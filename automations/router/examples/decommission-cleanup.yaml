@@ -1,0 +1,22 @@
+engine: go
+routes:
+  - name: release-dns
+    events: [deployment.completed, instance.deleted]
+    match:
+      md-environment: prod
+    when: '{{ or (eq .type "instance.deleted") (eq .data.metadata.deployment_action "DECOMMISSION") }}'
+    timeout: 5s
+    do:
+      - http:
+          method: DELETE
+          url: 'https://dns.example.com/records/{{ attr "md-instance" }}'
+          headers:
+            Authorization: 'Bearer {{ env "DNS_TOKEN" }}'
+          body: '{"instance": {{ json (attr "md-instance") }}, "event": {{ json .id }}}'
+
+  - name: purge-environment-bucket
+    events: [environment.deleted]
+    async: true
+    timeout: 5m
+    do:
+      - exec: [/scripts/purge-bucket.py, '{{ .data.entity.identifier }}']

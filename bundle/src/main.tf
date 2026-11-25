@@ -16,11 +16,20 @@ locals {
   }
 
   # The secret may arrive as a JSON string or as an object.
-  hook_env = try(jsondecode(local.secrets.DECOMMISSION_CLEANUP_HOOK_ENV), lookup(local.secrets, "DECOMMISSION_CLEANUP_HOOK_ENV", {}))
+  router_env = try(jsondecode(local.secrets.ROUTER_ENV), lookup(local.secrets, "ROUTER_ENV", {}))
 
   attribute_enforcer_config = try(yamldecode(var.attribute_enforcer.config), {})
   statuspage_config         = try(yamldecode(var.statuspage.config), {})
   sandbox_config            = try(yamldecode(var.sandbox_on_join.config), {})
+  router_config             = try(yamldecode(var.router.config), {})
+
+  router_routes      = try(coalesce(local.router_config.routes), [])
+  router_event_types = distinct(flatten([for r in local.router_routes : try(coalesce(r.events), [])]))
+  # Commands need a shell, jq, curl, or python3, which only the -scripts image has.
+  router_uses_exec = length(var.router.scripts) > 0 || anytrue(flatten([
+    for r in local.router_routes : [for s in try(coalesce(r.do), []) : try(s.exec, null) != null]
+  ]))
+  scripts_dir = "/scripts"
 
   # One jq test per required key: a key without `allowed` must be present, and a key with `allowed` must hold one
   # of its values. Only entities that break a rule reach attribute-enforcer.
@@ -140,20 +149,6 @@ locals {
       condition   = ".data.entity.artifact_type == \"application/vnd.massdriver.bundle.v1+json\""
     }
 
-    decommission-cleanup = {
-      enabled    = var.decommission_cleanup.enabled
-      image      = local.image
-      host       = "decommission-cleanup.${var.ingress.domain}"
-      files      = { "hooks.yaml" = var.decommission_cleanup.hooks }
-      state_size = 0
-      env = merge(local.hook_env, {
-        CLEANUP_HOOKS_FILE = "${local.config_dir}/hooks.yaml"
-      })
-      event_types = ["deployment.completed", "instance.deleted", "environment.deleted"]
-      attributes  = var.decommission_cleanup.attributes
-      condition   = ".type != \"deployment.completed\" or .data.metadata.deployment_action == \"DECOMMISSION\""
-    }
-
     freeze-guard = {
       enabled    = var.freeze_guard.enabled
       image      = local.image
@@ -221,6 +216,21 @@ locals {
       event_types = ["repo.published"]
       attributes  = { "md-repo-artifact-type" = "bundle" }
       condition   = ""
+    }
+
+    router = {
+      enabled    = var.router.enabled
+      image      = local.router_uses_exec ? "${local.image}-scripts" : local.image
+      host       = "router.${var.ingress.domain}"
+      files      = { "config.yaml" = var.router.config }
+      state_size = 0
+      env = merge(local.router_env, local.massdriver_env, {
+        ROUTER_CONFIG = "${local.config_dir}/config.yaml"
+      })
+      event_types = local.router_event_types
+      # Routes filter on attributes and jq themselves, and an attribute filter would drop events without attributes.
+      attributes = {}
+      condition  = ""
     }
 
     sandbox-on-join = {

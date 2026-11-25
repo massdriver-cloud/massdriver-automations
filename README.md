@@ -20,11 +20,11 @@ docker run -p 8080:8080 \
 | [audit-archiver](automations/audit-archiver) | every event | Archives every event, unchanged, in S3, Splunk, or Datadog. |
 | [autodeploy-downstream](automations/autodeploy-downstream) | `deployment.completed` | Deploys opted-in dependents when an instance deploys. |
 | [bundle-scanner](automations/bundle-scanner) | `repo.published` | Scans each new bundle version with Trivy and Checkov. Uses the `-scanner` image tag. |
-| [decommission-cleanup](automations/decommission-cleanup) | `deployment.completed`, `environment.deleted` | Runs HTTP and command hooks when infrastructure is decommissioned. |
 | [freeze-guard](automations/freeze-guard) | `deployment.created`, `deployment.enqueued` | Aborts deployments inside a change freeze window. |
 | [github-deployments](automations/github-deployments) | `deployment.*` | Shows Massdriver deployments as GitHub Deployments. |
 | [proposal-chatops](automations/proposal-chatops) | `deployment.proposed`, `deployment.approved`, `deployment.rejected` | Approve or reject proposed deployments from Slack. |
 | [release-notes](automations/release-notes) | `repo.published` | Posts new bundle versions, and the instances that can upgrade, to Slack and Teams. |
+| [router](automations/router) | configured per route | Runs HTTP requests, commands, and Massdriver API calls for the events that match configured routes. Commands use the `-scripts` image tag. |
 | [sandbox-on-join](automations/sandbox-on-join) | `group_membership.*`, `deployment.completed` | Forks a sandbox environment for each new group member, and removes it when they leave. |
 | [statuspage](automations/statuspage) | `alarm.*`, `alarm_state.created`, `deployment.*`, `instance.*` | Serves a public status page from alarms, instances, and deployments. |
 

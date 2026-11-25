@@ -1,0 +1,26 @@
+routes:
+  - name: page-on-prod-failure
+    events: [deployment.failed]
+    match:
+      md-environment: prod
+    when: '.data.metadata.deployment_action == "PROVISION"'
+    timeout: 5s
+    do:
+      - http:
+          url: https://events.pagerduty.com/v2/enqueue
+          body: |
+            {
+              routing_key: env.PAGERDUTY_ROUTING_KEY,
+              event_action: "trigger",
+              dedup_key: .id,
+              payload: {
+                summary: "Deployment of \(.data.attributes["md-instance"]) failed",
+                source: .data.attributes["md-instance"],
+                severity: "error",
+                custom_details: {
+                  bundle: .data.attributes["md-bundle"],
+                  deployed_by: .data.entity.deployed_by_name,
+                  message: .data.entity.message
+                }
+              }
+            }

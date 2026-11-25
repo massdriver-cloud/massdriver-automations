@@ -1,0 +1,26 @@
+routes:
+  - name: plan-on-version-change
+    events: [instance.updated]
+    match:
+      md-environment: staging
+    when: '.data.entity.params != null'
+    timeout: 5s
+    do:
+      - massdriver:
+          query: |
+            mutation PlanInstance($org: ID!, $id: ID!, $input: CreateDeploymentInput!) {
+              createDeployment(organizationId: $org, id: $id, input: $input) {
+                successful
+                messages { field message }
+                result { id status }
+              }
+            }
+          variables: |
+            {
+              id: .data.entity.identifier,
+              input: {
+                action: "PLAN",
+                params: (.data.entity.params | tojson),
+                message: "Plan after \(.data.entity.version) was set"
+              }
+            }

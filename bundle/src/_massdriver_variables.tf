@@ -41,13 +41,6 @@ variable "bundle_scanner" {
     timeout              = string
   })
 }
-variable "decommission_cleanup" {
-  type = object({
-    attributes = map(string)
-    enabled    = bool
-    hooks      = string
-  })
-}
 variable "freeze_guard" {
   type = object({
     attributes     = map(string)
@@ -134,6 +127,13 @@ variable "release_notes" {
   type = object({
     enabled             = bool
     include_development = bool
+  })
+}
+variable "router" {
+  type = object({
+    config  = string
+    enabled = bool
+    scripts = map(string)
   })
 }
 variable "sandbox_on_join" {

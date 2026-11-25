@@ -22,6 +22,18 @@ resource "kubernetes_config_map_v1" "files" {
   data = each.value.files
 }
 
+resource "kubernetes_config_map_v1" "scripts" {
+  for_each = { for name, a in local.enabled : name => a if name == "router" && length(var.router.scripts) > 0 }
+
+  metadata {
+    name      = "${local.names[each.key]}-scripts"
+    namespace = local.namespace
+    labels    = merge(local.labels, { "app.kubernetes.io/name" = each.key })
+  }
+
+  data = var.router.scripts
+}
+
 resource "kubernetes_persistent_volume_claim_v1" "state" {
   for_each = { for name, a in local.enabled : name => a if a.state_size > 0 }
 
@@ -73,7 +85,9 @@ resource "kubernetes_deployment_v1" "main" {
         labels = merge(local.labels, { "app.kubernetes.io/name" = each.key })
         annotations = {
           # Restarts the pod when its settings change. The files and the env are read only at start.
-          "massdriver.cloud/config-hash" = sha256(jsonencode([local.env[each.key], each.value.files]))
+          "massdriver.cloud/config-hash" = sha256(jsonencode([
+            local.env[each.key], each.value.files, each.key == "router" ? var.router.scripts : {}
+          ]))
         }
       }
 
@@ -158,6 +172,15 @@ resource "kubernetes_deployment_v1" "main" {
           }
 
           dynamic "volume_mount" {
+            for_each = each.key == "router" && length(var.router.scripts) > 0 ? [1] : []
+            content {
+              name       = "scripts"
+              mount_path = local.scripts_dir
+              read_only  = true
+            }
+          }
+
+          dynamic "volume_mount" {
             for_each = each.value.state_size > 0 ? [1] : []
             content {
               name       = "state"
@@ -177,6 +200,17 @@ resource "kubernetes_deployment_v1" "main" {
             name = "files"
             config_map {
               name = kubernetes_config_map_v1.files[each.key].metadata[0].name
+            }
+          }
+        }
+
+        dynamic "volume" {
+          for_each = each.key == "router" && length(var.router.scripts) > 0 ? [1] : []
+          content {
+            name = "scripts"
+            config_map {
+              name         = kubernetes_config_map_v1.scripts[each.key].metadata[0].name
+              default_mode = "0755"
             }
           }
         }

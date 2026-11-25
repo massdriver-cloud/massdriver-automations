@@ -1,0 +1,23 @@
+routes:
+  - name: teams-on-proposal
+    events: [deployment.proposed]
+    timeout: 5s
+    do:
+      - http:
+          url: '\(env.TEAMS_WEBHOOK_URL)'
+          body: |
+            {
+              type: "message",
+              attachments: [{
+                contentType: "application/vnd.microsoft.card.adaptive",
+                content: {
+                  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                  type: "AdaptiveCard",
+                  version: "1.4",
+                  body: [
+                    {type: "TextBlock", weight: "Bolder", text: "\(.data.entity.deployed_by_name) proposed \(.data.entity.action) of \(.data.attributes["md-instance"])"},
+                    {type: "TextBlock", wrap: true, text: (.data.entity.message // "No message")}
+                  ]
+                }
+              }]
+            }
