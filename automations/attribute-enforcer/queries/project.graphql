@@ -1,6 +1,0 @@
-query ProjectAttributes($org: ID!, $id: ID!) {
-  project(organizationId: $org, id: $id) {
-    attributes
-    effectiveAttributes
-  }
-}
