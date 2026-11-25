@@ -3,14 +3,13 @@ package auditarchiver
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,115 +33,141 @@ var Definition = automation.Definition{
 	Name:        "audit-archiver",
 	Description: "Archives every event, unchanged, in S3, Splunk, or Datadog.",
 	New: func() (automation.Automation, error) {
-		cfg, err := loadConfig()
-		if err != nil {
+		var cfg Config
+		if err := automation.LoadConfig(&cfg); err != nil {
+			return nil, err
+		}
+		if err := cfg.readSecrets(); err != nil {
 			return nil, err
 		}
 		var sinks []Sink
-		if cfg.s3 != nil {
-			awsCfg, err := awsconfig.LoadDefaultConfig(context.Background())
+		if cfg.S3 != nil {
+			var opts []func(*awsconfig.LoadOptions) error
+			if cfg.S3.Region != "" {
+				opts = append(opts, awsconfig.WithRegion(cfg.S3.Region))
+			}
+			awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), opts...)
 			if err != nil {
 				return nil, err
 			}
-			sinks = append(sinks, NewS3Sink(*cfg.s3, awsCfg))
+			sinks = append(sinks, NewS3Sink(*cfg.S3, awsCfg))
 		}
-		if cfg.splunk != nil {
-			sinks = append(sinks, &SplunkSink{cfg: *cfg.splunk, http: http.DefaultClient})
+		if cfg.Splunk != nil {
+			sinks = append(sinks, &SplunkSink{cfg: *cfg.Splunk, http: http.DefaultClient})
 		}
-		if cfg.datadog != nil {
-			sinks = append(sinks, &DatadogSink{cfg: *cfg.datadog, http: http.DefaultClient})
+		if cfg.Datadog != nil {
+			sinks = append(sinks, &DatadogSink{cfg: *cfg.Datadog, http: http.DefaultClient})
 		}
 		return New(sinks), nil
 	},
 }
 
+// Config is the config file of audit-archiver. Each section that is set turns on its sink.
+type Config struct {
+	S3      *S3Config      `yaml:"s3"`
+	Splunk  *SplunkConfig  `yaml:"splunk"`
+	Datadog *DatadogConfig `yaml:"datadog"`
+}
+
 // S3Config selects the bucket and the retention of each object.
 type S3Config struct {
-	Bucket   string
-	Prefix   string
-	Endpoint string
-	LockMode types.ObjectLockMode
-	LockDays int
+	Bucket string `yaml:"bucket"`
+	// Region replaces AWS_REGION for the bucket.
+	Region     string      `yaml:"region"`
+	Prefix     string      `yaml:"prefix"`
+	Endpoint   string      `yaml:"endpoint"`
+	ObjectLock *ObjectLock `yaml:"object_lock"`
+}
+
+// ObjectLock is the retention that each object gets.
+type ObjectLock struct {
+	Mode types.ObjectLockMode `yaml:"mode"`
+	Days int                  `yaml:"days"`
 }
 
 // SplunkConfig is an HTTP Event Collector.
 type SplunkConfig struct {
-	URL        string
-	Token      string
-	Index      string
-	Source     string
-	Sourcetype string
+	URL        string `yaml:"url"`
+	TokenEnv   string `yaml:"token_env"`
+	Index      string `yaml:"index"`
+	Source     string `yaml:"source"`
+	Sourcetype string `yaml:"sourcetype"`
+
+	token string
 }
 
 // DatadogConfig is a Datadog Logs intake.
 type DatadogConfig struct {
-	URL     string
-	APIKey  string
-	Service string
-	Tags    string
+	Site      string   `yaml:"site"`
+	URL       string   `yaml:"url"`
+	APIKeyEnv string   `yaml:"api_key_env"`
+	Service   string   `yaml:"service"`
+	Tags      []string `yaml:"tags"`
+
+	apiKey string
 }
 
-type config struct {
-	s3      *S3Config
-	splunk  *SplunkConfig
-	datadog *DatadogConfig
+// Validate checks the sinks and fills their defaults.
+func (c *Config) Validate() error {
+	if c.S3 == nil && c.Splunk == nil && c.Datadog == nil {
+		return errors.New("no sink configured: set s3, splunk, datadog, or more than one")
+	}
+	if s := c.S3; s != nil {
+		if s.Bucket == "" {
+			return errors.New("s3.bucket is required")
+		}
+		s.Prefix = strings.Trim(s.Prefix, "/")
+		if s.Prefix == "" {
+			s.Prefix = "events"
+		}
+		if l := s.ObjectLock; l != nil {
+			l.Mode = types.ObjectLockMode(strings.ToUpper(string(l.Mode)))
+			if l.Mode != types.ObjectLockModeGovernance && l.Mode != types.ObjectLockModeCompliance {
+				return fmt.Errorf("s3.object_lock.mode must be GOVERNANCE or COMPLIANCE, got %q", l.Mode)
+			}
+			if l.Days < 1 {
+				return fmt.Errorf("s3.object_lock.days must be 1 or more, got %d", l.Days)
+			}
+		}
+	}
+	if s := c.Splunk; s != nil {
+		if s.URL == "" {
+			return errors.New("splunk.url is required")
+		}
+		s.URL = strings.TrimRight(s.URL, "/")
+		s.TokenEnv = cmp.Or(s.TokenEnv, "SPLUNK_HEC_TOKEN")
+		s.Source = cmp.Or(s.Source, "massdriver")
+		s.Sourcetype = cmp.Or(s.Sourcetype, "massdriver:cloudevent")
+	}
+	if d := c.Datadog; d != nil {
+		d.Site = cmp.Or(d.Site, "datadoghq.com")
+		d.URL = strings.TrimRight(cmp.Or(d.URL, "https://http-intake.logs."+d.Site), "/")
+		d.APIKeyEnv = cmp.Or(d.APIKeyEnv, "DD_API_KEY")
+		d.Service = cmp.Or(d.Service, "massdriver")
+	}
+	return nil
 }
 
-func loadConfig() (config, error) {
-	var c config
-
-	if bucket := os.Getenv("ARCHIVE_S3_BUCKET"); bucket != "" {
-		sc := &S3Config{
-			Bucket:   bucket,
-			Prefix:   strings.Trim(automation.Env("ARCHIVE_S3_PREFIX", "events"), "/"),
-			Endpoint: os.Getenv("ARCHIVE_S3_ENDPOINT"),
-		}
-		mode, days := os.Getenv("ARCHIVE_S3_OBJECT_LOCK_MODE"), os.Getenv("ARCHIVE_S3_OBJECT_LOCK_DAYS")
-		if (mode == "") != (days == "") {
-			return c, errors.New("set both ARCHIVE_S3_OBJECT_LOCK_MODE and ARCHIVE_S3_OBJECT_LOCK_DAYS, or neither")
-		}
-		if mode != "" {
-			sc.LockMode = types.ObjectLockMode(strings.ToUpper(mode))
-			if sc.LockMode != types.ObjectLockModeGovernance && sc.LockMode != types.ObjectLockModeCompliance {
-				return c, fmt.Errorf("ARCHIVE_S3_OBJECT_LOCK_MODE must be GOVERNANCE or COMPLIANCE, got %q", mode)
-			}
-			n, err := strconv.Atoi(days)
-			if err != nil || n < 1 {
-				return c, fmt.Errorf("ARCHIVE_S3_OBJECT_LOCK_DAYS must be a whole number of days, 1 or more, got %q", days)
-			}
-			sc.LockDays = n
-		}
-		c.s3 = sc
+// readSecrets reads the tokens from the environment variables that the config names.
+func (c *Config) readSecrets() error {
+	var names []string
+	if c.Splunk != nil {
+		names = append(names, c.Splunk.TokenEnv)
 	}
-
-	if u := os.Getenv("SPLUNK_HEC_URL"); u != "" {
-		token := os.Getenv("SPLUNK_HEC_TOKEN")
-		if token == "" {
-			return c, errors.New("SPLUNK_HEC_URL is set, but SPLUNK_HEC_TOKEN is not")
-		}
-		c.splunk = &SplunkConfig{
-			URL:        strings.TrimRight(u, "/") + "/services/collector/event",
-			Token:      token,
-			Index:      os.Getenv("SPLUNK_INDEX"),
-			Source:     automation.Env("SPLUNK_SOURCE", "massdriver"),
-			Sourcetype: automation.Env("SPLUNK_SOURCETYPE", "massdriver:cloudevent"),
-		}
+	if c.Datadog != nil {
+		names = append(names, c.Datadog.APIKeyEnv)
 	}
-
-	if key := os.Getenv("DD_API_KEY"); key != "" {
-		base := automation.Env("DD_LOGS_URL", "https://http-intake.logs."+automation.Env("DD_SITE", "datadoghq.com"))
-		c.datadog = &DatadogConfig{
-			URL:     strings.TrimRight(base, "/") + "/api/v2/logs",
-			APIKey:  key,
-			Service: automation.Env("DD_SERVICE", "massdriver"),
-			Tags:    os.Getenv("DD_TAGS"),
-		}
+	v, err := automation.RequireEnv(names...)
+	if err != nil {
+		return err
 	}
-
-	if c.s3 == nil && c.splunk == nil && c.datadog == nil {
-		return c, errors.New("no sink configured: set ARCHIVE_S3_BUCKET, SPLUNK_HEC_URL, or DD_API_KEY")
+	if c.Splunk != nil {
+		c.Splunk.token = v[c.Splunk.TokenEnv]
 	}
-	return c, nil
+	if c.Datadog != nil {
+		c.Datadog.apiKey = v[c.Datadog.APIKeyEnv]
+	}
+	return nil
 }
 
 // Sink stores one event.
@@ -267,9 +292,9 @@ func (s *S3Sink) Write(ctx context.Context, ev automation.Event) error {
 		ContentType: aws.String("application/cloudevents+json"),
 		Metadata:    map[string]string{"webhook-id": ev.ID},
 	}
-	if s.cfg.LockMode != "" {
-		in.ObjectLockMode = s.cfg.LockMode
-		in.ObjectLockRetainUntilDate = aws.Time(s.now().UTC().AddDate(0, 0, s.cfg.LockDays))
+	if l := s.cfg.ObjectLock; l != nil {
+		in.ObjectLockMode = l.Mode
+		in.ObjectLockRetainUntilDate = aws.Time(s.now().UTC().AddDate(0, 0, l.Days))
 	}
 	_, err := s.client.PutObject(ctx, in)
 	return err
@@ -302,7 +327,7 @@ func (s *SplunkSink) Write(ctx context.Context, ev automation.Event) error {
 	if s.cfg.Index != "" {
 		payload["index"] = s.cfg.Index
 	}
-	return post(ctx, s.http, s.cfg.URL, map[string]string{"authorization": "Splunk " + s.cfg.Token}, payload)
+	return post(ctx, s.http, s.cfg.URL+"/services/collector/event", map[string]string{"authorization": "Splunk " + s.cfg.token}, payload)
 }
 
 // --- Datadog ---------------------------------------------------------------
@@ -324,10 +349,10 @@ func (d *DatadogSink) Write(ctx context.Context, ev automation.Event) error {
 		"message":    string(ev.Raw),
 		"webhook_id": ev.ID,
 	}
-	if d.cfg.Tags != "" {
-		entry["ddtags"] = d.cfg.Tags
+	if len(d.cfg.Tags) > 0 {
+		entry["ddtags"] = strings.Join(d.cfg.Tags, ",")
 	}
-	return post(ctx, d.http, d.cfg.URL, map[string]string{"dd-api-key": d.cfg.APIKey}, []any{entry})
+	return post(ctx, d.http, d.cfg.URL+"/api/v2/logs", map[string]string{"dd-api-key": d.cfg.apiKey}, []any{entry})
 }
 
 func post(ctx context.Context, c *http.Client, url string, headers map[string]string, payload any) error {

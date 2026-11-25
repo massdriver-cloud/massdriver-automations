@@ -422,7 +422,7 @@ func TestHistoryAndOutputSurviveRestart(t *testing.T) {
 
 	for _, f := range []string{"index.html", "foobar/index.html", "internal/index.html", "api/status.json", "feed.atom", "badge.svg", "internal/feed.atom", "internal/badge.svg"} {
 		if _, err := os.Stat(filepath.Join(outputDir, f)); err != nil {
-			t.Errorf("OUTPUT_DIR is missing %s", f)
+			t.Errorf("output_dir is missing %s", f)
 		}
 	}
 }
@@ -512,11 +512,25 @@ pages:
 }
 
 func TestExampleConfigLoads(t *testing.T) {
-	cfg, err := LoadConfig("statuspage.example.yaml")
+	cfg, err := LoadConfig("config.example.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(cfg.environmentIDs(), ","); got != "api-prod,web-prod,api-staging" {
 		t.Errorf("environments = %s", got)
+	}
+}
+
+func TestOutputDirFromConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("output_dir: /srv/status\npages: [{title: Acme, environments: [{id: api-prod, title: Production}]}]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OutputDir != "/srv/status" {
+		t.Fatalf("output_dir = %q", cfg.OutputDir)
 	}
 }

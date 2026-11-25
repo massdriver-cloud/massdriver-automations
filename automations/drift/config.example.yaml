@@ -1,0 +1,55 @@
+# drift config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+
+slack:
+  # The channel for alerts of the checks that do not name their own, with SLACK_BOT_TOKEN. Empty, with no channel
+  # on a check, writes alerts to the logs only. Ignored with only SLACK_WEBHOOK_URL.
+  channel: "#infra-drift"
+
+massdriver:
+  # The Massdriver UI, for the plan links in alerts. Default: https://app.massdriver.cloud.
+  app_url: https://app.massdriver.cloud
+
+# Required: at least one check.
+checks:
+  - # Required. Unique. Alerts and POST /drift/run?check=<name> use it.
+    name: prod-nightly
+    # Standard cron: minute, hour, day of month, month, day of week. Also @daily, @hourly, @every 6h.
+    # Without a schedule, the check runs only from POST /drift/run.
+    schedule: "0 6 * * *"
+    # An IANA zone for the schedule. Default: UTC.
+    timezone: America/Chicago
+    # Effective attributes of the instances to plan. A list matches any of its values.
+    match:
+      md-environment: prod
+      team: [payments, billing]
+    # detect (default): alert only. resolve: re-apply now. propose: create a proposal that a person approves.
+    mode: propose
+    # deployed (default): the params, bundle version, and dependencies of the last completed PROVISION.
+    # saved: the instance's saved params, with its current bundle version.
+    resolve_with: deployed
+    # Plans running at once. The rest wait in a queue. Default: 5.
+    max_concurrent: 5
+    # Replaces the default channel for this check.
+    slack:
+      channel: "#payments-oncall"
+    # Also post instances without drift. Default: false.
+    notify_clean: false
+    # Post one line of totals when the run finishes. Default: false.
+    summary: true
+
+  - name: sandbox-weekly
+    schedule: "0 9 * * MON"
+    match:
+      md-project: sandbox
+    mode: resolve
+    resolve_with: saved
+    max_concurrent: 2
+    # Regular expressions (Go RE2) that read the plan logs. These are the defaults.
+    patterns:
+      clean: 'No changes\.'
+      drift: 'Plan: \d+ to \w+(?:, \d+ to \w+)*'
+      resource: '(?m)^\s*# \S+.* (?:will be|must be) .*$'
+
+  - name: on-demand
+    match:
+      drift-check: "true"

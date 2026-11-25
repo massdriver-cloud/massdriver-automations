@@ -1,0 +1,11 @@
+# proposal-chatops config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+# proposal-chatops needs SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET. A webhook cannot update a message or receive a
+# button click.
+
+slack:
+  # Required. The channel name or ID for proposals. Invite the app to a private channel.
+  channel: "#deploys"
+  # An instance attribute whose value, when the instance has it, names the channel for its proposals.
+  channel_attribute: slack_channel
+  # Slack user IDs that can click Approve and Reject. Empty allows everybody in the channel.
+  allowed_users: [U012ABCDEF, U034GHIJKL]

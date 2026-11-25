@@ -3,9 +3,11 @@ package sandboxonjoin
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -402,5 +404,24 @@ sandboxes:
 	}
 	if _, err := ParseConfig([]byte("sandboxes:\n  - group: Developers\n    project: api\n    environment: staging\n    deploys: true\n")); err == nil {
 		t.Error("unknown key: want error")
+	}
+}
+
+func TestExampleConfigLoads(t *testing.T) {
+	var cfg Config
+	if err := automation.LoadConfigFile("config.example.yaml", &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Sandboxes) != 1 || !cfg.Sandboxes[0].DeleteAfterDecommission {
+		t.Fatalf("config = %+v", cfg)
+	}
+}
+
+func TestNoConfigFileRefusesStart(t *testing.T) {
+	t.Setenv("CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
+	_, err := Definition.New()
+	var ce *automation.ConfigError
+	if !errors.As(err, &ce) || !strings.HasSuffix(err.Error(), "sandboxes: at least one rule is required") {
+		t.Fatalf("err = %v", err)
 	}
 }

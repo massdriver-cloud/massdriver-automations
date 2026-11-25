@@ -2,6 +2,7 @@ package router
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -520,9 +521,19 @@ func TestExamplesParse(t *testing.T) {
 	if len(files) == 0 {
 		t.Fatal("no examples")
 	}
-	for _, f := range files {
-		if _, err := LoadConfig(f); err != nil {
+	for _, f := range append(files, "config.example.yaml") {
+		var cfg Config
+		if err := automation.LoadConfigFile(f, &cfg); err != nil {
 			t.Errorf("%s: %v", f, err)
 		}
+	}
+}
+
+func TestNoConfigFileRefusesStart(t *testing.T) {
+	t.Setenv("CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
+	_, err := Definition.New()
+	var ce *automation.ConfigError
+	if !errors.As(err, &ce) || !strings.HasSuffix(err.Error(), "routes: at least one route is required") {
+		t.Fatalf("err = %v", err)
 	}
 }

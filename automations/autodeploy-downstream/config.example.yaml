@@ -1,0 +1,28 @@
+# autodeploy-downstream config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+#
+# Without a config file, or with no rules, one rule applies: deploy the downstream instances whose
+# attribute autodeploy is "true".
+
+# Each rule selects downstream instances. The first rule that matches an instance applies.
+rules:
+  - # Required. Unique. The logs and the deployment message name the rule.
+    name: staging-cascade
+    # Optional. Attributes that the upstream's deployment.completed event must have.
+    upstream:
+      md-environment: staging
+    # Required. Attributes that the effective attributes of a downstream instance must have.
+    # A list matches any one of its values.
+    downstream:
+      autodeploy: "true"
+      md-environment: staging
+    # deploy (default): run a PROVISION deployment.
+    # propose: create a PROVISION deployment in PROPOSED status, which waits for a person to approve it.
+    action: deploy
+
+  - name: prod-review
+    upstream:
+      md-environment: prod
+    downstream:
+      autodeploy: "true"
+      tier: [frontend, api]
+    action: propose

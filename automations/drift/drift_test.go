@@ -3,6 +3,7 @@ package drift
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,8 @@ import (
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/slack"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/slack/slacktest"
 )
 
 var secret = []byte("0123456789abcdef0123456789abcdef")
@@ -171,36 +174,9 @@ func contains(list []string, s string) bool {
 	return false
 }
 
-type fakeSlack struct {
-	mu    sync.Mutex
-	fail  int
-	texts []string
-}
-
-func (s *fakeSlack) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Text string `json:"text"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.fail > 0 {
-		s.fail--
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-	s.texts = append(s.texts, body.Text)
-}
-
-func (s *fakeSlack) sent() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]string{}, s.texts...)
-}
-
 type env struct {
 	api   *fakeAPI
-	slack *fakeSlack
+	slack *slacktest.Server
 	d     *Drift
 	h     http.Handler
 	opts  Options
@@ -212,19 +188,13 @@ func setup(t *testing.T, cfgYAML string, stateDir string) *env {
 	api := newFakeAPI()
 	apiSrv := httptest.NewServer(api)
 	t.Cleanup(apiSrv.Close)
-	slack := &fakeSlack{}
-	slackSrv := httptest.NewServer(slack)
-	t.Cleanup(slackSrv.Close)
-
 	cfg, err := ParseConfig([]byte(cfgYAML))
 	if err != nil {
 		t.Fatal(err)
 	}
-	e := &env{api: api, slack: slack, cfg: cfg, opts: Options{
-		SlackWebhookURL: slackSrv.URL,
-		RunToken:        "run-token",
-		AppURL:          "https://app.massdriver.cloud/",
-		StateDir:        stateDir,
+	e := &env{api: api, slack: slacktest.NewServer(t), cfg: cfg, opts: Options{
+		RunToken: "run-token",
+		StateDir: stateDir,
 	}}
 	e.start(t)
 	return e
@@ -235,7 +205,7 @@ func (e *env) start(t *testing.T) {
 	t.Helper()
 	srv := httptest.NewServer(e.api)
 	t.Cleanup(srv.Close)
-	d, err := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, e.cfg, e.opts)
+	d, err := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, e.slack.Bot(), e.cfg, e.opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,6 +237,10 @@ func provisioned(source string) fakeInstance {
 }
 
 const nightly = `
+slack:
+  channel: "#drift"
+massdriver:
+  app_url: https://app.massdriver.cloud/
 checks:
   - name: nightly
     schedule: "0 6 * * *"
@@ -341,17 +315,17 @@ func TestDriftAlertsAndResolvesByMode(t *testing.T) {
 		mutations         []call
 	}{
 		{"detect", "deployed", "", nil},
-		{"resolve", "deployed", "Resolving: deployment rollback-1 re-applies deployment dep-db-1.\n", []call{
+		{"resolve", "deployed", "Resolving: deployment rollback-1 re-applies deployment dep-db-1.", []call{
 			{Op: "RollbackDeployment", Vars: map[string]any{"org": "acme", "id": "dep-db-1"}},
 			{Op: "ApproveDeployment", Vars: map[string]any{"org": "acme", "id": "rollback-1"}},
 		}},
-		{"resolve", "saved", "Resolving: deployment deploy-1 applies the saved configuration.\n", []call{
+		{"resolve", "saved", "Resolving: deployment deploy-1 applies the saved configuration.", []call{
 			{Op: "CreateDeployment", Vars: map[string]any{"org": "acme", "id": "api-prod-db", "input": saved}},
 		}},
-		{"propose", "deployed", "Proposed deployment rollback-1 re-applies deployment dep-db-1. It waits for approval.\n", []call{
+		{"propose", "deployed", "Proposed deployment rollback-1 re-applies deployment dep-db-1. It waits for approval.", []call{
 			{Op: "RollbackDeployment", Vars: map[string]any{"org": "acme", "id": "dep-db-1"}},
 		}},
-		{"propose", "saved", "Proposed deployment proposal-1 applies the saved configuration. It waits for approval.\n", []call{
+		{"propose", "saved", "Proposed deployment proposal-1 applies the saved configuration. It waits for approval.", []call{
 			{Op: "ProposeDeployment", Vars: map[string]any{"org": "acme", "id": "api-prod-db", "input": saved}},
 		}},
 	}
@@ -372,9 +346,12 @@ func TestDriftAlertsAndResolvesByMode(t *testing.T) {
 			if got := e.api.mutations("PlanDeployment"); !reflect.DeepEqual(got, tt.mutations) {
 				t.Errorf("mutations = %v, want %v", got, tt.mutations)
 			}
-			want := []string{head + tt.note + link}
-			if got := e.slack.sent(); !reflect.DeepEqual(got, want) {
-				t.Errorf("slack = %q, want %q", got, want)
+			want := []slacktest.Call{{Method: "chat.postMessage", Channel: "#drift", Text: head + link, TS: "1700000000.000001"}}
+			if tt.note != "" {
+				want = append(want, slacktest.Call{Method: "chat.postMessage", Channel: "CDRIFT", Text: tt.note, ThreadTS: "1700000000.000001", TS: "1700000000.000002"})
+			}
+			if got := e.slack.Calls(); !reflect.DeepEqual(got, want) {
+				t.Errorf("slack = %+v\nwant    %+v", got, want)
 			}
 		})
 	}
@@ -385,7 +362,7 @@ func TestSlackFailureRetriesWithoutResolvingTwice(t *testing.T) {
 	e.api.listed = []string{"api-prod-db"}
 	e.api.instances["api-prod-db"] = provisioned("dep-db-1")
 	e.api.logs["plan-dep-db-1"] = driftLogs
-	e.slack.fail = 1
+	e.slack.Fail("ratelimited")
 	if err := e.d.RunCheck(context.Background(), "nightly"); err != nil {
 		t.Fatal(err)
 	}
@@ -394,6 +371,7 @@ func TestSlackFailureRetriesWithoutResolvingTwice(t *testing.T) {
 		t.Fatalf("status = %d, want 500 so Massdriver retries", code)
 	}
 	e.start(t)
+	e.slack.Fail("")
 	if code := e.event(t, "evt-1", "deployment.completed", "PLAN", "plan-dep-db-1"); code != http.StatusNoContent {
 		t.Fatalf("retry status = %d", code)
 	}
@@ -401,8 +379,99 @@ func TestSlackFailureRetriesWithoutResolvingTwice(t *testing.T) {
 	if got := e.api.count("RollbackDeployment"); got != 1 {
 		t.Errorf("rolled back %d times, want 1", got)
 	}
-	if got := len(e.slack.sent()); got != 1 {
-		t.Errorf("sent %d Slack messages, want 1", got)
+	calls := e.slack.Calls()
+	if len(calls) != 2 || calls[1].ThreadTS != calls[0].TS || calls[1].Text != "Resolving: deployment rollback-1 re-applies deployment dep-db-1." {
+		t.Errorf("slack = %+v, want the alert and the outcome in its thread", calls)
+	}
+}
+
+func TestFailedReplyRetriesOnlyTheReply(t *testing.T) {
+	e := setup(t, config("resolve", "deployed"), t.TempDir())
+	e.api.listed = []string{"api-prod-db"}
+	e.api.instances["api-prod-db"] = provisioned("dep-db-1")
+	e.api.logs["plan-dep-db-1"] = driftLogs
+	if err := e.d.RunCheck(context.Background(), "nightly"); err != nil {
+		t.Fatal(err)
+	}
+	// The alert posts, then Slack fails for the reply.
+	e.d.slack = slack.New(slack.Options{BotToken: "xoxb-test", APIURL: e.slack.URL + "/api", HTTP: &http.Client{Transport: &failAfter{n: 1}}})
+	if code := e.event(t, "evt-1", "deployment.completed", "PLAN", "plan-dep-db-1"); code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", code)
+	}
+	e.start(t)
+	if code := e.event(t, "evt-1", "deployment.completed", "PLAN", "plan-dep-db-1"); code != http.StatusNoContent {
+		t.Fatalf("retry status = %d", code)
+	}
+	calls := e.slack.Calls()
+	if len(calls) != 2 || calls[0].ThreadTS != "" || calls[1].ThreadTS != calls[0].TS {
+		t.Errorf("slack = %+v, want one alert and one reply in its thread", calls)
+	}
+	if got := e.api.count("RollbackDeployment"); got != 1 {
+		t.Errorf("rolled back %d times, want 1", got)
+	}
+}
+
+// failAfter lets n requests through and fails the rest.
+type failAfter struct {
+	mu sync.Mutex
+	n  int
+}
+
+func (f *failAfter) RoundTrip(r *http.Request) (*http.Response, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.n == 0 {
+		return nil, errors.New("connection reset")
+	}
+	f.n--
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+func TestWebhookPostsTheOutcomeAsItsOwnMessage(t *testing.T) {
+	e := setup(t, config("resolve", "deployed"), "")
+	e.d.slack = e.slack.Webhook()
+	e.api.listed = []string{"api-prod-db"}
+	e.api.instances["api-prod-db"] = provisioned("dep-db-1")
+	e.api.logs["plan-dep-db-1"] = driftLogs
+	if err := e.d.RunCheck(context.Background(), "nightly"); err != nil {
+		t.Fatal(err)
+	}
+	e.event(t, "evt-1", "deployment.completed", "PLAN", "plan-dep-db-1")
+	calls := e.slack.Calls()
+	if len(calls) != 2 || calls[0].Method != "webhook" || calls[1].Method != "webhook" ||
+		calls[1].Text != "Resolving: deployment rollback-1 re-applies deployment dep-db-1." {
+		t.Errorf("slack = %+v", calls)
+	}
+}
+
+func TestCheckChannelReplacesTheDefault(t *testing.T) {
+	e := setup(t, strings.Replace(config("detect", "deployed"), "    mode:", "    slack: {channel: \"#db-team\"}\n    mode:", 1), "")
+	e.api.listed = []string{"api-prod-db"}
+	e.api.instances["api-prod-db"] = provisioned("dep-db-1")
+	e.api.logs["plan-dep-db-1"] = driftLogs
+	if err := e.d.RunCheck(context.Background(), "nightly"); err != nil {
+		t.Fatal(err)
+	}
+	e.event(t, "evt-1", "deployment.completed", "PLAN", "plan-dep-db-1")
+	calls := e.slack.Calls()
+	if len(calls) != 1 || calls[0].Channel != "#db-team" {
+		t.Errorf("slack = %+v", calls)
+	}
+}
+
+func TestNoChannelLogsTheAlert(t *testing.T) {
+	e := setup(t, strings.Replace(config("detect", "deployed"), "  channel: \"#drift\"", "  channel: \"\"", 1), "")
+	e.api.listed = []string{"api-prod-db"}
+	e.api.instances["api-prod-db"] = provisioned("dep-db-1")
+	e.api.logs["plan-dep-db-1"] = driftLogs
+	if err := e.d.RunCheck(context.Background(), "nightly"); err != nil {
+		t.Fatal(err)
+	}
+	if code := e.event(t, "evt-1", "deployment.completed", "PLAN", "plan-dep-db-1"); code != http.StatusNoContent {
+		t.Fatalf("status = %d", code)
+	}
+	if calls := e.slack.Calls(); len(calls) != 0 {
+		t.Errorf("slack = %+v", calls)
 	}
 }
 
@@ -416,7 +485,7 @@ func TestCleanPlanSendsNothing(t *testing.T) {
 	}
 	e.event(t, "evt-1", "deployment.completed", "PLAN", "plan-dep-db-1")
 
-	if got := e.slack.sent(); len(got) != 0 {
+	if got := e.slack.Texts(); len(got) != 0 {
 		t.Errorf("slack = %q, want nothing", got)
 	}
 	if got := e.api.mutations("PlanDeployment"); len(got) != 0 {
@@ -441,7 +510,7 @@ func TestUnknownResultAlertsWithoutResolving(t *testing.T) {
 
 	want := []string{"Drift unknown on api-prod-db (check nightly): the plan logs show a result for 1 of 2 steps. Nothing was resolved.\n" +
 		"Plan: <https://app.massdriver.cloud/orgs/acme/projects/api/environments/prod/instances/db?deployment=plan-dep-db-1&tab=history|plan-dep-db-1>"}
-	if got := e.slack.sent(); !reflect.DeepEqual(got, want) {
+	if got := e.slack.Texts(); !reflect.DeepEqual(got, want) {
 		t.Errorf("slack = %q, want %q", got, want)
 	}
 	if got := e.api.mutations("PlanDeployment"); len(got) != 0 {
@@ -462,7 +531,7 @@ func TestUndeployedChangesAreNotResolved(t *testing.T) {
 	}
 	e.event(t, "evt-1", "deployment.completed", "PLAN", "plan-dep-db-1")
 
-	got := e.slack.sent()
+	got := e.slack.Texts()
 	want := "The plan also includes changes that were never deployed: bundle version 1.4.0 to 1.5.0; dependencies network. Nothing was resolved.\n"
 	if len(got) != 1 || !strings.Contains(got[0], want) {
 		t.Errorf("slack = %q, want it to contain %q", got, want)
@@ -483,7 +552,7 @@ func TestFailedPlanAlerts(t *testing.T) {
 
 	want := []string{"Drift check failed for api-prod-db (check nightly): the plan was failed. Nothing was resolved.\n" +
 		"Plan: <https://app.massdriver.cloud/orgs/acme/projects/api/environments/prod/instances/db?deployment=plan-dep-db-1&tab=history|plan-dep-db-1>"}
-	if got := e.slack.sent(); !reflect.DeepEqual(got, want) {
+	if got := e.slack.Texts(); !reflect.DeepEqual(got, want) {
 		t.Errorf("slack = %q, want %q", got, want)
 	}
 	if got := e.api.mutations("PlanDeployment"); len(got) != 0 {
@@ -504,7 +573,7 @@ func TestUntrackedPlansAreIgnored(t *testing.T) {
 	if n := len(e.api.calls); n != 0 {
 		t.Errorf("made %d API calls, want 0: %v", n, e.api.calls)
 	}
-	if got := e.slack.sent(); len(got) != 0 {
+	if got := e.slack.Texts(); len(got) != 0 {
 		t.Errorf("slack = %q, want nothing", got)
 	}
 }
@@ -535,8 +604,8 @@ func TestPendingPlansSurviveRestart(t *testing.T) {
 	if got := e.api.mutations(); !reflect.DeepEqual(got, want) {
 		t.Errorf("mutations = %v, want %v", got, want)
 	}
-	if got := len(e.slack.sent()); got != 1 {
-		t.Errorf("sent %d Slack messages, want 1", got)
+	if got := len(e.slack.Texts()); got != 2 {
+		t.Errorf("sent %d Slack messages, want the alert and its reply", got)
 	}
 }
 
@@ -594,8 +663,8 @@ func TestAnalyzeImportAndForget(t *testing.T) {
 }
 
 func TestExampleConfigLoads(t *testing.T) {
-	cfg, err := LoadConfig("drift.example.yaml")
-	if err != nil {
+	var cfg Config
+	if err := automation.LoadConfigFile("config.example.yaml", &cfg); err != nil {
 		t.Fatal(err)
 	}
 	if got := len(cfg.Checks); got != 3 {

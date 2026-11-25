@@ -1,10 +1,7 @@
 package autodeploydownstream
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
-	"os"
 	"slices"
 
 	"gopkg.in/yaml.v3"
@@ -50,86 +47,51 @@ func (v *Values) UnmarshalYAML(n *yaml.Node) error {
 	}
 }
 
-// LoadConfig reads the rules file.
-func LoadConfig(path string) ([]Rule, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("AUTODEPLOY_CONFIG: %w", err)
-	}
-	rules, err := ParseConfig(b)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	return rules, nil
+// Config is the config file of autodeploy-downstream.
+type Config struct {
+	Rules []Rule `yaml:"rules"`
 }
 
-// ParseConfig parses the YAML of a rules file.
-func ParseConfig(b []byte) ([]Rule, error) {
-	var file struct {
-		Rules []Rule `yaml:"rules"`
-	}
-	dec := yaml.NewDecoder(bytes.NewReader(b))
-	dec.KnownFields(true)
-	if err := dec.Decode(&file); err != nil {
-		return nil, err
-	}
-	if len(file.Rules) == 0 {
-		return nil, errors.New("rules: at least one rule is required")
+// DefaultRule deploys the instances whose attribute autodeploy is "true". It applies when the config has no rules.
+var DefaultRule = Rule{Name: "autodeploy=true", Downstream: map[string]Values{"autodeploy": {"true"}}, Action: ActionDeploy}
+
+// Validate checks the rules and fills their defaults.
+func (c *Config) Validate() error {
+	if len(c.Rules) == 0 {
+		c.Rules = []Rule{DefaultRule}
+		return nil
 	}
 	seen := map[string]bool{}
-	for i := range file.Rules {
-		r := &file.Rules[i]
+	for i := range c.Rules {
+		r := &c.Rules[i]
 		if r.Name == "" {
-			return nil, fmt.Errorf("rules[%d]: name is required", i)
+			return fmt.Errorf("rules[%d]: name is required", i)
 		}
 		if seen[r.Name] {
-			return nil, fmt.Errorf("%s: name is used by two rules", r.Name)
+			return fmt.Errorf("%s: name is used by two rules", r.Name)
 		}
 		seen[r.Name] = true
 		if len(r.Downstream) == 0 {
-			return nil, fmt.Errorf("%s: downstream needs at least one attribute", r.Name)
+			return fmt.Errorf("%s: downstream needs at least one attribute", r.Name)
 		}
 		for k, v := range r.Downstream {
 			if len(v) == 0 {
-				return nil, fmt.Errorf("%s: downstream %s has no values", r.Name, k)
+				return fmt.Errorf("%s: downstream %s has no values", r.Name, k)
 			}
 		}
 		for k, v := range r.Upstream {
 			if len(v) == 0 {
-				return nil, fmt.Errorf("%s: upstream %s has no values", r.Name, k)
+				return fmt.Errorf("%s: upstream %s has no values", r.Name, k)
 			}
 		}
 		if r.Action == "" {
 			r.Action = ActionDeploy
 		}
 		if r.Action != ActionDeploy && r.Action != ActionPropose {
-			return nil, fmt.Errorf("%s: action %q: want deploy or propose", r.Name, r.Action)
+			return fmt.Errorf("%s: action %q: want deploy or propose", r.Name, r.Action)
 		}
 	}
-	return file.Rules, nil
-}
-
-// RulesFromEnv returns the rules file at AUTODEPLOY_CONFIG, or one deploy rule built from AUTO_DEPLOY_ATTR_KEY and
-// AUTO_DEPLOY_ATTR_VALUE. getenv is os.Getenv outside tests.
-func RulesFromEnv(getenv func(string) string) ([]Rule, error) {
-	path, key, value := getenv("AUTODEPLOY_CONFIG"), getenv("AUTO_DEPLOY_ATTR_KEY"), getenv("AUTO_DEPLOY_ATTR_VALUE")
-	if path != "" {
-		if key != "" || value != "" {
-			return nil, errors.New("set AUTODEPLOY_CONFIG or AUTO_DEPLOY_ATTR_KEY and AUTO_DEPLOY_ATTR_VALUE, not both")
-		}
-		return LoadConfig(path)
-	}
-	if key == "" {
-		key = "autodeploy"
-	}
-	if value == "" {
-		value = "true"
-	}
-	return []Rule{{
-		Name:       key + "=" + value,
-		Downstream: map[string]Values{key: {value}},
-		Action:     ActionDeploy,
-	}}, nil
+	return nil
 }
 
 // matches reports whether every key of want is in attrs with one of its values. A missing key never matches.

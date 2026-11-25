@@ -1,0 +1,17 @@
+# release-notes config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+# Post to Slack, to Microsoft Teams, or to both.
+
+# Also post development versions, such as 1.3.1-dev.20261124T055403Z. Default: false.
+include_development: false
+
+slack:
+  # The channel for release notes, with SLACK_BOT_TOKEN. Empty posts nothing to Slack. Ignored with only
+  # SLACK_WEBHOOK_URL, which always posts.
+  channel: "#releases"
+
+teams:
+  # Post an Adaptive Card to a Microsoft Teams Workflows webhook. Default: false.
+  enabled: true
+  # The environment variable that holds the webhook URL, from the "Post to a channel when a webhook request is
+  # received" template. Default: TEAMS_WEBHOOK_URL.
+  webhook_url_env: TEAMS_WEBHOOK_URL

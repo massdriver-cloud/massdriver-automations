@@ -1,0 +1,46 @@
+# freeze-guard config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+# Without windows, freeze-guard adds no policies, and removes the ones it made.
+
+# The default timezone of the windows. An IANA zone. Default: UTC.
+timezone: America/New_York
+
+# The default actions that a window denies. Default: instance:deploy, instance:decommission, environment:deploy,
+# and environment:decommission.
+actions: [instance:deploy, instance:decommission, environment:deploy, environment:decommission]
+
+# Groups that every window leaves alone, by name.
+exempt_groups: [SRE]
+
+slack:
+  # The channel for window announcements, with SLACK_BOT_TOKEN. Empty posts nothing. Ignored with only
+  # SLACK_WEBHOOK_URL.
+  channel: "#changes"
+
+windows:
+  - # Required. Unique. POST /freeze/lift?window=<name> uses it.
+    name: weekend
+    # The deny policy's conditions: attributes of the entities to freeze. A list matches any of its values, and
+    # "*" matches any value. Without match, the window denies the actions on every entity.
+    match:
+      md-environment: prod
+    # Added to the exempt_groups above.
+    exempt_groups: [Release Managers]
+    # A weekly window: set weekly, or from and to. Each range is "<day> HH:MM" to "<day> HH:MM". A range whose
+    # end is before its start wraps past Saturday.
+    weekly:
+      - from: Fri 17:00
+        to: Mon 08:00
+
+  - name: holiday
+    match:
+      md-project: [api, web]
+    # Replaces the default actions for this window.
+    actions: [instance:deploy]
+    # Replaces the default timezone for this window.
+    timezone: America/Los_Angeles
+    # A fixed window: RFC 3339, YYYY-MM-DD HH:MM, or YYYY-MM-DD, in the window's timezone.
+    from: 2026-12-24
+    to: 2026-12-26 12:00
+    # Replaces the default channel for this window.
+    slack:
+      channel: "#release"

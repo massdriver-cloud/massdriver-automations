@@ -2,9 +2,12 @@ package releasenotes
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -13,6 +16,8 @@ import (
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
+	slackpkg "github.com/massdriver-cloud/massdriver-automations/pkg/slack"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/slack/slacktest"
 )
 
 var secret = []byte("0123456789abcdef0123456789abcdef")
@@ -89,20 +94,29 @@ func (h *hook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
-func setup(t *testing.T, api *fakeAPI, includeDev bool) (http.Handler, *hook, *hook) {
+// slackHook records the Slack posts as the text and blocks of each message.
+type slackHook struct{ srv *slacktest.Server }
+
+func (h slackHook) bodies() []map[string]any {
+	out := []map[string]any{}
+	for _, c := range h.srv.Calls() {
+		out = append(out, map[string]any{"text": c.Text, "blocks": c.Blocks})
+	}
+	return out
+}
+
+func setup(t *testing.T, api *fakeAPI, includeDev bool) (http.Handler, slackHook, *hook) {
 	t.Helper()
 	apiSrv := httptest.NewServer(api)
-	slack, teams := &hook{}, &hook{}
-	slackSrv, teamsSrv := httptest.NewServer(slack), httptest.NewServer(teams)
-	t.Cleanup(func() { apiSrv.Close(); slackSrv.Close(); teamsSrv.Close() })
+	teams := &hook{}
+	teamsSrv := httptest.NewServer(teams)
+	t.Cleanup(func() { apiSrv.Close(); teamsSrv.Close() })
+	sl := slacktest.NewServer(t)
 
-	n := New(&massdriver.Client{Endpoint: apiSrv.URL, OrganizationID: "acme", APIKey: "md_test"}, Config{
-		SlackWebhookURL:    slackSrv.URL,
-		TeamsWebhookURL:    teamsSrv.URL,
-		IncludeDevelopment: includeDev,
-	})
+	cfg := Config{IncludeDevelopment: includeDev, Slack: slackpkg.Config{Channel: "#releases"}, Teams: TeamsConfig{Enabled: true, webhookURL: teamsSrv.URL}}
+	n := New(&massdriver.Client{Endpoint: apiSrv.URL, OrganizationID: "acme", APIKey: "md_test"}, sl.Bot(), cfg)
 	n.run = func(f func()) { f() }
-	return automation.Handler(n, secret), slack, teams
+	return automation.Handler(n, secret), slackHook{sl}, teams
 }
 
 func post(t *testing.T, h http.Handler, id string, body []byte) int {
@@ -150,8 +164,8 @@ func TestAnnouncesVersionChangelogAndInstances(t *testing.T) {
 				"text": "*Instances on a release channel that move to 1.3.0*\n*api* · `api-staging`: `api-staging-database` (deployed 1.2.2)"}},
 		},
 	}
-	if len(slack.bodies) != 1 || !reflect.DeepEqual(slack.bodies[0], wantSlack) {
-		t.Fatalf("slack:\n got %#v\nwant %#v", slack.bodies, wantSlack)
+	if len(slack.bodies()) != 1 || !reflect.DeepEqual(slack.bodies()[0], wantSlack) {
+		t.Fatalf("slack:\n got %#v\nwant %#v", slack.bodies(), wantSlack)
 	}
 
 	if len(teams.bodies) != 1 {
@@ -196,8 +210,8 @@ func TestSkipsDevelopmentVersions(t *testing.T) {
 
 	post(t, h, "ev-2", publishedEvent("ev-2", "aws-aurora", "2026-11-24T05:54:04Z"))
 
-	if len(slack.bodies) != 0 || len(teams.bodies) != 0 {
-		t.Fatalf("posted a development version: %v %v", slack.bodies, teams.bodies)
+	if len(slack.bodies()) != 0 || len(teams.bodies) != 0 {
+		t.Fatalf("posted a development version: %v %v", slack.bodies(), teams.bodies)
 	}
 }
 
@@ -217,8 +231,8 @@ func TestIncludeDevelopmentAndNoUpgrades(t *testing.T) {
 			map[string]any{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": "No instances can upgrade to 1.3.1-dev.20261124T055403Z."}},
 		},
 	}
-	if len(slack.bodies) != 1 || !reflect.DeepEqual(slack.bodies[0], want) {
-		t.Fatalf("slack: %#v", slack.bodies)
+	if len(slack.bodies()) != 1 || !reflect.DeepEqual(slack.bodies()[0], want) {
+		t.Fatalf("slack: %#v", slack.bodies())
 	}
 }
 
@@ -232,8 +246,8 @@ func TestSameVersionIsAnnouncedOnce(t *testing.T) {
 	post(t, h, "ev-4", publishedEvent("ev-4", "aws-aurora", "2026-11-24T05:54:04Z"))
 	post(t, h, "ev-5", publishedEvent("ev-5", "aws-aurora", "2026-11-24T05:54:05Z"))
 
-	if len(slack.bodies) != 1 {
-		t.Fatalf("slack posts: %d", len(slack.bodies))
+	if len(slack.bodies()) != 1 {
+		t.Fatalf("slack posts: %d", len(slack.bodies()))
 	}
 }
 
@@ -245,7 +259,64 @@ func TestIgnoresOtherEvents(t *testing.T) {
 	if code := post(t, h, "ev-6", body); code != http.StatusNoContent {
 		t.Fatalf("got %d", code)
 	}
-	if len(api.queries) != 0 || len(slack.bodies) != 0 {
+	if len(api.queries) != 0 || len(slack.bodies()) != 0 {
 		t.Fatalf("acted on repo.created")
+	}
+}
+
+func TestStartNeedsSomewhereToPost(t *testing.T) {
+	t.Setenv("MASSDRIVER_ORGANIZATION_ID", "acme")
+	t.Setenv("MASSDRIVER_API_KEY", "md_test")
+	t.Setenv("SLACK_BOT_TOKEN", "")
+	t.Setenv("SLACK_WEBHOOK_URL", "")
+	t.Setenv("TEAMS_WEBHOOK_URL", "")
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("CONFIG_FILE", path)
+
+	if _, err := Definition.New(); err == nil || !strings.HasPrefix(err.Error(), "nothing to post to") {
+		t.Fatalf("no destination: err = %v", err)
+	}
+	t.Setenv("SLACK_BOT_TOKEN", "xoxb-1")
+	if _, err := Definition.New(); err == nil || !strings.HasPrefix(err.Error(), "nothing to post to") {
+		t.Fatalf("bot token without a channel: err = %v", err)
+	}
+	t.Setenv("SLACK_BOT_TOKEN", "")
+	t.Setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/T/B/x")
+	if _, err := Definition.New(); err != nil {
+		t.Fatalf("webhook: err = %v", err)
+	}
+
+	t.Setenv("SLACK_WEBHOOK_URL", "")
+	if err := os.WriteFile(path, []byte("teams:\n  enabled: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Definition.New(); err == nil || err.Error() != "missing required env vars: [TEAMS_WEBHOOK_URL]" {
+		t.Fatalf("teams without its URL: err = %v", err)
+	}
+	t.Setenv("TEAMS_WEBHOOK_URL", "https://example.webhook.office.com/x")
+	a, err := Definition.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := a.(*ReleaseNotes); n.cfg.Teams.webhookURL != "https://example.webhook.office.com/x" {
+		t.Fatalf("teams = %+v", n.cfg.Teams)
+	}
+
+	if err := os.WriteFile(path, []byte("slack_webhook_url: https://hooks.slack.com/x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var ce *automation.ConfigError
+	if _, err := Definition.New(); !errors.As(err, &ce) {
+		t.Fatalf("unknown key: err = %v", err)
+	}
+}
+
+func TestExampleConfigLoads(t *testing.T) {
+	var cfg Config
+	if err := automation.LoadConfigFile("config.example.yaml", &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Slack.Channel != "#releases" || !cfg.Teams.Enabled || cfg.Teams.WebhookURLEnv != "TEAMS_WEBHOOK_URL" {
+		t.Fatalf("config = %+v", cfg)
 	}
 }

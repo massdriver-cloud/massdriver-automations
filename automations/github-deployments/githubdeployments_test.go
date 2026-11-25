@@ -3,9 +3,12 @@ package githubdeployments
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -125,14 +128,10 @@ func (f *fakeGitHub) writes() []call {
 }
 
 func testConfig(githubURL string) Config {
-	return Config{
-		GitHubURL:       githubURL,
-		GitHubToken:     "ghp_test",
-		AppURL:          "https://app.massdriver.cloud",
-		RepoAttrKey:     "github_repo",
-		RefAttrKey:      "github_ref",
-		EnvironmentName: "environment",
-	}
+	cfg := DefaultConfig()
+	cfg.GitHub.APIURL = githubURL
+	cfg.GitHub.token = "ghp_test"
+	return cfg
 }
 
 func post(t *testing.T, h http.Handler, id string, body []byte) int {
@@ -243,7 +242,7 @@ func TestRefAttributeProjectEnvironmentNameAndDecommission(t *testing.T) {
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
 	cfg := testConfig(srv.URL)
-	cfg.EnvironmentName = "project-environment"
+	cfg.GitHub.EnvironmentName = "project-environment"
 	h := automation.Handler(New(cfg), secret)
 
 	post(t, h, "ev-6", deploymentEvent("ev-6", "deployment.completed", "DECOMMISSION", map[string]any{"github_ref": "release"}))
@@ -333,5 +332,55 @@ func TestTruncate(t *testing.T) {
 	}
 	if got := truncate("short", 140); got != "short" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestStartReadsTheTokenFromTheNamedEnvVar(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("github:\n  token_env: GHE_TOKEN\n  api_url: https://ghe.example.com/api/v3/\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONFIG_FILE", path)
+	t.Setenv("GHE_TOKEN", "")
+	if _, err := Definition.New(); err == nil || err.Error() != "missing required env vars: [GHE_TOKEN]" {
+		t.Fatalf("err = %v", err)
+	}
+	t.Setenv("GHE_TOKEN", "ghp_enterprise")
+	a, err := Definition.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := a.(*GitHubDeployments)
+	if g.gh.token != "ghp_enterprise" || g.gh.url != "https://ghe.example.com/api/v3" || g.cfg.GitHub.RepoAttribute != "github_repo" {
+		t.Fatalf("config = %+v", g.cfg)
+	}
+}
+
+func TestStartRefusesBadConfig(t *testing.T) {
+	for body, want := range map[string]string{
+		"github: {environment_name: team}\n": `github.environment_name must be environment or project-environment, got "team"`,
+		"github: {repo_attribute: \"\"}\n":   "github.repo_attribute must not be empty",
+		"github: {token: ghp_x}\n":           "field token not found",
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("CONFIG_FILE", path)
+		_, err := Definition.New()
+		var ce *automation.ConfigError
+		if !errors.As(err, &ce) || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: err = %v, want %q", body, err, want)
+		}
+	}
+}
+
+func TestExampleConfigLoads(t *testing.T) {
+	cfg := DefaultConfig()
+	if err := automation.LoadConfigFile("config.example.yaml", &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GitHub.RepoAttribute != "github_repo" || cfg.Massdriver.URL() != "https://app.massdriver.cloud" {
+		t.Fatalf("config = %+v", cfg)
 	}
 }

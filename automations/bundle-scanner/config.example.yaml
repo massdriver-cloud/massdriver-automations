@@ -1,0 +1,20 @@
+# bundle-scanner config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+# Every key is optional: without a config file, both scanners run, a version fails at HIGH, and results go to the
+# logs and to the Slack webhook, if one is set.
+
+# The scanners to run. Default: [trivy, checkov].
+scanners: [trivy, checkov]
+
+# A version fails when a finding has this severity or higher: UNKNOWN, LOW, MEDIUM, HIGH, or CRITICAL.
+# Default: HIGH.
+fail_severity: HIGH
+
+# A repo custom attribute that records the result as passed or failed. Empty sets no attribute.
+result_attribute: iac_scan
+
+# The longest time for one bundle version: the pull and every scanner. Default: 10m.
+timeout: 10m
+
+slack:
+  # The channel for results, with SLACK_BOT_TOKEN. Empty posts nothing. Ignored with only SLACK_WEBHOOK_URL.
+  channel: "#bundles"

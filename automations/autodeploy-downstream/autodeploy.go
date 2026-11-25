@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"os"
 	"slices"
 	"time"
 
@@ -35,15 +34,15 @@ var Definition = automation.Definition{
 	Description: "Deploys opted-in dependents when an instance deploys.",
 	Events:      []string{"deployment.completed"},
 	New: func() (automation.Automation, error) {
+		var cfg Config
+		if err := automation.LoadConfig(&cfg); err != nil {
+			return nil, err
+		}
 		api, err := massdriver.FromEnv()
 		if err != nil {
 			return nil, err
 		}
-		rules, err := RulesFromEnv(os.Getenv)
-		if err != nil {
-			return nil, err
-		}
-		return New(api, rules), nil
+		return New(api, cfg.Rules), nil
 	},
 }
 

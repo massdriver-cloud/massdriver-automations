@@ -35,17 +35,18 @@ var Definition = automation.Definition{
 	Name:        automationName,
 	Description: "Runs HTTP requests, commands, and Massdriver API calls for the events that match configured routes.",
 	New: func() (automation.Automation, error) {
-		cfg, err := LoadConfig(automation.Env("ROUTER_CONFIG", "/etc/router/config.yaml"))
-		if err != nil {
+		var cfg Config
+		if err := automation.LoadConfig(&cfg); err != nil {
 			return nil, err
 		}
 		var md *massdriver.Client
+		var err error
 		if cfg.usesMassdriver() {
 			if md, err = massdriver.FromEnv(); err != nil {
 				return nil, err
 			}
 		}
-		r := New(cfg, md)
+		r := New(&cfg, md)
 		go r.Work()
 		return r, nil
 	},

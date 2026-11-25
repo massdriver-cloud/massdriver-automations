@@ -3,18 +3,14 @@
 package sandboxonjoin
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
@@ -54,20 +50,15 @@ var Definition = automation.Definition{
 	Description: "Forks a sandbox environment for each person who joins a group, and removes it when they leave.",
 	Events:      []string{"group_membership.added", "group_membership.removed", "deployment.completed"},
 	New: func() (automation.Automation, error) {
+		var cfg Config
+		if err := automation.LoadConfig(&cfg); err != nil {
+			return nil, err
+		}
 		api, err := massdriver.FromEnv()
 		if err != nil {
 			return nil, err
 		}
-		path := automation.Env("SANDBOX_CONFIG", "/config/sandboxes.yaml")
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("SANDBOX_CONFIG: %w", err)
-		}
-		rules, err := ParseConfig(raw)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
-		}
-		return New(api, rules), nil
+		return New(api, cfg.Sandboxes), nil
 	},
 }
 
@@ -85,25 +76,34 @@ type Rule struct {
 
 func (r Rule) template() string { return r.Project + "-" + r.Environment }
 
-// ParseConfig reads the `sandboxes:` list of rules.
-func ParseConfig(raw []byte) ([]Rule, error) {
-	var doc struct {
-		Sandboxes []Rule `yaml:"sandboxes"`
+// Config is the config file of sandbox-on-join.
+type Config struct {
+	Sandboxes []Rule `yaml:"sandboxes"`
+}
+
+// Validate requires at least one rule, each with a group and a template environment.
+func (c *Config) Validate() error {
+	if len(c.Sandboxes) == 0 {
+		return errors.New("sandboxes: at least one rule is required")
 	}
-	dec := yaml.NewDecoder(bytes.NewReader(raw))
-	dec.KnownFields(true)
-	if err := dec.Decode(&doc); err != nil {
-		return nil, err
-	}
-	if len(doc.Sandboxes) == 0 {
-		return nil, errors.New("no sandboxes configured")
-	}
-	for i, r := range doc.Sandboxes {
+	for i, r := range c.Sandboxes {
 		if r.Group == "" || r.Project == "" || r.Environment == "" {
-			return nil, fmt.Errorf("sandboxes[%d]: group, project, and environment are required", i)
+			return fmt.Errorf("sandboxes[%d]: group, project, and environment are required", i)
 		}
 	}
-	return doc.Sandboxes, nil
+	return nil
+}
+
+// ParseConfig decodes and checks a config document and returns its rules.
+func ParseConfig(raw []byte) ([]Rule, error) {
+	var c Config
+	if err := automation.DecodeConfig(raw, &c); err != nil {
+		return nil, err
+	}
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	return c.Sandboxes, nil
 }
 
 // Sandboxes holds the API client and the rules.

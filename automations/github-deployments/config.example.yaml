@@ -1,0 +1,19 @@
+# github-deployments config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+# Every key is optional. These are the defaults.
+
+massdriver:
+  # The Massdriver UI, for the log links of each deployment status.
+  app_url: https://app.massdriver.cloud
+
+github:
+  # For GitHub Enterprise Server: https://<host>/api/v3.
+  api_url: https://api.github.com
+  # The environment variable that holds the GitHub token. The token needs the Deployments: write and
+  # Metadata: read repository permissions (fine-grained), or the repo_deployment scope (classic).
+  token_env: GITHUB_TOKEN
+  # The instance attribute that names the repository, as owner/name.
+  repo_attribute: github_repo
+  # The instance attribute that names the ref. Without it, the deployment uses the repository's default branch.
+  ref_attribute: github_ref
+  # The GitHub environment of a deployment: environment (such as prod) or project-environment (such as api-prod).
+  environment_name: environment

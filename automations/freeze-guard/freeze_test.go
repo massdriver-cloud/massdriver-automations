@@ -17,11 +17,14 @@ import (
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/slack/slacktest"
 )
 
 var secret = []byte("0123456789abcdef0123456789abcdef")
 
 const windowsYAML = `
+slack:
+  channel: "#changes"
 timezone: America/New_York
 exempt_groups: [SRE]
 windows:
@@ -38,6 +41,8 @@ windows:
     actions: [instance:deploy]
     from: 2026-11-26
     to: 2026-11-27
+    slack:
+      channel: "#api-team"
 `
 
 var (
@@ -166,42 +171,26 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 }
 
-type fakeWebhook struct {
-	mu    sync.Mutex
-	texts []string
-}
-
-func (f *fakeWebhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	var body map[string]string
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	f.mu.Lock()
-	f.texts = append(f.texts, body["text"])
-	f.mu.Unlock()
-	_, _ = w.Write([]byte("ok"))
-}
-
 type harness struct {
 	api      *fakeAPI
-	webhook  *fakeWebhook
+	slack    *slacktest.Server
 	apiURL   string
-	hookURL  string
 	stateDir string
 	now      time.Time
 }
 
 func setup(t *testing.T) *harness {
 	t.Helper()
-	api, hook := &fakeAPI{}, &fakeWebhook{}
+	api := &fakeAPI{}
 	api.addGroup("group-admins", "Administrators", "ORGANIZATION_ADMIN")
 	api.addGroup("group-contractors", "Contractors", "CUSTOM",
 		fakePolicy{ID: "foreign-1", Actions: []string{"instance:deploy"}, Conditions: json.RawMessage(`{"md-environment":["prod"]}`)})
 	api.addGroup("group-developers", "Developers", "CUSTOM")
 	api.addGroup("group-release", "Release Managers", "CUSTOM")
 	api.addGroup("group-sre", "SRE", "CUSTOM")
-	apiSrv, hookSrv := httptest.NewServer(api), httptest.NewServer(hook)
+	apiSrv := httptest.NewServer(api)
 	t.Cleanup(apiSrv.Close)
-	t.Cleanup(hookSrv.Close)
-	return &harness{api: api, webhook: hook, apiURL: apiSrv.URL, hookURL: hookSrv.URL, stateDir: t.TempDir()}
+	return &harness{api: api, slack: slacktest.NewServer(t), apiURL: apiSrv.URL, stateDir: t.TempDir()}
 }
 
 func (h *harness) guard(t *testing.T) *Guard {
@@ -210,8 +199,8 @@ func (h *harness) guard(t *testing.T) *Guard {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := New(&massdriver.Client{Endpoint: h.apiURL, OrganizationID: "acme", APIKey: "md_test"}, windows,
-		Options{StateDir: h.stateDir, AdminToken: "admin-token", SlackWebhookURL: h.hookURL})
+	g, err := New(&massdriver.Client{Endpoint: h.apiURL, OrganizationID: "acme", APIKey: "md_test"}, h.slack.Bot(), windows,
+		Options{StateDir: h.stateDir, AdminToken: "admin-token"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,8 +252,9 @@ func TestWindowStartCreatesDenyPolicyPerNonExemptGroup(t *testing.T) {
 	wantText := "Freeze window \"weekend\" started. Denied environment:decommission, environment:deploy, " +
 		"instance:decommission, instance:deploy where md-environment is prod.\n" +
 		"Frozen groups: Contractors, Developers.\nExempt groups: Release Managers, SRE."
-	if !reflect.DeepEqual(h.webhook.texts, []string{wantText}) {
-		t.Fatalf("slack = %q", h.webhook.texts)
+	calls := h.slack.Calls()
+	if len(calls) != 1 || calls[0].Text != wantText || calls[0].Channel != "#changes" {
+		t.Fatalf("slack = %+v", calls)
 	}
 }
 
@@ -274,8 +264,8 @@ func TestReconcileInsideWindowIsIdempotent(t *testing.T) {
 	g := h.guard(t)
 	reconcile(t, g)
 	reconcile(t, g)
-	if len(h.api.created) != 2 || len(h.webhook.texts) != 1 {
-		t.Fatalf("created = %v, slack = %q", h.api.created, h.webhook.texts)
+	if len(h.api.created) != 2 || len(h.slack.Texts()) != 1 {
+		t.Fatalf("created = %v, slack = %q", h.api.created, h.slack.Texts())
 	}
 }
 
@@ -294,7 +284,7 @@ func TestWindowEndDeletesOnlyItsPolicies(t *testing.T) {
 	if got := h.api.policyIDs("group-contractors"); !reflect.DeepEqual(got, []string{"foreign-1"}) {
 		t.Fatalf("contractors policies = %v", got)
 	}
-	if got := h.webhook.texts[1]; got != `Freeze window "weekend" ended. Removed its deny policies.` {
+	if got := h.slack.Texts()[1]; got != `Freeze window "weekend" ended. Removed its deny policies.` {
 		t.Fatalf("slack = %q", got)
 	}
 }
@@ -358,8 +348,8 @@ func TestRestartWithState(t *testing.T) {
 
 	restarted := h.guard(t)
 	reconcile(t, restarted)
-	if len(h.api.created) != 2 || len(h.webhook.texts) != 1 {
-		t.Fatalf("created = %v, slack = %q", h.api.created, h.webhook.texts)
+	if len(h.api.created) != 2 || len(h.slack.Texts()) != 1 {
+		t.Fatalf("created = %v, slack = %q", h.api.created, h.slack.Texts())
 	}
 
 	h.now = weekday.AddDate(0, 0, 7)
@@ -440,7 +430,7 @@ func TestEmergencyLift(t *testing.T) {
 	if len(h.api.deleted) != 2 || len(h.api.policyIDs("group-developers")) != 0 {
 		t.Fatalf("deleted = %v", h.api.deleted)
 	}
-	if got := h.webhook.texts[1]; got != `Freeze window "weekend" lifted until 2026-12-04 17:00 EST. Removed its deny policies.` {
+	if got := h.slack.Texts()[1]; got != `Freeze window "weekend" lifted until 2026-12-04 17:00 EST. Removed its deny policies.` {
 		t.Fatalf("slack = %q", got)
 	}
 
@@ -479,8 +469,9 @@ func TestFixedWindowWithOwnActions(t *testing.T) {
 	}
 	wantText := "Freeze window \"thanksgiving\" started. Denied instance:deploy where md-project is one of api, web.\n" +
 		"Frozen groups: Contractors, Developers, Release Managers.\nExempt groups: SRE."
-	if !reflect.DeepEqual(h.webhook.texts, []string{wantText}) {
-		t.Fatalf("slack = %q", h.webhook.texts)
+	calls := h.slack.Calls()
+	if len(calls) != 1 || calls[0].Text != wantText || calls[0].Channel != "#api-team" {
+		t.Fatalf("slack = %+v", calls)
 	}
 }
 
@@ -539,6 +530,7 @@ func TestParseWindowsErrors(t *testing.T) {
 		"bad weekday":    "windows: [{name: x, weekly: [{from: Funday 17:00, to: Mon 08:00}]}]",
 		"backwards":      "windows: [{name: x, from: 2026-11-27, to: 2026-11-26}]",
 		"unknown key":    "windows: [{name: x, form: 2026-11-26, to: 2026-11-27}]",
+		"slack url":      "windows: [{name: x, from: 2026-11-26, to: 2026-11-27, slack: {webhook_url: https://hooks.slack.com/x}}]",
 	}
 	for name, src := range cases {
 		if _, err := ParseWindows([]byte(src)); err == nil {
@@ -556,7 +548,7 @@ func TestRemovedWindowPoliciesAreDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := New(&massdriver.Client{Endpoint: h.apiURL, OrganizationID: "acme", APIKey: "md_test"}, windows, Options{StateDir: h.stateDir})
+	g, err := New(&massdriver.Client{Endpoint: h.apiURL, OrganizationID: "acme", APIKey: "md_test"}, nil, windows, Options{StateDir: h.stateDir})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,5 +563,23 @@ func TestRemovedWindowPoliciesAreDeleted(t *testing.T) {
 	}
 	if string(b) != `{"policies":{},"active":{},"lifts":{}}` {
 		t.Fatalf("state = %s", b)
+	}
+}
+
+func TestExampleConfigLoads(t *testing.T) {
+	var cfg Config
+	if err := automation.LoadConfigFile("config.example.yaml", &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.windows) != 2 || cfg.windows[1].Slack.Channel != "#release" || cfg.windows[0].Slack.Channel != "#changes" {
+		t.Fatalf("windows = %+v", cfg.windows)
+	}
+}
+
+func TestNoConfigFileIsValid(t *testing.T) {
+	t.Setenv("CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
+	var cfg Config
+	if err := automation.LoadConfig(&cfg); err != nil || len(cfg.windows) != 0 {
+		t.Fatalf("windows = %v, err = %v", cfg.windows, err)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"regexp"
 	"sort"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/slack"
 )
 
 const (
@@ -40,42 +42,67 @@ var Definition = automation.Definition{
 	Description: "Posts new bundle versions and the instances that can upgrade to Slack and Microsoft Teams.",
 	Events:      []string{"repo.published"},
 	New: func() (automation.Automation, error) {
+		var cfg Config
+		if err := automation.LoadConfig(&cfg); err != nil {
+			return nil, err
+		}
 		api, err := massdriver.FromEnv()
 		if err != nil {
 			return nil, err
 		}
-		cfg := Config{
-			SlackWebhookURL:    automation.Env("SLACK_WEBHOOK_URL", ""),
-			TeamsWebhookURL:    automation.Env("TEAMS_WEBHOOK_URL", ""),
-			IncludeDevelopment: automation.Env("INCLUDE_DEVELOPMENT", "false") == "true",
+		if cfg.Teams.Enabled {
+			v, err := automation.RequireEnv(cfg.Teams.WebhookURLEnv)
+			if err != nil {
+				return nil, err
+			}
+			cfg.Teams.webhookURL = v[cfg.Teams.WebhookURLEnv]
 		}
-		if cfg.SlackWebhookURL == "" && cfg.TeamsWebhookURL == "" {
-			return nil, errors.New("set SLACK_WEBHOOK_URL, TEAMS_WEBHOOK_URL, or both")
+		sl := slack.FromEnv()
+		sl.WarnIgnoredChannels(slog.Default(), cfg.Slack.Channel)
+		if !sl.Sends(cfg.Slack.Channel) && !cfg.Teams.Enabled {
+			return nil, errors.New("nothing to post to: set slack.channel with SLACK_BOT_TOKEN, set SLACK_WEBHOOK_URL, or set teams.enabled")
 		}
-		return New(api, cfg), nil
+		return New(api, sl, cfg), nil
 	},
 }
 
-// Config is where the notes go and which versions get them.
+// Config is the config file of release-notes.
 type Config struct {
-	SlackWebhookURL    string
-	TeamsWebhookURL    string
-	IncludeDevelopment bool
+	IncludeDevelopment bool         `yaml:"include_development"`
+	Slack              slack.Config `yaml:"slack"`
+	Teams              TeamsConfig  `yaml:"teams"`
+}
+
+// TeamsConfig turns on the Microsoft Teams post. The webhook URL is a credential, so it comes from the environment.
+type TeamsConfig struct {
+	Enabled       bool   `yaml:"enabled"`
+	WebhookURLEnv string `yaml:"webhook_url_env"`
+
+	webhookURL string
+}
+
+// Validate fills the default Teams variable.
+func (c *Config) Validate() error {
+	if c.Teams.WebhookURLEnv == "" {
+		c.Teams.WebhookURLEnv = "TEAMS_WEBHOOK_URL"
+	}
+	return nil
 }
 
 // ReleaseNotes holds the API client and the versions it already announced.
 type ReleaseNotes struct {
-	api *massdriver.Client
-	cfg Config
-	run func(func())
+	api   *massdriver.Client
+	slack *slack.Client
+	cfg   Config
+	run   func(func())
 
 	mu        sync.Mutex
 	announced map[string]bool
 }
 
 // New returns the automation.
-func New(api *massdriver.Client, cfg Config) *ReleaseNotes {
-	return &ReleaseNotes{api: api, cfg: cfg, run: func(f func()) { go f() }, announced: map[string]bool{}}
+func New(api *massdriver.Client, sl *slack.Client, cfg Config) *ReleaseNotes {
+	return &ReleaseNotes{api: api, slack: sl, cfg: cfg, run: func(f func()) { go f() }, announced: map[string]bool{}}
 }
 
 // Handle starts the announcement of a published bundle version.
@@ -172,13 +199,15 @@ func (n *ReleaseNotes) announce(ctx context.Context, ev automation.Event, repo s
 		}
 	}
 
-	if n.cfg.SlackWebhookURL != "" {
-		if err := postJSON(ctx, n.cfg.SlackWebhookURL, SlackMessage(note)); err != nil {
+	if n.slack.Sends(n.cfg.Slack.Channel) {
+		msg := SlackMessage(note)
+		msg.Channel = n.cfg.Slack.Channel
+		if _, err := n.slack.Post(ctx, msg); err != nil {
 			log.Error("slack post failed", "err", err)
 		}
 	}
-	if n.cfg.TeamsWebhookURL != "" {
-		if err := postJSON(ctx, n.cfg.TeamsWebhookURL, TeamsMessage(note)); err != nil {
+	if n.cfg.Teams.Enabled {
+		if err := postJSON(ctx, n.cfg.Teams.webhookURL, TeamsMessage(note)); err != nil {
 			log.Error("teams post failed", "err", err)
 		}
 	}
@@ -340,8 +369,8 @@ func teamsMarkdown(md string) string { return mdHeading.ReplaceAllString(md, "**
 func slackBold(s string) string { return "*" + s + "*" }
 func teamsBold(s string) string { return "**" + s + "**" }
 
-// SlackMessage is the incoming-webhook payload for a note.
-func SlackMessage(n Note) map[string]any {
+// SlackMessage is the Slack message for a note, without a channel.
+func SlackMessage(n Note) slack.Message {
 	title := fmt.Sprintf("%s %s published", n.Bundle, n.Version)
 	section := func(text string) map[string]any {
 		return map[string]any{"type": "section", "text": map[string]any{"type": "mrkdwn", "text": clip(text, maxSection)}}
@@ -360,7 +389,7 @@ func SlackMessage(n Note) map[string]any {
 		blocks = append(blocks, section(fmt.Sprintf("*Instances on a release channel that move to %s*\n", n.Version)+
 			instanceList(grouped(n.OnChannel, deployedVersion), slackBold)))
 	}
-	return map[string]any{"text": title, "blocks": blocks}
+	return slack.Message{Text: title, Blocks: blocks}
 }
 
 // TeamsMessage is the Workflows webhook payload for a note: one Adaptive Card.

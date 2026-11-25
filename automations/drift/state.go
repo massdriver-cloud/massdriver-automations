@@ -23,6 +23,12 @@ type plan struct {
 	// Resolution is the deployment that a resolve created, so a redelivered event does not create a second one.
 	Resolution string `json:"resolution,omitempty"`
 	Outcome    string `json:"outcome,omitempty"`
+	// Alerted and Replied record the Slack posts that went out, so a retry after a failed post does not repeat
+	// them. AlertChannel and AlertTS place the outcome reply in the alert's thread.
+	Alerted      bool   `json:"alerted,omitempty"`
+	AlertChannel string `json:"alert_channel,omitempty"`
+	AlertTS      string `json:"alert_ts,omitempty"`
+	Replied      bool   `json:"replied,omitempty"`
 }
 
 // run counts the outcomes of one run of a check.

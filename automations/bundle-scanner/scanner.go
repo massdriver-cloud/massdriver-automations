@@ -2,13 +2,10 @@
 package bundlescanner
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -19,6 +16,7 @@ import (
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/slack"
 )
 
 const (
@@ -41,56 +39,65 @@ var Definition = automation.Definition{
 	Description: "Scans each new bundle version with Trivy and Checkov and posts the findings to Slack.",
 	Events:      []string{"repo.published"},
 	New: func() (automation.Automation, error) {
+		cfg := DefaultConfig()
+		if err := automation.LoadConfig(&cfg); err != nil {
+			return nil, err
+		}
 		api, err := massdriver.FromEnv()
 		if err != nil {
 			return nil, err
 		}
-		cfg, err := configFromEnv()
-		if err != nil {
-			return nil, err
-		}
-		s := New(api, cfg)
+		sl := slack.FromEnv()
+		sl.WarnIgnoredChannels(slog.Default(), cfg.Slack.Channel)
+		s := New(api, sl, cfg)
 		go s.Work()
 		return s, nil
 	},
 }
 
-// Config is the behavior of the scanner that does not come from Massdriver.
+// Config is the config file of bundle-scanner.
 type Config struct {
-	SlackWebhookURL string
-	Tools           []Tool
-	FailSeverity    string
-	AttributeKey    string
-	Timeout         time.Duration
+	Scanners        []string      `yaml:"scanners"`
+	FailSeverity    string        `yaml:"fail_severity"`
+	ResultAttribute string        `yaml:"result_attribute"`
+	Timeout         time.Duration `yaml:"timeout"`
+	Slack           slack.Config  `yaml:"slack"`
+
+	tools []Tool
 }
 
-func configFromEnv() (Config, error) {
-	cfg := Config{
-		SlackWebhookURL: os.Getenv("SLACK_WEBHOOK_URL"),
-		FailSeverity:    strings.ToUpper(automation.Env("SCAN_FAIL_SEVERITY", "HIGH")),
-		AttributeKey:    os.Getenv("SCAN_ATTRIBUTE_KEY"),
+// DefaultConfig runs both scanners, fails at HIGH, and sets no attribute.
+func DefaultConfig() Config {
+	return Config{Scanners: []string{"trivy", "checkov"}, FailSeverity: "HIGH", Timeout: 10 * time.Minute}
+}
+
+// Validate checks the scanners and the severity.
+func (c *Config) Validate() error {
+	c.FailSeverity = strings.ToUpper(c.FailSeverity)
+	if _, ok := severityRank[c.FailSeverity]; !ok {
+		return fmt.Errorf("fail_severity %q is not one of UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL", c.FailSeverity)
 	}
-	if _, ok := severityRank[cfg.FailSeverity]; !ok {
-		return cfg, fmt.Errorf("SCAN_FAIL_SEVERITY %q is not one of UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL", cfg.FailSeverity)
+	if c.Timeout <= 0 {
+		return errors.New("timeout must be more than 0, such as 10m")
 	}
-	timeout, err := time.ParseDuration(automation.Env("SCAN_TIMEOUT", "10m"))
-	if err != nil {
-		return cfg, fmt.Errorf("SCAN_TIMEOUT: %w", err)
+	if len(c.Scanners) == 0 {
+		return errors.New("scanners: set trivy, checkov, or both")
 	}
-	cfg.Timeout = timeout
-	for _, name := range strings.Split(automation.Env("SCANNERS", "trivy,checkov"), ",") {
-		tool, ok := tools[strings.TrimSpace(name)]
+	c.tools = nil
+	for _, name := range c.Scanners {
+		tool, ok := tools[name]
 		if !ok {
-			return cfg, fmt.Errorf("SCANNERS: unknown scanner %q; use trivy, checkov, or both", name)
+			return fmt.Errorf("scanners: unknown scanner %q; use trivy, checkov, or both", name)
 		}
-		cfg.Tools = append(cfg.Tools, tool)
+		c.tools = append(c.tools, tool)
 	}
-	return cfg, nil
+	return nil
 }
 
 // Scanner queues bundle versions and scans them one at a time.
 type Scanner struct {
 	api      *massdriver.Client
+	slack    *slack.Client
 	registry string
 	cfg      Config
 	http     *http.Client
@@ -107,9 +114,10 @@ type job struct {
 }
 
 // New returns the automation. Call Work to start scanning.
-func New(api *massdriver.Client, cfg Config) *Scanner {
+func New(api *massdriver.Client, sl *slack.Client, cfg Config) *Scanner {
 	return &Scanner{
 		api:      api,
+		slack:    sl,
 		registry: strings.TrimSuffix(api.Endpoint, "/api/v2"),
 		cfg:      cfg,
 		http:     &http.Client{Timeout: 5 * time.Minute},
@@ -189,7 +197,7 @@ func (s *Scanner) process(j job) {
 	if err := s.postSlack(ctx, s.slackText(r)); err != nil {
 		log.Error("slack post failed", "err", err)
 	}
-	if s.cfg.AttributeKey != "" && r.err == nil {
+	if s.cfg.ResultAttribute != "" && r.err == nil {
 		if err := s.setAttribute(ctx, j.repo, attrs, passed); err != nil {
 			log.Error("repo attribute update failed", "err", err)
 		}
@@ -233,7 +241,7 @@ func (s *Scanner) scan(ctx context.Context, repo, version string) ([]finding, er
 		return nil, fmt.Errorf("pull: %w", err)
 	}
 	var all []finding
-	for _, tool := range s.cfg.Tools {
+	for _, tool := range s.cfg.tools {
 		fs, err := tool.run(ctx, dir)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", tool.Name, err)
@@ -287,25 +295,11 @@ func (s *Scanner) slackText(r report) string {
 }
 
 func (s *Scanner) postSlack(ctx context.Context, text string) error {
-	if s.cfg.SlackWebhookURL == "" {
+	if !s.slack.Sends(s.cfg.Slack.Channel) {
 		return nil
 	}
-	body, _ := json.Marshal(map[string]string{"text": text})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.SlackWebhookURL, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("content-type", "application/json")
-	resp, err := s.http.Do(req)
-	if err != nil {
-		return automation.RedactURL(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("slack: HTTP %d: %s", resp.StatusCode, b)
-	}
-	return nil
+	_, err := s.slack.Post(ctx, slack.Message{Channel: s.cfg.Slack.Channel, Text: text})
+	return err
 }
 
 // updateOciRepo replaces the whole attribute map, so the other attributes of the repo are sent back unchanged.
@@ -314,9 +308,9 @@ func (s *Scanner) setAttribute(ctx context.Context, repo string, current map[str
 	for k, v := range current {
 		attrs[k] = v
 	}
-	attrs[s.cfg.AttributeKey] = "failed"
+	attrs[s.cfg.ResultAttribute] = "failed"
 	if passed {
-		attrs[s.cfg.AttributeKey] = "passed"
+		attrs[s.cfg.ResultAttribute] = "passed"
 	}
 	encoded, err := massdriver.JSONString(attrs)
 	if err != nil {

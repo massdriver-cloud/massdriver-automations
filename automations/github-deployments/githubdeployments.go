@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
 )
 
 const (
@@ -27,33 +28,60 @@ var Definition = automation.Definition{
 	Description: "Mirrors Massdriver deployments as GitHub Deployments in the repo set on the instance.",
 	Events:      []string{"deployment.started", "deployment.completed", "deployment.failed", "deployment.aborted"},
 	New: func() (automation.Automation, error) {
-		v, err := automation.RequireEnv("GITHUB_TOKEN")
+		cfg := DefaultConfig()
+		if err := automation.LoadConfig(&cfg); err != nil {
+			return nil, err
+		}
+		v, err := automation.RequireEnv(cfg.GitHub.TokenEnv)
 		if err != nil {
 			return nil, err
 		}
-		cfg := Config{
-			GitHubURL:       automation.Env("GITHUB_API_URL", "https://api.github.com"),
-			GitHubToken:     v["GITHUB_TOKEN"],
-			AppURL:          automation.Env("MASSDRIVER_APP_URL", "https://app.massdriver.cloud"),
-			RepoAttrKey:     automation.Env("GITHUB_REPO_ATTR_KEY", "github_repo"),
-			RefAttrKey:      automation.Env("GITHUB_REF_ATTR_KEY", "github_ref"),
-			EnvironmentName: automation.Env("GITHUB_ENVIRONMENT_NAME", "environment"),
-		}
-		if cfg.EnvironmentName != "environment" && cfg.EnvironmentName != "project-environment" {
-			return nil, fmt.Errorf("GITHUB_ENVIRONMENT_NAME must be environment or project-environment, got %q", cfg.EnvironmentName)
-		}
+		cfg.GitHub.token = v[cfg.GitHub.TokenEnv]
 		return New(cfg), nil
 	},
 }
 
-// Config is the GitHub connection and the attribute keys that name the repo and the ref.
+// Config is the config file of github-deployments.
 type Config struct {
-	GitHubURL       string
-	GitHubToken     string
-	AppURL          string
-	RepoAttrKey     string
-	RefAttrKey      string
-	EnvironmentName string
+	Massdriver massdriver.AppConfig `yaml:"massdriver"`
+	GitHub     GitHubConfig         `yaml:"github"`
+}
+
+// GitHubConfig is the GitHub connection and the attribute keys that name the repo and the ref.
+type GitHubConfig struct {
+	APIURL          string `yaml:"api_url"`
+	TokenEnv        string `yaml:"token_env"`
+	RepoAttribute   string `yaml:"repo_attribute"`
+	RefAttribute    string `yaml:"ref_attribute"`
+	EnvironmentName string `yaml:"environment_name"`
+
+	token string
+}
+
+// DefaultConfig uses github.com and the github_repo and github_ref attributes.
+func DefaultConfig() Config {
+	return Config{GitHub: GitHubConfig{
+		APIURL:          "https://api.github.com",
+		TokenEnv:        "GITHUB_TOKEN",
+		RepoAttribute:   "github_repo",
+		RefAttribute:    "github_ref",
+		EnvironmentName: "environment",
+	}}
+}
+
+// Validate checks the settings that have a fixed set of values.
+func (c *Config) Validate() error {
+	g := &c.GitHub
+	if g.EnvironmentName != "environment" && g.EnvironmentName != "project-environment" {
+		return fmt.Errorf("github.environment_name must be environment or project-environment, got %q", g.EnvironmentName)
+	}
+	for key, v := range map[string]string{"api_url": g.APIURL, "token_env": g.TokenEnv, "repo_attribute": g.RepoAttribute, "ref_attribute": g.RefAttribute} {
+		if v == "" {
+			return fmt.Errorf("github.%s must not be empty", key)
+		}
+	}
+	g.APIURL = strings.TrimRight(g.APIURL, "/")
+	return nil
 }
 
 // GitHubDeployments holds the GitHub client and the deployments it created.
@@ -69,11 +97,9 @@ type GitHubDeployments struct {
 
 // New returns the automation.
 func New(cfg Config) *GitHubDeployments {
-	cfg.GitHubURL = strings.TrimRight(cfg.GitHubURL, "/")
-	cfg.AppURL = strings.TrimRight(cfg.AppURL, "/")
 	return &GitHubDeployments{
 		cfg:         cfg,
-		gh:          &github{url: cfg.GitHubURL, token: cfg.GitHubToken},
+		gh:          &github{url: cfg.GitHub.APIURL, token: cfg.GitHub.token},
 		deployments: map[string]int64{},
 		branches:    map[string]string{},
 	}
@@ -104,7 +130,7 @@ type deploymentPayload struct {
 // Handle creates or finds the GitHub deployment and posts its status. A GitHub error is returned, so Massdriver
 // sends the event again.
 func (g *GitHubDeployments) Handle(ctx context.Context, ev automation.Event) error {
-	repo := ev.Attribute(g.cfg.RepoAttrKey)
+	repo := ev.Attribute(g.cfg.GitHub.RepoAttribute)
 	action := ev.Metadata("deployment_action")
 	if verbs[ev.Type] == "" || action == "PLAN" || !validRepo(repo) || ev.Attribute("md-environment") == "" {
 		return nil
@@ -175,7 +201,7 @@ func stateFor(eventType, action string) string {
 }
 
 func (g *GitHubDeployments) environment(ev automation.Event) string {
-	if g.cfg.EnvironmentName == "project-environment" {
+	if g.cfg.GitHub.EnvironmentName == "project-environment" {
 		return ev.Attribute("md-project") + "-" + ev.Attribute("md-environment")
 	}
 	return ev.Attribute("md-environment")
@@ -188,7 +214,7 @@ func (g *GitHubDeployments) logURL(ev automation.Event, deploymentID string) str
 		return ""
 	}
 	return fmt.Sprintf("%s/orgs/%s/projects/%s/environments/%s/instances/%s?%s",
-		g.cfg.AppURL,
+		g.cfg.Massdriver.URL(),
 		url.PathEscape(parts[1]),
 		url.PathEscape(ev.Attribute("md-project")),
 		url.PathEscape(ev.Attribute("md-environment")),
@@ -244,7 +270,7 @@ func (g *GitHubDeployments) githubDeployment(ctx context.Context, ev automation.
 		return id, nil
 	}
 
-	ref := ev.Attribute(g.cfg.RefAttrKey)
+	ref := ev.Attribute(g.cfg.GitHub.RefAttribute)
 	if ref == "" {
 		if ref, err = g.defaultBranch(ctx, repo); err != nil {
 			return 0, err

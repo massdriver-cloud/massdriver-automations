@@ -4,9 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -109,9 +112,9 @@ func TestArchivesTheRawEventToEverySink(t *testing.T) {
 	defer ddSrv.Close()
 
 	h := automation.Handler(New([]Sink{
-		testS3Sink(s3srv.URL, S3Config{Bucket: "audit", Prefix: "events", LockMode: types.ObjectLockModeCompliance, LockDays: 365}),
-		&SplunkSink{cfg: SplunkConfig{URL: splunkSrv.URL + "/services/collector/event", Token: "hec-token", Index: "massdriver", Source: "massdriver", Sourcetype: "massdriver:cloudevent"}, http: http.DefaultClient},
-		&DatadogSink{cfg: DatadogConfig{URL: ddSrv.URL + "/api/v2/logs", APIKey: "dd-key", Service: "massdriver", Tags: "env:prod"}, http: http.DefaultClient},
+		testS3Sink(s3srv.URL, S3Config{Bucket: "audit", Prefix: "events", ObjectLock: &ObjectLock{Mode: types.ObjectLockModeCompliance, Days: 365}}),
+		&SplunkSink{cfg: SplunkConfig{URL: splunkSrv.URL, token: "hec-token", Index: "massdriver", Source: "massdriver", Sourcetype: "massdriver:cloudevent"}, http: http.DefaultClient},
+		&DatadogSink{cfg: DatadogConfig{URL: ddSrv.URL, apiKey: "dd-key", Service: "massdriver", Tags: []string{"env:prod", "team:platform"}}, http: http.DefaultClient},
 	}), secret)
 
 	if code := deliver(t, h); code != http.StatusNoContent {
@@ -173,7 +176,7 @@ func TestArchivesTheRawEventToEverySink(t *testing.T) {
 	if e["message"] != rawEvent {
 		t.Errorf("datadog message = %q", e["message"])
 	}
-	if e["ddsource"] != "massdriver" || e["service"] != "massdriver" || e["ddtags"] != "env:prod" || e["webhook_id"] != "4b0b5a8e-0f6c-4a53-9d0c-5a1f4ad5c1c2" {
+	if e["ddsource"] != "massdriver" || e["service"] != "massdriver" || e["ddtags"] != "env:prod,team:platform" || e["webhook_id"] != "4b0b5a8e-0f6c-4a53-9d0c-5a1f4ad5c1c2" {
 		t.Errorf("datadog entry = %v", e)
 	}
 }
@@ -186,7 +189,7 @@ func TestFailsUntilEverySinkWritesAndRetriesOnlyTheFailedSink(t *testing.T) {
 
 	h := automation.Handler(New([]Sink{
 		testS3Sink(s3srv.URL, S3Config{Bucket: "audit", Prefix: "md/events"}),
-		&DatadogSink{cfg: DatadogConfig{URL: ddSrv.URL + "/api/v2/logs", APIKey: "dd-key", Service: "massdriver"}, http: http.DefaultClient},
+		&DatadogSink{cfg: DatadogConfig{URL: ddSrv.URL, apiKey: "dd-key", Service: "massdriver"}, http: http.DefaultClient},
 	}), secret)
 
 	if code := deliver(t, h); code != http.StatusInternalServerError {
@@ -211,31 +214,85 @@ func TestFailsUntilEverySinkWritesAndRetriesOnlyTheFailedSink(t *testing.T) {
 	}
 }
 
-func TestLoadConfig(t *testing.T) {
-	t.Setenv("ARCHIVE_S3_BUCKET", "audit")
-	t.Setenv("ARCHIVE_S3_OBJECT_LOCK_MODE", "governance")
-	t.Setenv("ARCHIVE_S3_OBJECT_LOCK_DAYS", "30")
-	t.Setenv("SPLUNK_HEC_URL", "https://splunk.example.com:8088/")
-	t.Setenv("SPLUNK_HEC_TOKEN", "hec-token")
-	t.Setenv("DD_API_KEY", "dd-key")
-	t.Setenv("DD_SITE", "datadoghq.eu")
-
-	c, err := loadConfig()
+func TestConfigDefaults(t *testing.T) {
+	var c Config
+	err := automation.DecodeConfig([]byte(`
+s3:
+  bucket: audit
+  object_lock: {mode: governance, days: 30}
+splunk:
+  url: https://splunk.example.com:8088/
+datadog:
+  site: datadoghq.eu
+`), &c)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.s3.Prefix != "events" || c.s3.LockMode != types.ObjectLockModeGovernance || c.s3.LockDays != 30 {
-		t.Errorf("s3 = %+v", *c.s3)
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
 	}
-	if c.splunk.URL != "https://splunk.example.com:8088/services/collector/event" || c.splunk.Sourcetype != "massdriver:cloudevent" {
-		t.Errorf("splunk = %+v", *c.splunk)
+	if c.S3.Prefix != "events" || c.S3.ObjectLock.Mode != types.ObjectLockModeGovernance || c.S3.ObjectLock.Days != 30 {
+		t.Errorf("s3 = %+v", *c.S3)
 	}
-	if c.datadog.URL != "https://http-intake.logs.datadoghq.eu/api/v2/logs" {
-		t.Errorf("datadog url = %q", c.datadog.URL)
+	if c.Splunk.URL != "https://splunk.example.com:8088" || c.Splunk.TokenEnv != "SPLUNK_HEC_TOKEN" || c.Splunk.Sourcetype != "massdriver:cloudevent" {
+		t.Errorf("splunk = %+v", *c.Splunk)
 	}
+	if c.Datadog.URL != "https://http-intake.logs.datadoghq.eu" || c.Datadog.APIKeyEnv != "DD_API_KEY" || c.Datadog.Service != "massdriver" {
+		t.Errorf("datadog = %+v", *c.Datadog)
+	}
+}
 
-	t.Setenv("ARCHIVE_S3_OBJECT_LOCK_DAYS", "")
-	if _, err := loadConfig(); err == nil || err.Error() != "set both ARCHIVE_S3_OBJECT_LOCK_MODE and ARCHIVE_S3_OBJECT_LOCK_DAYS, or neither" {
-		t.Errorf("err = %v", err)
+func TestStartReadsTokensFromTheNamedEnvVars(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("splunk:\n  url: https://splunk.example.com:8088\n  token_env: HEC_TOKEN\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONFIG_FILE", path)
+	t.Setenv("HEC_TOKEN", "")
+	if _, err := Definition.New(); err == nil || err.Error() != "missing required env vars: [HEC_TOKEN]" {
+		t.Fatalf("err = %v", err)
+	}
+	t.Setenv("HEC_TOKEN", "hec-token")
+	a, err := Definition.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := a.(*Archiver).sinks[0].(*SplunkSink)
+	if sink.cfg.token != "hec-token" {
+		t.Fatalf("token = %q", sink.cfg.token)
+	}
+}
+
+func TestStartRefusesBadConfig(t *testing.T) {
+	cases := map[string]string{
+		"":         "no sink configured",
+		"s3: {}\n": "s3.bucket is required",
+		"s3: {bucket: a, object_lock: {mode: forever, days: 1}}\n": `s3.object_lock.mode must be GOVERNANCE or COMPLIANCE, got "FOREVER"`,
+		"s3: {bucket: a, object_lock: {mode: COMPLIANCE}}\n":       "s3.object_lock.days must be 1 or more",
+		"splunk: {index: main}\n":                                  "splunk.url is required",
+		"datadog: {site: datadoghq.eu, tags: env:prod}\n":          "cannot unmarshal",
+		"s3: {bucket: a, lock_days: 3}\n":                          "field lock_days not found",
+	}
+	for body, want := range cases {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("CONFIG_FILE", path)
+		_, err := Definition.New()
+		var ce *automation.ConfigError
+		if !errors.As(err, &ce) || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: err = %v, want a config error with %q", body, err, want)
+		}
+	}
+}
+
+func TestExampleConfigLoads(t *testing.T) {
+	var c Config
+	if err := automation.LoadConfigFile("config.example.yaml", &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.S3 == nil || c.Splunk == nil || c.Datadog == nil {
+		t.Fatalf("config = %+v", c)
 	}
 }

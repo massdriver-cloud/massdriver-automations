@@ -183,7 +183,7 @@ type root struct {
 	prefix string
 }
 
-// Links are relative so the files work from any host or path prefix when copied out of OUTPUT_DIR.
+// Links are relative so the files work from any host or path prefix when copied out of output_dir.
 func (s *StatusPage) roots(i int, slug string) []root {
 	r := []root{{dir: slug + "/", prefix: "../"}}
 	if i == 0 {

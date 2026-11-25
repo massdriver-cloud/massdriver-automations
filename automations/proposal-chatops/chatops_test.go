@@ -1,14 +1,14 @@
 package proposalchatops
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +17,8 @@ import (
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/slack"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/slack/slacktest"
 )
 
 var (
@@ -53,35 +55,6 @@ type call struct {
 	Body   map[string]any
 }
 
-type fakeSlack struct {
-	mu    sync.Mutex
-	calls []call
-}
-
-func (f *fakeSlack) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	var body map[string]any
-	b, _ := io.ReadAll(r.Body)
-	_ = json.Unmarshal(b, &body)
-	f.mu.Lock()
-	f.calls = append(f.calls, call{strings.TrimPrefix(r.URL.Path, "/"), body})
-	f.mu.Unlock()
-	if r.Header.Get("authorization") != "Bearer xoxb-test" {
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid_auth"})
-		return
-	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "channel": "C0DEPLOYS", "ts": "1700000000.000100"})
-}
-
-func (f *fakeSlack) methods() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := []string{}
-	for _, c := range f.calls {
-		out = append(out, c.Method)
-	}
-	return out
-}
-
 type fakeAPI struct {
 	mu       sync.Mutex
 	calls    []call
@@ -112,19 +85,17 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 type harness struct {
 	c       *Chatops
 	handler http.Handler
-	slack   *fakeSlack
+	slack   *slacktest.Server
 	api     *fakeAPI
 }
 
 func setup(t *testing.T) *harness {
 	t.Helper()
-	sl, api := &fakeSlack{}, &fakeAPI{}
-	slSrv, apiSrv := httptest.NewServer(sl), httptest.NewServer(api)
-	t.Cleanup(slSrv.Close)
+	sl, api := slacktest.NewServer(t), &fakeAPI{}
+	apiSrv := httptest.NewServer(api)
 	t.Cleanup(apiSrv.Close)
-	c := New(&massdriver.Client{Endpoint: apiSrv.URL, OrganizationID: "acme", APIKey: "md_test"}, Config{
-		SlackURL: slSrv.URL, SlackToken: "xoxb-test", SlackSigningSecret: slackSecret,
-		Channel: "#deploys", ChannelAttrKey: "slack-channel",
+	c := New(&massdriver.Client{Endpoint: apiSrv.URL, OrganizationID: "acme", APIKey: "md_test"}, sl.Bot(), slackSecret, Config{
+		Slack: SlackConfig{Channel: "#deploys", ChannelAttribute: "slack-channel"},
 	})
 	c.run = func(f func()) { f() }
 	return &harness{c: c, handler: automation.Handler(c, secret), slack: sl, api: api}
@@ -154,23 +125,26 @@ func (h *harness) click(actionID, user string) int {
 	})
 	body := []byte("payload=" + url.QueryEscape(string(payload)))
 	req := httptest.NewRequest(http.MethodPost, InteractionsPath, strings.NewReader(string(body)))
-	ts := strconv.FormatInt(time.Now().Unix(), 10)
-	mac := hmac.New(sha256.New, slackSecret)
-	mac.Write([]byte("v0:" + ts + ":"))
-	mac.Write(body)
-	req.Header.Set("X-Slack-Request-Timestamp", ts)
-	req.Header.Set("X-Slack-Signature", "v0="+hex.EncodeToString(mac.Sum(nil)))
+	slack.SignRequest(req, slackSecret, body, time.Now())
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, req)
 	return rec.Code
 }
 
-func blockText(blocks any, i int) string {
-	b := blocks.([]any)[i].(map[string]any)
+func blockText(blocks []any, i int) string {
+	b := blocks[i].(map[string]any)
 	if text, ok := b["text"].(map[string]any); ok {
 		return text["text"].(string)
 	}
 	return b["elements"].([]any)[0].(map[string]any)["text"].(string)
+}
+
+func methods(s *slacktest.Server) []string {
+	out := []string{}
+	for _, c := range s.Calls() {
+		out = append(out, c.Method)
+	}
+	return out
 }
 
 func TestProposedPostsMessageWithButtons(t *testing.T) {
@@ -181,19 +155,19 @@ func TestProposedPostsMessageWithButtons(t *testing.T) {
 	}
 	h.send(deploymentEvent("evt-1", "deployment.proposed", nil, "Jane Doe"))
 
-	if got := h.slack.methods(); len(got) != 1 || got[0] != "chat.postMessage" {
+	if got := methods(h.slack); len(got) != 1 || got[0] != "chat.postMessage" {
 		t.Fatalf("slack calls = %v", got)
 	}
-	body := h.slack.calls[0].Body
-	if body["channel"] != "#deploys" {
-		t.Errorf("channel = %v", body["channel"])
+	post := h.slack.Calls()[0]
+	if post.Channel != "#deploys" {
+		t.Errorf("channel = %v", post.Channel)
 	}
 	want := "*Deployment proposed* for `api-prod-database`\n*Action:* PROVISION   *Version:* 1.2.3\n" +
 		"*Proposed by:* jane@example.com\n*Message:* Bump the instance size"
-	if got := blockText(body["blocks"], 0); got != want {
+	if got := blockText(post.Blocks, 0); got != want {
 		t.Errorf("summary = %q", got)
 	}
-	buttons := body["blocks"].([]any)[1].(map[string]any)["elements"].([]any)
+	buttons := post.Blocks[1].(map[string]any)["elements"].([]any)
 	approve, reject := buttons[0].(map[string]any), buttons[1].(map[string]any)
 	if approve["action_id"] != "approve" || approve["value"] != deploymentID {
 		t.Errorf("approve button = %v", approve)
@@ -206,7 +180,7 @@ func TestProposedPostsMessageWithButtons(t *testing.T) {
 func TestChannelFromAttribute(t *testing.T) {
 	h := setup(t)
 	h.send(deploymentEvent("evt-1", "deployment.proposed", map[string]any{"slack-channel": "#payments-deploys"}, "Jane Doe"))
-	if got := h.slack.calls[0].Body["channel"]; got != "#payments-deploys" {
+	if got := h.slack.Calls()[0].Channel; got != "#payments-deploys" {
 		t.Fatalf("channel = %v", got)
 	}
 }
@@ -225,21 +199,21 @@ func TestApproveFromSlack(t *testing.T) {
 	if v := h.api.calls[0].Body; v["org"] != "acme" || v["id"] != deploymentID {
 		t.Errorf("variables = %v", v)
 	}
-	if got := h.slack.methods(); len(got) != 2 {
+	if got := methods(h.slack); len(got) != 2 {
 		t.Fatalf("slack calls = %v", got)
 	}
-	update := h.slack.calls[1]
-	if update.Method != "chat.update" || update.Body["channel"] != "C0DEPLOYS" || update.Body["ts"] != "1700000000.000100" {
-		t.Fatalf("update = %v", update)
+	update := h.slack.Calls()[1]
+	if update.Method != "chat.update" || update.Channel != "C0DEPLOYS" || update.TS != "1700000000.000100" {
+		t.Fatalf("update = %+v", update)
 	}
-	blocks := update.Body["blocks"].([]any)
+	blocks := update.Blocks
 	if len(blocks) != 2 || blockText(blocks, 1) != "Approved by <@U0SAM> in Slack" {
 		t.Errorf("blocks = %v", blocks)
 	}
 
 	// The approval event that the service account causes must not replace the Slack user.
 	h.send(deploymentEvent("evt-2", "deployment.approved", nil, "slack-chatops"))
-	if got := h.slack.methods(); len(got) != 2 {
+	if got := methods(h.slack); len(got) != 2 {
 		t.Errorf("slack calls = %v", got)
 	}
 }
@@ -252,10 +226,10 @@ func TestRejectFromSlackAfterRestart(t *testing.T) {
 	if len(h.api.calls) != 1 || h.api.calls[0].Method != "rejectDeployment" {
 		t.Fatalf("api calls = %v", h.api.calls)
 	}
-	if got := h.slack.methods(); len(got) != 1 || got[0] != "chat.update" {
+	if got := methods(h.slack); len(got) != 1 || got[0] != "chat.update" {
 		t.Fatalf("slack calls = %v", got)
 	}
-	blocks := h.slack.calls[0].Body["blocks"].([]any)
+	blocks := h.slack.Calls()[0].Blocks
 	if blockText(blocks, 0) != "summary from slack" || blockText(blocks, 1) != "Rejected by <@U0SAM> in Slack" {
 		t.Errorf("blocks = %v", blocks)
 	}
@@ -269,12 +243,12 @@ func TestFailedApprovalTellsUser(t *testing.T) {
 
 	h.click("approve", "U0SAM")
 
-	if got := h.slack.methods(); len(got) != 1 {
+	if got := methods(h.slack); len(got) != 1 {
 		t.Fatalf("slack calls = %v", got)
 	}
-	c := h.slack.calls[0]
-	if c.Method != "chat.postEphemeral" || c.Body["user"] != "U0SAM" || c.Body["text"] != "Approval failed: status: must be PROPOSED" {
-		t.Fatalf("call = %v", c)
+	c := h.slack.Calls()[0]
+	if c.Method != "chat.postEphemeral" || c.User != "U0SAM" || c.Text != "Approval failed: status: must be PROPOSED" {
+		t.Fatalf("call = %+v", c)
 	}
 
 	// The proposal is open again, so a second click calls the API again.
@@ -294,7 +268,7 @@ func TestUserNotAllowed(t *testing.T) {
 	if len(h.api.calls) != 0 {
 		t.Fatalf("api calls = %v", h.api.calls)
 	}
-	if c := h.slack.calls[0]; c.Method != "chat.postEphemeral" || c.Body["text"] != "You are not allowed to approve or reject deployments." {
+	if c := h.slack.Calls()[0]; c.Method != "chat.postEphemeral" || c.Text != "You are not allowed to approve or reject deployments." {
 		t.Fatalf("call = %v", c)
 	}
 }
@@ -304,10 +278,10 @@ func TestDecidedInMassdriverUpdatesMessage(t *testing.T) {
 	h.send(deploymentEvent("evt-1", "deployment.proposed", nil, "Jane Doe"))
 	h.send(deploymentEvent("evt-2", "deployment.rejected", nil, "Sam Lee"))
 
-	if got := h.slack.methods(); len(got) != 2 || got[1] != "chat.update" {
+	if got := methods(h.slack); len(got) != 2 || got[1] != "chat.update" {
 		t.Fatalf("slack calls = %v", got)
 	}
-	blocks := h.slack.calls[1].Body["blocks"].([]any)
+	blocks := h.slack.Calls()[1].Blocks
 	if len(blocks) != 2 || blockText(blocks, 1) != "Rejected by Sam Lee in Massdriver" {
 		t.Errorf("blocks = %v", blocks)
 	}
@@ -318,10 +292,10 @@ func TestDecisionBeforeProposalPostsDecided(t *testing.T) {
 	h.send(deploymentEvent("evt-2", "deployment.approved", nil, "Sam Lee"))
 	h.send(deploymentEvent("evt-1", "deployment.proposed", nil, "Jane Doe"))
 
-	if got := h.slack.methods(); len(got) != 1 || got[0] != "chat.postMessage" {
+	if got := methods(h.slack); len(got) != 1 || got[0] != "chat.postMessage" {
 		t.Fatalf("slack calls = %v", got)
 	}
-	blocks := h.slack.calls[0].Body["blocks"].([]any)
+	blocks := h.slack.Calls()[0].Blocks
 	if len(blocks) != 2 || blockText(blocks, 1) != "Approved by Sam Lee in Massdriver" {
 		t.Errorf("blocks = %v", blocks)
 	}
@@ -329,13 +303,13 @@ func TestDecisionBeforeProposalPostsDecided(t *testing.T) {
 
 func TestSlackFailureAsksForRetry(t *testing.T) {
 	h := setup(t)
-	h.c.slack.token = "xoxb-wrong"
+	h.slack.Fail("invalid_auth")
 	if code := h.send(deploymentEvent("evt-1", "deployment.proposed", nil, "Jane Doe")); code != http.StatusInternalServerError {
 		t.Fatalf("status = %d", code)
 	}
-	h.c.slack.token = "xoxb-test"
+	h.slack.Fail("")
 	h.send(deploymentEvent("evt-1", "deployment.proposed", nil, "Jane Doe"))
-	if got := h.slack.methods(); len(got) != 2 || got[1] != "chat.postMessage" {
+	if got := methods(h.slack); len(got) != 1 || got[0] != "chat.postMessage" {
 		t.Fatalf("slack calls = %v", got)
 	}
 }
@@ -355,7 +329,48 @@ func TestBadSlackSignature(t *testing.T) {
 func TestIgnoresOtherEvents(t *testing.T) {
 	h := setup(t)
 	h.send(deploymentEvent("evt-1", "deployment.completed", nil, "Jane Doe"))
-	if got := h.slack.methods(); len(got) != 0 {
+	if got := methods(h.slack); len(got) != 0 {
 		t.Fatalf("slack calls = %v", got)
+	}
+}
+
+func TestStartNeedsABotTokenAndAChannel(t *testing.T) {
+	t.Setenv("MASSDRIVER_ORGANIZATION_ID", "acme")
+	t.Setenv("MASSDRIVER_API_KEY", "md_test")
+	t.Setenv("SLACK_SIGNING_SECRET", "s")
+	t.Setenv("SLACK_BOT_TOKEN", "")
+	t.Setenv("SLACK_WEBHOOK_URL", "https://hooks.slack.com/services/T/B/x")
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	t.Setenv("CONFIG_FILE", path)
+
+	_, err := Definition.New()
+	var ce *automation.ConfigError
+	if !errors.As(err, &ce) || !strings.HasSuffix(err.Error(), "slack.channel is required") {
+		t.Fatalf("no config: err = %v", err)
+	}
+
+	if err := os.WriteFile(path, []byte("slack:\n  channel: \"#deploys\"\n  allowed_users: [U0LEAD]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Definition.New(); err == nil || err.Error() != "missing required env vars: [SLACK_BOT_TOKEN]" {
+		t.Fatalf("webhook only: err = %v", err)
+	}
+	t.Setenv("SLACK_BOT_TOKEN", "xoxb-1")
+	a, err := Definition.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := a.(*Chatops); !c.allowed["U0LEAD"] || !c.slack.HasBotToken() {
+		t.Fatalf("chatops = %+v", c)
+	}
+}
+
+func TestExampleConfigLoads(t *testing.T) {
+	var cfg Config
+	if err := automation.LoadConfigFile("config.example.yaml", &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Slack.Channel != "#deploys" || cfg.Slack.ChannelAttribute == "" || len(cfg.Slack.AllowedUsers) != 2 {
+		t.Fatalf("config = %+v", cfg)
 	}
 }

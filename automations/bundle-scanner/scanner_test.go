@@ -18,6 +18,8 @@ import (
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
+	slackpkg "github.com/massdriver-cloud/massdriver-automations/pkg/slack"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/slack/slacktest"
 )
 
 var secret = []byte("0123456789abcdef0123456789abcdef")
@@ -139,21 +141,6 @@ func digest(s string) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-type fakeSlack struct {
-	mu    sync.Mutex
-	texts []string
-}
-
-func (f *fakeSlack) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	var msg struct {
-		Text string `json:"text"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&msg)
-	f.mu.Lock()
-	f.texts = append(f.texts, msg.Text)
-	f.mu.Unlock()
-}
-
 // fakeTool writes a script that copies the scanned src/main.tf to seen and prints output, as the scanner would.
 func fakeTool(t *testing.T, name, output string, exitCode int, parse func([]byte) ([]finding, error)) (Tool, string) {
 	t.Helper()
@@ -175,7 +162,7 @@ type harness struct {
 	scanner *Scanner
 	handler http.Handler
 	md      *fakeMassdriver
-	slack   *fakeSlack
+	slack   *slacktest.Server
 	seen    []string
 }
 
@@ -184,21 +171,19 @@ func newHarness(t *testing.T, layers map[string]string, attrKey string) *harness
 	md := &fakeMassdriver{layers: layers}
 	mdSrv := httptest.NewServer(md)
 	t.Cleanup(mdSrv.Close)
-	slack := &fakeSlack{}
-	slackSrv := httptest.NewServer(slack)
-	t.Cleanup(slackSrv.Close)
+	sl := slacktest.NewServer(t)
 
 	trivy, trivySeen := fakeTool(t, "trivy", trivyOutput, 0, parseTrivy)
 	checkov, checkovSeen := fakeTool(t, "checkov", checkovOutput, 1, parseCheckov)
 
-	s := New(&massdriver.Client{Endpoint: mdSrv.URL + "/api/v2", OrganizationID: "acme", APIKey: "md_test"}, Config{
-		SlackWebhookURL: slackSrv.URL,
-		Tools:           []Tool{trivy, checkov},
+	s := New(&massdriver.Client{Endpoint: mdSrv.URL + "/api/v2", OrganizationID: "acme", APIKey: "md_test"}, sl.Bot(), Config{
+		Slack:           slackpkg.Config{Channel: "#bundles"},
+		tools:           []Tool{trivy, checkov},
 		FailSeverity:    "HIGH",
-		AttributeKey:    attrKey,
+		ResultAttribute: attrKey,
 		Timeout:         time.Minute,
 	})
-	return &harness{scanner: s, handler: automation.Handler(s, secret), md: md, slack: slack, seen: []string{trivySeen, checkovSeen}}
+	return &harness{scanner: s, handler: automation.Handler(s, secret), md: md, slack: sl, seen: []string{trivySeen, checkovSeen}}
 }
 
 // drain scans every queued job in the test goroutine.
@@ -232,8 +217,8 @@ func TestScansTheVersionThatThePublishAnnounced(t *testing.T) {
 
 	wantSlack := "Failed: IaC scan of *aws-aurora@1.2.3* (fails at HIGH or above): 0 critical, 1 high, 0 medium, 1 low, 1 unrated.\n" +
 		"• HIGH `AWS-0086` src/main.tf:1 — S3 Access block should block public ACL (trivy)"
-	if len(h.slack.texts) != 1 || h.slack.texts[0] != wantSlack {
-		t.Fatalf("slack = %q\nwant  %q", h.slack.texts, wantSlack)
+	if len(h.slack.Texts()) != 1 || h.slack.Texts()[0] != wantSlack {
+		t.Fatalf("slack = %q\nwant  %q", h.slack.Texts(), wantSlack)
 	}
 
 	if len(h.md.updates) != 1 {
@@ -262,8 +247,8 @@ func TestPassesWhenNoFindingReachesTheThreshold(t *testing.T) {
 	h.drain()
 
 	want := "Passed: IaC scan of *aws-aurora@1.2.3* (fails at CRITICAL or above): 0 critical, 1 high, 0 medium, 1 low, 1 unrated."
-	if len(h.slack.texts) != 1 || h.slack.texts[0] != want {
-		t.Fatalf("slack = %q", h.slack.texts)
+	if len(h.slack.Texts()) != 1 || h.slack.Texts()[0] != want {
+		t.Fatalf("slack = %q", h.slack.Texts())
 	}
 	if got := h.md.updates[0]["input"].(map[string]any)["attributes"]; got != `{"owner":"platform","scan":"passed"}` {
 		t.Errorf("attributes = %v", got)
@@ -277,11 +262,11 @@ func TestScansEachVersionOnce(t *testing.T) {
 	post(t, h.handler, repoPublished("evt-2", "aws-aurora", bundleArtifactType, eventTime))
 	h.drain()
 
-	if len(h.slack.texts) != 1 {
-		t.Fatalf("slack posts = %d, want 1", len(h.slack.texts))
+	if len(h.slack.Texts()) != 1 {
+		t.Fatalf("slack posts = %d, want 1", len(h.slack.Texts()))
 	}
 	if len(h.md.updates) != 0 {
-		t.Errorf("updates = %v, want none without SCAN_ATTRIBUTE_KEY", h.md.updates)
+		t.Errorf("updates = %v, want none without result_attribute", h.md.updates)
 	}
 }
 
@@ -291,8 +276,8 @@ func TestRefusesAFileNameOutsideTheBundle(t *testing.T) {
 	post(t, h.handler, repoPublished("evt-1", "aws-aurora", bundleArtifactType, eventTime))
 	h.drain()
 
-	if len(h.slack.texts) != 1 || !strings.HasPrefix(h.slack.texts[0], "Error: IaC scan of *aws-aurora@1.2.3* did not finish: pull: layer sha256:") {
-		t.Fatalf("slack = %q", h.slack.texts)
+	if len(h.slack.Texts()) != 1 || !strings.HasPrefix(h.slack.Texts()[0], "Error: IaC scan of *aws-aurora@1.2.3* did not finish: pull: layer sha256:") {
+		t.Fatalf("slack = %q", h.slack.Texts())
 	}
 	if len(h.md.updates) != 0 {
 		t.Errorf("updates = %v, want none after a failed scan", h.md.updates)
@@ -333,5 +318,62 @@ func TestParseCheckovSingleFramework(t *testing.T) {
 	}
 	if len(fs) != 1 || fs[0] != (finding{Tool: "checkov", ID: "CKV_AWS_1", Title: "n", Severity: "CRITICAL", File: "a.tf", Line: 4}) {
 		t.Fatalf("findings = %+v", fs)
+	}
+}
+
+func TestPostsToTheConfiguredChannel(t *testing.T) {
+	h := newHarness(t, map[string]string{"src/main.tf": mainTF}, "")
+	post(t, h.handler, repoPublished("evt-1", "aws-aurora", bundleArtifactType, eventTime))
+	h.drain()
+	calls := h.slack.Calls()
+	if len(calls) != 1 || calls[0].Method != "chat.postMessage" || calls[0].Channel != "#bundles" {
+		t.Fatalf("calls = %+v", calls)
+	}
+}
+
+func TestNoChannelPostsNothing(t *testing.T) {
+	h := newHarness(t, map[string]string{"src/main.tf": mainTF}, "")
+	h.scanner.cfg.Slack.Channel = ""
+	post(t, h.handler, repoPublished("evt-1", "aws-aurora", bundleArtifactType, eventTime))
+	h.drain()
+	if calls := h.slack.Calls(); len(calls) != 0 {
+		t.Fatalf("calls = %+v", calls)
+	}
+}
+
+func TestConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.tools) != 2 || cfg.FailSeverity != "HIGH" || cfg.Timeout != 10*time.Minute {
+		t.Fatalf("default config = %+v", cfg)
+	}
+
+	for body, want := range map[string]string{
+		"fail_severity: severe\n": `fail_severity "SEVERE"`,
+		"scanners: [tfsec]\n":     `unknown scanner "tfsec"`,
+		"scanners: []\n":          "scanners: set trivy, checkov, or both",
+		"timeout: 0s\n":           "timeout must be more than 0",
+		"timeout: soon\n":         "cannot unmarshal",
+	} {
+		cfg := DefaultConfig()
+		err := automation.DecodeConfig([]byte(body), &cfg)
+		if err == nil {
+			err = cfg.Validate()
+		}
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: err = %v, want %q", body, err, want)
+		}
+	}
+}
+
+func TestExampleConfigLoads(t *testing.T) {
+	cfg := DefaultConfig()
+	if err := automation.LoadConfigFile("config.example.yaml", &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Slack.Channel == "" || cfg.ResultAttribute == "" {
+		t.Fatalf("config = %+v", cfg)
 	}
 }

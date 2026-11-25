@@ -1,0 +1,18 @@
+# rollback-on-failure config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+# Every key is optional. Without a config file, instances with autorollback=true opt in, and notices go to the
+# logs and to the Slack webhook, if one is set.
+
+# The attribute key and value that opt an instance in. The key must be a component custom attribute that allows
+# the value.
+attribute:
+  key: autorollback
+  value: "true"
+
+slack:
+  # The channel for rollback notices, with SLACK_BOT_TOKEN. The rollback's result is a reply in the notice's thread.
+  # Empty posts nothing. Ignored with only SLACK_WEBHOOK_URL.
+  channel: "#deploys"
+
+massdriver:
+  # The Massdriver UI, for the links in notices. Default: https://app.massdriver.cloud.
+  app_url: https://app.massdriver.cloud

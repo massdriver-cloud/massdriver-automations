@@ -58,15 +58,15 @@ var Definition = automation.Definition{
 	Description: "Serves a public status page from alarms, instances, and deployments.",
 	Events:      events,
 	New: func() (automation.Automation, error) {
+		cfg, err := LoadConfig(automation.ConfigPath())
+		if err != nil {
+			return nil, err
+		}
 		api, err := massdriver.FromEnv()
 		if err != nil {
 			return nil, err
 		}
-		cfg, err := LoadConfig(automation.Env("STATUSPAGE_CONFIG", "./statuspage.yaml"))
-		if err != nil {
-			return nil, err
-		}
-		s, err := New(api, cfg, os.Getenv("STATE_DIR"), os.Getenv("OUTPUT_DIR"))
+		s, err := New(api, cfg, os.Getenv("STATE_DIR"), cfg.OutputDir)
 		if err != nil {
 			return nil, err
 		}

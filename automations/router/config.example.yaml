@@ -1,0 +1,70 @@
+# router config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+# Required: at least one route. examples/ has more routes.
+
+# The expression language of every expression in the file: jq (default) or go (Go text/template).
+engine: jq
+
+routes:
+  - # Required. Unique. The logs name the route.
+    name: page-on-prod-failure
+    # Required. Event types, such as deployment.failed. <entity>.* selects every event type of one entity.
+    # The event destination must send each of them.
+    events: [deployment.failed]
+    # Attributes that the event's entity must have, each with exactly this value.
+    match:
+      md-environment: prod
+    # An expression. The route runs only when jq outputs true, or the Go template renders true.
+    when: '.data.metadata.deployment_action == "PROVISION"'
+    # false (default): run before the response, within 8s, and respond 500 on a failure so Massdriver retries.
+    # true: queue the route, respond, and only log a failure.
+    async: false
+    # The time for every step of the route. Default: 8s, the most for a sync route. Default for async: 1m.
+    timeout: 5s
+    # Required. The steps, in order. Each step has exactly one of http, exec, and massdriver.
+    do:
+      - http:
+          # Default: POST.
+          method: POST
+          # Text. Each \(expr) is replaced with the output of the jq expression.
+          url: https://events.pagerduty.com/v2/enqueue
+          # Header values are text, like url. env.NAME reads an environment variable of the router.
+          headers:
+            X-Routing-Key: '\(env.PAGERDUTY_ROUTING_KEY)'
+          # An expression. Its output is sent as JSON.
+          body: |
+            {
+              routing_key: env.PAGERDUTY_ROUTING_KEY,
+              event_action: "trigger",
+              dedup_key: .id,
+              payload: {
+                summary: "Deployment of \(.data.attributes["md-instance"]) failed",
+                source: .data.attributes["md-instance"],
+                severity: "error"
+              }
+            }
+
+  - name: purge-environment-bucket
+    events: [environment.deleted]
+    async: true
+    timeout: 5m
+    do:
+      # The program and its arguments, each text with \(expr). No shell runs it. Needs the -scripts image.
+      - exec: [/scripts/purge-bucket.py, '\(.data.entity.identifier)']
+
+  - name: plan-on-version-change
+    events: [instance.updated]
+    match:
+      md-environment: staging
+    when: '.data.entity.params != null'
+    do:
+      # One operation against the Massdriver V2 GraphQL API, as the service account of MASSDRIVER_API_KEY.
+      - massdriver:
+          query: |
+            mutation PlanInstance($org: ID!, $id: ID!, $input: CreateDeploymentInput!) {
+              createDeployment(organizationId: $org, id: $id, input: $input) {
+                successful
+                messages { field message }
+              }
+            }
+          # An expression that outputs the variables. $org defaults to MASSDRIVER_ORGANIZATION_ID.
+          variables: '{id: .data.entity.identifier, input: {action: "PLAN", params: (.data.entity.params | tojson)}}'

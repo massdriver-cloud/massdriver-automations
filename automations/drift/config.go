@@ -1,15 +1,17 @@
 package drift
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"regexp"
 	"time"
 
 	"github.com/robfig/cron/v3"
 	"gopkg.in/yaml.v3"
+
+	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/slack"
 )
 
 // Modes and resolve sources of a check.
@@ -29,24 +31,27 @@ const (
 	DefaultResourcePattern = `(?m)^\s*# \S+.* (?:will be|must be) .*$`
 )
 
-// Config is the parsed drift.yaml.
+// Config is the config file of drift.
 type Config struct {
-	Checks []Check `yaml:"checks"`
+	// Slack is where alerts go when a check does not name its own channel.
+	Slack      slack.Config         `yaml:"slack"`
+	Massdriver massdriver.AppConfig `yaml:"massdriver"`
+	Checks     []Check              `yaml:"checks"`
 }
 
 // Check is one set of instances to plan on a schedule.
 type Check struct {
-	Name            string            `yaml:"name"`
-	Schedule        string            `yaml:"schedule"`
-	Timezone        string            `yaml:"timezone"`
-	Match           map[string]Values `yaml:"match"`
-	Mode            string            `yaml:"mode"`
-	ResolveWith     string            `yaml:"resolve_with"`
-	SlackWebhookURL string            `yaml:"slack_webhook_url"`
-	NotifyClean     bool              `yaml:"notify_clean"`
-	Summary         bool              `yaml:"summary"`
-	MaxConcurrent   int               `yaml:"max_concurrent"`
-	Patterns        Patterns          `yaml:"patterns"`
+	Name          string            `yaml:"name"`
+	Schedule      string            `yaml:"schedule"`
+	Timezone      string            `yaml:"timezone"`
+	Match         map[string]Values `yaml:"match"`
+	Mode          string            `yaml:"mode"`
+	ResolveWith   string            `yaml:"resolve_with"`
+	Slack         slack.Config      `yaml:"slack"`
+	NotifyClean   bool              `yaml:"notify_clean"`
+	Summary       bool              `yaml:"summary"`
+	MaxConcurrent int               `yaml:"max_concurrent"`
+	Patterns      Patterns          `yaml:"patterns"`
 
 	clean, drift, resource *regexp.Regexp
 }
@@ -75,30 +80,20 @@ func (v *Values) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
-// LoadConfig reads and checks the config file at path.
-func LoadConfig(path string) (*Config, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return ParseConfig(b)
-}
-
-// ParseConfig parses and checks a drift.yaml document.
+// ParseConfig decodes and checks a config document.
 func ParseConfig(b []byte) (*Config, error) {
-	dec := yaml.NewDecoder(bytes.NewReader(b))
-	dec.KnownFields(true)
 	var c Config
-	if err := dec.Decode(&c); err != nil {
+	if err := automation.DecodeConfig(b, &c); err != nil {
 		return nil, err
 	}
-	if err := c.check(); err != nil {
+	if err := c.Validate(); err != nil {
 		return nil, err
 	}
 	return &c, nil
 }
 
-func (c *Config) check() error {
+// Validate checks every check and fills its defaults.
+func (c *Config) Validate() error {
 	var errs []error
 	fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
 
@@ -166,6 +161,15 @@ func (c *Config) check() error {
 		ch.resource = compile("resource", ch.Patterns.Resource, DefaultResourcePattern)
 	}
 	return errors.Join(errs...)
+}
+
+// channels returns every channel that the config names.
+func (c *Config) channels() []string {
+	out := []string{c.Slack.Channel}
+	for _, ch := range c.Checks {
+		out = append(out, ch.Slack.Channel)
+	}
+	return out
 }
 
 func (ch *Check) spec() string { return "CRON_TZ=" + ch.Timezone + " " + ch.Schedule }

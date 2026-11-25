@@ -2,9 +2,12 @@ package rollbackonfailure
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +15,7 @@ import (
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/slack/slacktest"
 )
 
 var secret = []byte("0123456789abcdef0123456789abcdef")
@@ -76,22 +80,11 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 }
 
-type fakeSlack struct {
-	mu    sync.Mutex
-	texts []string
-}
-
-func (s *fakeSlack) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Text string `json:"text"`
-	}
-	_ = json.NewDecoder(r.Body).Decode(&body)
-	s.mu.Lock()
-	s.texts = append(s.texts, body.Text)
-	s.mu.Unlock()
-}
-
 func failedEvent(id, action string, entity map[string]any, attrs map[string]any) []byte {
+	return deploymentEvent(id, "deployment.failed", action, entity, attrs)
+}
+
+func deploymentEvent(id, typ, action string, entity map[string]any, attrs map[string]any) []byte {
 	base := map[string]any{"id": "failed-dep", "message": "Bump the instance size", "created_at": "2026-11-25T12:00:00.000000Z"}
 	for k, v := range entity {
 		base[k] = v
@@ -108,7 +101,7 @@ func failedEvent(id, action string, entity map[string]any, attrs map[string]any)
 	}
 	b, _ := json.Marshal(map[string]any{
 		"id":      id,
-		"type":    "deployment.failed",
+		"type":    typ,
 		"subject": "mri:acme:api:prod:deployment:failed-dep",
 		"data": map[string]any{
 			"entity":     base,
@@ -123,21 +116,20 @@ func completed(id, version, createdAt string) map[string]any {
 	return map[string]any{"id": id, "version": version, "createdAt": createdAt}
 }
 
-func setup(t *testing.T, api *fakeAPI) (http.Handler, *fakeSlack) {
+func testConfig() Config {
+	cfg := DefaultConfig()
+	cfg.Slack.Channel = "#deploys"
+	cfg.Massdriver.AppURL = "https://app.example.com/"
+	return cfg
+}
+
+func setup(t *testing.T, api *fakeAPI) (http.Handler, *slacktest.Server) {
 	t.Helper()
 	apiSrv := httptest.NewServer(api)
 	t.Cleanup(apiSrv.Close)
-	slack := &fakeSlack{}
-	slackSrv := httptest.NewServer(slack)
-	t.Cleanup(slackSrv.Close)
-
-	r := New(&massdriver.Client{Endpoint: apiSrv.URL, OrganizationID: "acme", APIKey: "md_test"}, Config{
-		AttrKey:         "autorollback",
-		AttrValue:       "true",
-		SlackWebhookURL: slackSrv.URL,
-		AppURL:          "https://app.example.com/",
-	})
-	return automation.Handler(r, secret), slack
+	sl := slacktest.NewServer(t)
+	r := New(&massdriver.Client{Endpoint: apiSrv.URL, OrganizationID: "acme", APIKey: "md_test"}, sl.Bot(), testConfig())
+	return automation.Handler(r, secret), sl
 }
 
 func post(t *testing.T, h http.Handler, body []byte) int {
@@ -186,8 +178,8 @@ func TestRollsBackToLastCompletedProvision(t *testing.T) {
 		"of <https://app.example.com/orgs/acme/projects/api/environments/prod/instances/database|api-prod-database> failed. " +
 		"Rollback <https://app.example.com/orgs/acme/projects/api/environments/prod/instances/database?deployment=rollback-dep&tab=history|rollback-dep> " +
 		"restores deployment <https://app.example.com/orgs/acme/projects/api/environments/prod/instances/database?deployment=good-dep&tab=history|good-dep> (v1.2.3)."
-	if len(slack.texts) != 1 || slack.texts[0] != want {
-		t.Errorf("slack = %q", slack.texts)
+	if len(slack.Texts()) != 1 || slack.Texts()[0] != want {
+		t.Errorf("slack = %q", slack.Texts())
 	}
 }
 
@@ -226,8 +218,8 @@ func TestLeavesTheProposalWhenApprovalIsRefused(t *testing.T) {
 	if got := strings.Join(ops(api), ","); got != "InstanceDeployments,RollbackDeployment,ApproveDeployment" {
 		t.Fatalf("calls = %s", got)
 	}
-	if len(slack.texts) != 1 || !strings.Contains(slack.texts[0], "waits for approval: approveDeployment: separationOfDuty: is enabled on environment api-prod") {
-		t.Errorf("slack = %q", slack.texts)
+	if len(slack.Texts()) != 1 || !strings.Contains(slack.Texts()[0], "waits for approval: approveDeployment: separationOfDuty: is enabled on environment api-prod") {
+		t.Errorf("slack = %q", slack.Texts())
 	}
 }
 
@@ -302,8 +294,8 @@ func TestSkips(t *testing.T) {
 			if tc.wantSlack != "" {
 				wantSlack = []string{tc.wantSlack}
 			}
-			if strings.Join(slack.texts, "|") != strings.Join(wantSlack, "|") || len(slack.texts) != len(wantSlack) {
-				t.Errorf("slack = %q, want %q", slack.texts, wantSlack)
+			if strings.Join(slack.Texts(), "|") != strings.Join(wantSlack, "|") || len(slack.Texts()) != len(wantSlack) {
+				t.Errorf("slack = %q, want %q", slack.Texts(), wantSlack)
 			}
 		})
 	}
@@ -314,9 +306,91 @@ func TestReturnsErrorWhenTheAPIIsDown(t *testing.T) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
 	defer srv.Close()
-	r := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, Config{AttrKey: "autorollback", AttrValue: "true"})
+	r := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, nil, DefaultConfig())
 
 	if code := post(t, automation.Handler(r, secret), failedEvent("evt-1", "PROVISION", nil, nil)); code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", code)
+	}
+}
+
+const rollbackLink = "<https://app.example.com/orgs/acme/projects/api/environments/prod/instances/database?deployment=rollback-dep&tab=history|rollback-dep>"
+
+func TestRollbackOutcomeRepliesInTheNoticeThread(t *testing.T) {
+	api := &fakeAPI{lastCompleted: []any{completed("good-dep", "1.2.3", "2026-11-24T09:00:00Z")}}
+	h, slack := setup(t, api)
+
+	post(t, h, failedEvent("evt-1", "PROVISION", nil, nil))
+	post(t, h, deploymentEvent("evt-2", "deployment.completed", "PROVISION", map[string]any{"id": "someone-elses"}, nil))
+	post(t, h, deploymentEvent("evt-3", "deployment.completed", "PROVISION", map[string]any{"id": "rollback-dep", "message": "Rollback to deployment good-dep (v1.2.3)"}, nil))
+
+	calls := slack.Calls()
+	if len(calls) != 2 {
+		t.Fatalf("slack = %+v", calls)
+	}
+	if calls[0].Channel != "#deploys" || calls[0].ThreadTS != "" {
+		t.Errorf("notice = %+v", calls[0])
+	}
+	if calls[1].Channel != "CDEPLOYS" || calls[1].ThreadTS != calls[0].TS || calls[1].Text != "Rollback "+rollbackLink+" completed." {
+		t.Errorf("reply = %+v", calls[1])
+	}
+}
+
+func TestFailedRollbackRepliesInTheNoticeThread(t *testing.T) {
+	api := &fakeAPI{lastCompleted: []any{completed("good-dep", "1.2.3", "2026-11-24T09:00:00Z")}}
+	h, slack := setup(t, api)
+
+	post(t, h, failedEvent("evt-1", "PROVISION", nil, nil))
+	post(t, h, failedEvent("evt-2", "PROVISION", map[string]any{"id": "rollback-dep", "rollback_of_deployment_id": "good-dep"}, nil))
+
+	calls := slack.Calls()
+	if len(calls) != 2 || calls[1].ThreadTS != calls[0].TS ||
+		!strings.HasPrefix(calls[1].Text, "Rollback "+rollbackLink+" of ") || !strings.HasSuffix(calls[1].Text, "The instance needs attention.") {
+		t.Fatalf("slack = %+v", calls)
+	}
+}
+
+func TestOtherCompletedDeploymentsPostNothing(t *testing.T) {
+	api := &fakeAPI{}
+	h, slack := setup(t, api)
+	if code := post(t, h, deploymentEvent("evt-1", "deployment.completed", "PROVISION", nil, nil)); code != http.StatusNoContent {
+		t.Fatalf("status = %d", code)
+	}
+	if len(api.calls) != 0 || len(slack.Calls()) != 0 {
+		t.Fatalf("api = %v, slack = %+v", api.calls, slack.Calls())
+	}
+}
+
+func TestConfigSelectsTheAttribute(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("attribute: {key: rollback, value: \"yes\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONFIG_FILE", path)
+	t.Setenv("MASSDRIVER_ORGANIZATION_ID", "acme")
+	t.Setenv("MASSDRIVER_API_KEY", "md_test")
+	a, err := Definition.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := a.(*Rollback).cfg.Attribute; got != (Attribute{Key: "rollback", Value: "yes"}) {
+		t.Fatalf("attribute = %+v", got)
+	}
+
+	if err := os.WriteFile(path, []byte("attribute: {key: \"\"}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var ce *automation.ConfigError
+	if _, err := Definition.New(); !errors.As(err, &ce) || !strings.HasSuffix(err.Error(), "attribute.key and attribute.value must not be empty") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestExampleConfigLoads(t *testing.T) {
+	cfg := DefaultConfig()
+	if err := automation.LoadConfigFile("config.example.yaml", &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Attribute.Key != "autorollback" || cfg.Slack.Channel == "" {
+		t.Fatalf("config = %+v", cfg)
 	}
 }

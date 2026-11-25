@@ -1,7 +1,6 @@
 package statuspage
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -11,9 +10,11 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 )
 
-// Config is the parsed statuspage.yaml.
+// Config is the config file of statuspage.
 type Config struct {
 	Site                 SiteConfig     `yaml:"site"`
 	HistoryDays          int            `yaml:"history_days"`
@@ -23,6 +24,8 @@ type Config struct {
 	Announcements        []Announcement `yaml:"announcements"`
 	Maintenance          []Maintenance  `yaml:"maintenance"`
 	Pages                []PageConfig   `yaml:"pages"`
+	// OutputDir is a directory that gets the static site after each change.
+	OutputDir string `yaml:"output_dir"`
 
 	location *time.Location
 	template string
@@ -120,20 +123,11 @@ var (
 	levels       = map[string]bool{"info": true, "warning": true, "critical": true}
 )
 
-// LoadConfig reads and checks the config file at path.
+// LoadConfig reads and checks the config file at path, and the template file it names.
 func LoadConfig(path string) (*Config, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	dec := yaml.NewDecoder(bytes.NewReader(b))
-	dec.KnownFields(true)
 	var c Config
-	if err := dec.Decode(&c); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
-	if err := c.check(); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+	if err := automation.LoadConfigFile(path, &c); err != nil {
+		return nil, err
 	}
 	if c.Site.Template != "" {
 		p := c.Site.Template
@@ -142,14 +136,15 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		t, err := os.ReadFile(p)
 		if err != nil {
-			return nil, fmt.Errorf("site.template: %w", err)
+			return nil, &automation.ConfigError{Path: path, Err: fmt.Errorf("site.template: %w", err)}
 		}
 		c.template = string(t)
 	}
 	return &c, nil
 }
 
-func (c *Config) check() error {
+// Validate checks the config and fills its defaults.
+func (c *Config) Validate() error {
 	var errs []error
 	fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(format, args...)) }
 

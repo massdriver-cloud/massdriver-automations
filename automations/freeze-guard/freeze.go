@@ -2,14 +2,12 @@
 package freezeguard
 
 import (
-	"bytes"
 	"context"
 	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -21,6 +19,7 @@ import (
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/slack"
 )
 
 const automationName = "freeze-guard"
@@ -44,26 +43,19 @@ var Definition = automation.Definition{
 	Description: "Adds deny policies for deployment actions to groups during change freeze windows.",
 	Events:      []string{"group.created", "group.updated", "group.deleted"},
 	New: func() (automation.Automation, error) {
+		var cfg Config
+		if err := automation.LoadConfig(&cfg); err != nil {
+			return nil, err
+		}
 		api, err := massdriver.FromEnv()
 		if err != nil {
 			return nil, err
 		}
-		v, err := automation.RequireEnv("FREEZE_WINDOWS_FILE")
-		if err != nil {
-			return nil, err
-		}
-		b, err := os.ReadFile(v["FREEZE_WINDOWS_FILE"])
-		if err != nil {
-			return nil, err
-		}
-		windows, err := ParseWindows(b)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", v["FREEZE_WINDOWS_FILE"], err)
-		}
-		g, err := New(api, windows, Options{
-			StateDir:        os.Getenv("STATE_DIR"),
-			AdminToken:      os.Getenv("FREEZE_ADMIN_TOKEN"),
-			SlackWebhookURL: os.Getenv("SLACK_WEBHOOK_URL"),
+		sl := slack.FromEnv()
+		sl.WarnIgnoredChannels(slog.Default(), cfg.channels()...)
+		g, err := New(api, sl, cfg.windows, Options{
+			StateDir:   os.Getenv("STATE_DIR"),
+			AdminToken: os.Getenv("FREEZE_ADMIN_TOKEN"),
 		})
 		if err != nil {
 			return nil, err
@@ -75,14 +67,14 @@ var Definition = automation.Definition{
 
 // Options are the settings that come from the environment.
 type Options struct {
-	StateDir        string
-	AdminToken      string
-	SlackWebhookURL string
+	StateDir   string
+	AdminToken string
 }
 
 // Guard keeps one deny policy on each non-exempt group for each active window.
 type Guard struct {
 	api     *massdriver.Client
+	slack   *slack.Client
 	windows []Window
 	opts    Options
 	now     func() time.Time
@@ -96,12 +88,12 @@ type Guard struct {
 }
 
 // New returns the automation with its state loaded from opts.StateDir.
-func New(api *massdriver.Client, windows []Window, opts Options) (*Guard, error) {
+func New(api *massdriver.Client, sl *slack.Client, windows []Window, opts Options) (*Guard, error) {
 	st, found, err := loadState(opts.StateDir)
 	if err != nil {
 		return nil, fmt.Errorf("state: %w", err)
 	}
-	return &Guard{api: api, windows: windows, opts: opts, now: time.Now, wake: make(chan struct{}, 1), st: st, adopt: !found}, nil
+	return &Guard{api: api, slack: sl, windows: windows, opts: opts, now: time.Now, wake: make(chan struct{}, 1), st: st, adopt: !found}, nil
 }
 
 // Run reconciles at start, every interval, and after each group event, until ctx ends.
@@ -566,10 +558,10 @@ func (g *Guard) announce(ctx context.Context, w Window, active bool, groups map[
 		text = fmt.Sprintf("Freeze window %q ended. Removed its deny policies.", w.Name)
 	}
 	automation.Logger(ctx).Info(msg, "window", w.Name)
-	if g.opts.SlackWebhookURL == "" {
+	if !g.slack.Sends(w.Slack.Channel) {
 		return
 	}
-	if err := g.notify(ctx, text); err != nil {
+	if _, err := g.slack.Post(ctx, slack.Message{Channel: w.Slack.Channel, Text: text}); err != nil {
 		automation.Logger(ctx).Error("slack post failed", "window", w.Name, "err", err)
 	}
 }
@@ -579,26 +571,4 @@ func list(names []string) string {
 		return "none"
 	}
 	return strings.Join(names, ", ")
-}
-
-func (g *Guard) notify(ctx context.Context, text string) error {
-	body, err := json.Marshal(map[string]string{"text": text})
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.opts.SlackWebhookURL, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("content-type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return automation.RedactURL(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return errors.New(resp.Status + ": " + string(b))
-	}
-	return nil
 }

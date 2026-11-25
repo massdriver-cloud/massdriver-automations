@@ -5,31 +5,28 @@ package proposalchatops
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	_ "embed"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/slack"
 )
 
 // InteractionsPath receives Slack's interactivity requests.
 const InteractionsPath = "/slack/interactions"
 
 const (
-	slackTolerance = 5 * time.Minute
-	maxBodyBytes   = 1 << 20
-	postRetention  = 30 * 24 * time.Hour
-	resolving      = "resolving"
+	maxBodyBytes  = 1 << 20
+	postRetention = 30 * 24 * time.Hour
+	resolving     = "resolving"
 )
 
 var (
@@ -45,44 +42,46 @@ var Definition = automation.Definition{
 	Description: "Posts proposed deployments to Slack with Approve and Reject buttons.",
 	Events:      []string{"deployment.proposed", "deployment.approved", "deployment.rejected"},
 	New: func() (automation.Automation, error) {
+		var cfg Config
+		if err := automation.LoadConfig(&cfg); err != nil {
+			return nil, err
+		}
 		api, err := massdriver.FromEnv()
 		if err != nil {
 			return nil, err
 		}
-		v, err := automation.RequireEnv("SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET", "SLACK_CHANNEL")
+		// Buttons need chat.update and interactivity, which a webhook cannot do.
+		if _, err := automation.RequireEnv("SLACK_BOT_TOKEN"); err != nil {
+			return nil, err
+		}
+		signingSecret, err := slack.SigningSecretFromEnv()
 		if err != nil {
 			return nil, err
 		}
-		return New(api, Config{
-			SlackURL:           "https://slack.com/api",
-			SlackToken:         v["SLACK_BOT_TOKEN"],
-			SlackSigningSecret: []byte(v["SLACK_SIGNING_SECRET"]),
-			Channel:            v["SLACK_CHANNEL"],
-			ChannelAttrKey:     automation.Env("SLACK_CHANNEL_ATTR_KEY", ""),
-			AllowedUsers:       splitList(automation.Env("SLACK_ALLOWED_USERS", "")),
-		}), nil
+		return New(api, slack.FromEnv(), signingSecret, cfg), nil
 	},
 }
 
-// Config is the Slack side of the automation.
+// Config is the config file of proposal-chatops.
 type Config struct {
-	SlackURL           string
-	SlackToken         string
-	SlackSigningSecret []byte
-	Channel            string
-	ChannelAttrKey     string
-	// AllowedUsers are Slack user IDs. Empty allows everybody in the channel.
-	AllowedUsers []string
+	Slack SlackConfig `yaml:"slack"`
 }
 
-func splitList(s string) []string {
-	var out []string
-	for _, v := range strings.Split(s, ",") {
-		if v = strings.TrimSpace(v); v != "" {
-			out = append(out, v)
-		}
+// SlackConfig is where proposals go and who can decide them.
+type SlackConfig struct {
+	Channel string `yaml:"channel"`
+	// ChannelAttribute names an attribute whose value, when an instance has it, replaces Channel.
+	ChannelAttribute string `yaml:"channel_attribute"`
+	// AllowedUsers are Slack user IDs. Empty allows everybody in the channel.
+	AllowedUsers []string `yaml:"allowed_users"`
+}
+
+// Validate requires the default channel.
+func (c *Config) Validate() error {
+	if c.Slack.Channel == "" {
+		return errors.New("slack.channel is required")
 	}
-	return out
+	return nil
 }
 
 // post is the Slack message of one proposed deployment. outcome is empty while the proposal is open.
@@ -96,11 +95,12 @@ type post struct {
 
 // Chatops holds the clients and the Slack message of each proposal.
 type Chatops struct {
-	api     *massdriver.Client
-	slack   *slack
-	cfg     Config
-	allowed map[string]bool
-	run     func(func())
+	api           *massdriver.Client
+	slack         *slack.Client
+	signingSecret []byte
+	cfg           Config
+	allowed       map[string]bool
+	run           func(func())
 
 	// Massdriver events are handled one at a time, so a proposal and its decision cannot race each other.
 	events sync.Mutex
@@ -110,17 +110,18 @@ type Chatops struct {
 }
 
 // New returns the automation.
-func New(api *massdriver.Client, cfg Config) *Chatops {
+func New(api *massdriver.Client, sl *slack.Client, signingSecret []byte, cfg Config) *Chatops {
 	c := &Chatops{
-		api:   api,
-		slack: &slack{url: cfg.SlackURL, token: cfg.SlackToken},
-		cfg:   cfg,
-		run:   func(f func()) { go f() },
-		posts: map[string]*post{},
+		api:           api,
+		slack:         sl,
+		signingSecret: signingSecret,
+		cfg:           cfg,
+		run:           func(f func()) { go f() },
+		posts:         map[string]*post{},
 	}
-	if len(cfg.AllowedUsers) > 0 {
+	if len(cfg.Slack.AllowedUsers) > 0 {
 		c.allowed = map[string]bool{}
-		for _, u := range cfg.AllowedUsers {
+		for _, u := range cfg.Slack.AllowedUsers {
 			c.allowed[u] = true
 		}
 	}
@@ -184,12 +185,12 @@ func (c *Chatops) Handle(ctx context.Context, ev automation.Event) error {
 }
 
 func (c *Chatops) channelFor(ev automation.Event) string {
-	if c.cfg.ChannelAttrKey != "" {
-		if ch := ev.Attribute(c.cfg.ChannelAttrKey); ch != "" {
+	if c.cfg.Slack.ChannelAttribute != "" {
+		if ch := ev.Attribute(c.cfg.Slack.ChannelAttribute); ch != "" {
 			return ch
 		}
 	}
-	return c.cfg.Channel
+	return c.cfg.Slack.Channel
 }
 
 func (c *Chatops) proposed(ctx context.Context, ev automation.Event, dep deployment, who actor) error {
@@ -207,15 +208,15 @@ func (c *Chatops) proposed(ctx context.Context, ev automation.Event, dep deploym
 	if outcome != "" {
 		buttons = ""
 	}
-	ch, ts, err := c.slack.postMessage(ctx, c.channelFor(ev), summary, blocks(summary, outcome, buttons))
+	posted, err := c.slack.Post(ctx, slack.Message{Channel: c.channelFor(ev), Text: summary, Blocks: blocks(summary, outcome, buttons)})
 	if err != nil {
 		return err
 	}
 
 	c.mu.Lock()
-	p.channel, p.ts, p.summary = ch, ts, summary
+	p.channel, p.ts, p.summary = posted.Channel, posted.TS, summary
 	c.mu.Unlock()
-	automation.Logger(ctx).Info("proposal posted", "deployment_id", dep.ID, "channel", ch)
+	automation.Logger(ctx).Info("proposal posted", "deployment_id", dep.ID, "channel", posted.Channel)
 	return nil
 }
 
@@ -243,7 +244,7 @@ func (c *Chatops) decidedElsewhere(ctx context.Context, ev automation.Event, dep
 	if ts == "" {
 		return nil
 	}
-	return c.slack.update(ctx, channel, ts, summary, blocks(summary, outcome, ""))
+	return c.slack.Update(ctx, channel, ts, summary, blocks(summary, outcome, ""))
 }
 
 func summarize(instance string, dep deployment, who actor) string {
@@ -322,7 +323,7 @@ func (c *Chatops) handleInteraction(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
 		return
 	}
-	if !verifySlack(c.cfg.SlackSigningSecret, req.Header, body, time.Now()) {
+	if !slack.Verify(c.signingSecret, req.Header, body, time.Now()) {
 		log.Warn("slack signature rejected")
 		http.Error(w, "bad signature", http.StatusUnauthorized)
 		return
@@ -411,13 +412,13 @@ func (c *Chatops) decide(ctx context.Context, in interaction) {
 	c.mu.Unlock()
 	log.Info("deployment decided", "outcome", strings.ToLower(verb))
 
-	if err := c.slack.update(ctx, channel, ts, summary, blocks(summary, outcome, "")); err != nil {
+	if err := c.slack.Update(ctx, channel, ts, summary, blocks(summary, outcome, "")); err != nil {
 		log.Error("slack update failed", "err", err)
 	}
 }
 
 func (c *Chatops) tell(ctx context.Context, channel, user, text string) {
-	if err := c.slack.postEphemeral(ctx, channel, user, text); err != nil {
+	if err := c.slack.PostEphemeral(ctx, channel, user, text); err != nil {
 		automation.Logger(ctx).Error("slack post failed", "err", err)
 	}
 }
@@ -430,83 +431,4 @@ func (c *Chatops) mutate(ctx context.Context, mutation, field, deploymentID stri
 		return err
 	}
 	return out[field].Err()
-}
-
-// Slack signs "v0:<timestamp>:<body>" with HMAC-SHA256 and sends it hex-encoded.
-func verifySlack(secret []byte, h http.Header, body []byte, now time.Time) bool {
-	ts, sig := h.Get("X-Slack-Request-Timestamp"), h.Get("X-Slack-Signature")
-	sec, err := strconv.ParseInt(ts, 10, 64)
-	if sig == "" || err != nil {
-		return false
-	}
-	if d := now.Sub(time.Unix(sec, 0)); d > slackTolerance || d < -slackTolerance {
-		return false
-	}
-	mac := hmac.New(sha256.New, secret)
-	mac.Write([]byte("v0:" + ts + ":"))
-	mac.Write(body)
-	return hmac.Equal([]byte(sig), []byte("v0="+hex.EncodeToString(mac.Sum(nil))))
-}
-
-// --- slack web api ---------------------------------------------------------
-
-type slack struct {
-	url   string
-	token string
-}
-
-func (s *slack) postMessage(ctx context.Context, channel, text string, blocks []any) (string, string, error) {
-	var out struct {
-		Channel string `json:"channel"`
-		TS      string `json:"ts"`
-	}
-	err := s.call(ctx, "chat.postMessage", map[string]any{"channel": channel, "text": text, "blocks": blocks}, &out)
-	return out.Channel, out.TS, err
-}
-
-func (s *slack) update(ctx context.Context, channel, ts, text string, blocks []any) error {
-	return s.call(ctx, "chat.update", map[string]any{"channel": channel, "ts": ts, "text": text, "blocks": blocks}, nil)
-}
-
-func (s *slack) postEphemeral(ctx context.Context, channel, user, text string) error {
-	return s.call(ctx, "chat.postEphemeral", map[string]any{"channel": channel, "user": user, "text": text}, nil)
-}
-
-func (s *slack) call(ctx context.Context, method string, payload map[string]any, out any) error {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.url+"/"+method, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("content-type", "application/json; charset=utf-8")
-	req.Header.Set("authorization", "Bearer "+s.token)
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("slack %s: HTTP %d: %s", method, resp.StatusCode, b)
-	}
-
-	// Slack answers 200 for most failures and puts the error in the body.
-	var status struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal(b, &status); err != nil {
-		return err
-	}
-	if !status.OK {
-		return fmt.Errorf("slack %s: %s", method, status.Error)
-	}
-	if out != nil {
-		return json.Unmarshal(b, out)
-	}
-	return nil
 }

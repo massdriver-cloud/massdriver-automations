@@ -1,17 +1,15 @@
 package router
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 )
 
 const (
@@ -82,47 +80,44 @@ func (s *Step) kind() string {
 
 var eventPattern = regexp.MustCompile(`^[a-z_]+\.([a-z_]+|\*)$`)
 
-// LoadConfig reads and compiles the configuration file, so a mistake stops the router at start and not at an event.
-func LoadConfig(path string) (*Config, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("ROUTER_CONFIG: %w", err)
-	}
-	return ParseConfig(b)
-}
-
 // ParseConfig parses and compiles the YAML of a configuration file.
 func ParseConfig(b []byte) (*Config, error) {
 	var cfg Config
-	dec := yaml.NewDecoder(bytes.NewReader(b))
-	dec.KnownFields(true)
-	if err := dec.Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("router config: %w", err)
+	if err := automation.DecodeConfig(b, &cfg); err != nil {
+		return nil, err
 	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// Validate compiles every route, so a mistake stops the router at start and not at an event.
+func (cfg *Config) Validate() error {
 	if cfg.Engine == "" {
 		cfg.Engine = engineJQ
 	}
 	if cfg.Engine != engineJQ && cfg.Engine != engineGo {
-		return nil, fmt.Errorf("engine %q: use jq or go", cfg.Engine)
+		return fmt.Errorf("engine %q: use jq or go", cfg.Engine)
 	}
 	if len(cfg.Routes) == 0 {
-		return nil, errors.New("router config has no routes")
+		return errors.New("routes: at least one route is required")
 	}
 	c := newCompiler(cfg.Engine)
 	names := map[string]bool{}
 	for i, r := range cfg.Routes {
 		if r.Name == "" {
-			return nil, fmt.Errorf("route %d has no name", i+1)
+			return fmt.Errorf("route %d has no name", i+1)
 		}
 		if names[r.Name] {
-			return nil, fmt.Errorf("route name %q is used twice", r.Name)
+			return fmt.Errorf("route name %q is used twice", r.Name)
 		}
 		names[r.Name] = true
 		if err := r.compile(c); err != nil {
-			return nil, fmt.Errorf("route %q: %w", r.Name, err)
+			return fmt.Errorf("route %q: %w", r.Name, err)
 		}
 	}
-	return &cfg, nil
+	return nil
 }
 
 // EventTypes returns the event types of every route, for the event destination.

@@ -3,14 +3,11 @@
 package drift
 
 import (
-	"bytes"
 	"context"
 	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -27,6 +24,7 @@ import (
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/slack"
 )
 
 const (
@@ -61,19 +59,19 @@ var Definition = automation.Definition{
 	Description: "Plans instances on a schedule, alerts Slack about drift, and can re-apply the deployed configuration.",
 	Events:      []string{"deployment.completed", "deployment.failed", "deployment.aborted"},
 	New: func() (automation.Automation, error) {
+		var cfg Config
+		if err := automation.LoadConfig(&cfg); err != nil {
+			return nil, err
+		}
 		api, err := massdriver.FromEnv()
 		if err != nil {
 			return nil, err
 		}
-		cfg, err := LoadConfig(automation.Env("DRIFT_CONFIG", "./drift.yaml"))
-		if err != nil {
-			return nil, err
-		}
-		d, err := New(api, cfg, Options{
-			SlackWebhookURL: os.Getenv("SLACK_WEBHOOK_URL"),
-			RunToken:        os.Getenv("DRIFT_RUN_TOKEN"),
-			AppURL:          automation.Env("MASSDRIVER_APP_URL", "https://app.massdriver.cloud"),
-			StateDir:        os.Getenv("STATE_DIR"),
+		sl := slack.FromEnv()
+		sl.WarnIgnoredChannels(slog.Default(), cfg.channels()...)
+		d, err := New(api, sl, &cfg, Options{
+			RunToken: os.Getenv("DRIFT_RUN_TOKEN"),
+			StateDir: os.Getenv("STATE_DIR"),
 		})
 		if err != nil {
 			return nil, err
@@ -95,19 +93,18 @@ var Definition = automation.Definition{
 
 // Options are the settings that come from the environment.
 type Options struct {
-	SlackWebhookURL string
-	RunToken        string
-	AppURL          string
-	StateDir        string
+	RunToken string
+	StateDir string
 }
 
 // Drift runs the configured checks and tracks their plans.
 type Drift struct {
-	api  *massdriver.Client
-	cfg  *Config
-	opts Options
-	now  func() time.Time
-	run  func(func())
+	api   *massdriver.Client
+	slack *slack.Client
+	cfg   *Config
+	opts  Options
+	now   func() time.Time
+	run   func(func())
 
 	// handleMu serializes plan results, so two deliveries of one event cannot both resolve.
 	handleMu sync.Mutex
@@ -118,13 +115,12 @@ type Drift struct {
 }
 
 // New returns the automation with its pending plans loaded from opts.StateDir.
-func New(api *massdriver.Client, cfg *Config, opts Options) (*Drift, error) {
+func New(api *massdriver.Client, sl *slack.Client, cfg *Config, opts Options) (*Drift, error) {
 	st, err := loadState(opts.StateDir)
 	if err != nil {
 		return nil, fmt.Errorf("state: %w", err)
 	}
-	opts.AppURL = strings.TrimRight(opts.AppURL, "/")
-	return &Drift{api: api, cfg: cfg, opts: opts, now: time.Now, run: func(f func()) { go f() }, st: st}, nil
+	return &Drift{api: api, slack: sl, cfg: cfg, opts: opts, now: time.Now, run: func(f func()) { go f() }, st: st}, nil
 }
 
 // Schedule adds every check that has a schedule to c.
@@ -454,6 +450,7 @@ func (d *Drift) Handle(ctx context.Context, ev automation.Event) error {
 	log := automation.Logger(ctx).With("check", ch.Name, "instance", p.Instance, "deployment_id", dep.ID)
 
 	var outcome, text string
+	resolvable := false
 	if ev.Type == "deployment.completed" {
 		logs, err := d.planLogs(ctx, dep.ID)
 		if err != nil {
@@ -469,7 +466,8 @@ func (d *Drift) Handle(ctx context.Context, ev automation.Event) error {
 		default:
 			log.Warn("plan result unknown", "steps", len(res.Steps), "expected_steps", res.Expected)
 		}
-		if res.Status == Drifted && ch.Mode != ModeDetect && len(p.Undeployed) == 0 && p.Outcome == "" {
+		resolvable = res.Status == Drifted && ch.Mode != ModeDetect && len(p.Undeployed) == 0
+		if resolvable && p.Outcome == "" {
 			id, note := d.resolve(ctx, ch, p, dep.ID)
 			if id != "" {
 				log.Info("resolution deployment created", "resolution_deployment_id", id, "mode", ch.Mode)
@@ -489,10 +487,26 @@ func (d *Drift) Handle(ctx context.Context, ev automation.Event) error {
 			p.Instance, ch.Name, strings.TrimPrefix(ev.Type, "deployment."), d.planLink(p, dep.ID))
 	}
 
-	if text != "" {
-		if err := d.notify(ctx, ch, text); err != nil {
+	// A failed post returns an error so Massdriver retries the event. The resolution above already happened and is
+	// saved, so the retry only posts what is missing.
+	if text != "" && !p.Alerted {
+		posted, err := d.notify(ctx, ch, slack.Message{Text: text})
+		if err != nil {
 			return fmt.Errorf("slack: %w", err)
 		}
+		d.mu.Lock()
+		p.Alerted, p.AlertChannel, p.AlertTS = true, posted.Channel, posted.TS
+		d.saveLocked()
+		d.mu.Unlock()
+	}
+	if resolvable && !p.Replied {
+		if _, err := d.notify(ctx, ch, slack.Message{Channel: p.AlertChannel, ThreadTS: p.AlertTS, Text: p.Outcome}); err != nil {
+			return fmt.Errorf("slack: %w", err)
+		}
+		d.mu.Lock()
+		p.Replied = true
+		d.saveLocked()
+		d.mu.Unlock()
 	}
 	d.finishPlan(p, dep.ID, outcome)
 	bg := context.WithoutCancel(ctx)
@@ -530,7 +544,7 @@ func (d *Drift) finishRun(ctx context.Context, ch *Check) {
 	}
 	text := fmt.Sprintf("Drift check %s finished: %d planned, %d drifted, %d clean, %d unknown, %d failed, %d skipped.",
 		ch.Name, r.Planned, r.Drifted, r.Clean, r.Unknown, r.Failed, r.Skipped)
-	if err := d.notify(ctx, ch, text); err != nil {
+	if _, err := d.notify(ctx, ch, slack.Message{Text: text}); err != nil {
 		automation.Logger(ctx).Error("slack post failed", "check", ch.Name, "err", err)
 	}
 }
@@ -558,7 +572,7 @@ func (d *Drift) Prune() {
 			checks[ch.Name] = ch
 			text := fmt.Sprintf("Drift check for %s (check %s) has no result: the plan did not finish within %s.\nPlan: %s",
 				p.Instance, ch.Name, planTimeout, d.planLink(p, id))
-			if err := d.notify(ctx, ch, text); err != nil {
+			if _, err := d.notify(ctx, ch, slack.Message{Text: text}); err != nil {
 				slog.Error("slack post failed", "check", ch.Name, "err", err)
 			}
 			slog.Warn("plan timed out", "check", ch.Name, "instance", p.Instance, "deployment_id", id)
@@ -665,9 +679,6 @@ func (d *Drift) resultMessage(ch *Check, p *plan, planID string, res Result) str
 			}
 			b.WriteString("\n")
 		}
-		if p.Outcome != "" {
-			b.WriteString(p.Outcome + "\n")
-		}
 	}
 	b.WriteString("Plan: " + d.planLink(p, planID))
 	return b.String()
@@ -676,7 +687,7 @@ func (d *Drift) resultMessage(ch *Check, p *plan, planID string, res Result) str
 // The deployment in the instance's history, the page that Massdriver's own notifications link to.
 func (d *Drift) planLink(p *plan, planID string) string {
 	u := fmt.Sprintf("%s/orgs/%s/projects/%s/environments/%s/instances/%s?%s",
-		d.opts.AppURL,
+		d.cfg.Massdriver.URL(),
 		url.PathEscape(d.api.OrganizationID),
 		url.PathEscape(p.Project),
 		url.PathEscape(p.Environment),
@@ -686,34 +697,17 @@ func (d *Drift) planLink(p *plan, planID string) string {
 	return "<" + u + "|" + planID + ">"
 }
 
-func (d *Drift) notify(ctx context.Context, ch *Check, text string) error {
-	hook := ch.SlackWebhookURL
-	if hook == "" {
-		hook = d.opts.SlackWebhookURL
+// notify posts msg to the check's channel, or to msg.Channel when it is set. Without a Slack destination, it logs
+// the text.
+func (d *Drift) notify(ctx context.Context, ch *Check, msg slack.Message) (slack.Posted, error) {
+	if msg.Channel == "" {
+		msg.Channel = ch.Slack.Or(d.cfg.Slack).Channel
 	}
-	if hook == "" {
-		automation.Logger(ctx).Info("alert logged", "check", ch.Name, "text", text)
-		return nil
+	if !d.slack.Sends(msg.Channel) {
+		automation.Logger(ctx).Info("alert logged", "check", ch.Name, "text", msg.Text)
+		return slack.Posted{}, nil
 	}
-	body, err := json.Marshal(map[string]string{"text": text})
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, hook, bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("content-type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return automation.RedactURL(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return errors.New(resp.Status + ": " + string(b))
-	}
-	return nil
+	return d.slack.Post(ctx, msg)
 }
 
 func (d *Drift) saveLocked() {

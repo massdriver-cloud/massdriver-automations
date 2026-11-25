@@ -1,7 +1,6 @@
 package freezeguard
 
 import (
-	"bytes"
 	"fmt"
 	"slices"
 	"sort"
@@ -9,6 +8,9 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/slack"
 )
 
 // DefaultActions are the actions that change infrastructure. instance:deploy also gates approving and rejecting a
@@ -23,6 +25,7 @@ type Window struct {
 	Conditions   map[string][]string
 	Actions      []string
 	ExemptGroups []string
+	Slack        slack.Config
 	// Weekly ranges are minutes since Sunday 00:00 in loc. A range whose end is before its start wraps past Saturday.
 	weekly   [][2]int
 	from, to time.Time
@@ -55,33 +58,56 @@ type fileWindow struct {
 		From string `yaml:"from"`
 		To   string `yaml:"to"`
 	} `yaml:"weekly"`
-	From string `yaml:"from"`
-	To   string `yaml:"to"`
+	From  string       `yaml:"from"`
+	To    string       `yaml:"to"`
+	Slack slack.Config `yaml:"slack"`
 }
 
-// ParseWindows reads the windows file. YAML and JSON both parse.
+// Config is the config file of freeze-guard. No windows is valid: freeze-guard then removes the policies it made.
+type Config struct {
+	Timezone     string       `yaml:"timezone"`
+	Actions      []string     `yaml:"actions"`
+	ExemptGroups []string     `yaml:"exempt_groups"`
+	Windows      []fileWindow `yaml:"windows"`
+	// Slack is where announcements go when a window does not name its own channel.
+	Slack slack.Config `yaml:"slack"`
+
+	windows []Window
+}
+
+// ParseWindows decodes and checks a config document and returns its windows. YAML and JSON both parse.
 func ParseWindows(b []byte) ([]Window, error) {
-	var file struct {
-		Timezone     string       `yaml:"timezone"`
-		Actions      []string     `yaml:"actions"`
-		ExemptGroups []string     `yaml:"exempt_groups"`
-		Windows      []fileWindow `yaml:"windows"`
-	}
-	dec := yaml.NewDecoder(bytes.NewReader(b))
-	dec.KnownFields(true)
-	if err := dec.Decode(&file); err != nil {
+	var c Config
+	if err := automation.DecodeConfig(b, &c); err != nil {
 		return nil, err
 	}
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	return c.windows, nil
+}
 
+// channels returns every channel that the config names.
+func (c *Config) channels() []string {
+	out := []string{c.Slack.Channel}
+	for _, w := range c.Windows {
+		out = append(out, w.Slack.Channel)
+	}
+	return out
+}
+
+// Validate checks every window and builds it.
+func (c *Config) Validate() error {
+	file := c
 	var out []Window
 	seen := map[string]bool{}
 	for i, fw := range file.Windows {
 		name := fw.Name
 		if name == "" {
-			return nil, fmt.Errorf("windows[%d]: name is required", i)
+			return fmt.Errorf("windows[%d]: name is required", i)
 		}
 		if seen[name] {
-			return nil, fmt.Errorf("%s: name is used by two windows", name)
+			return fmt.Errorf("%s: name is used by two windows", name)
 		}
 		seen[name] = true
 		tz := fw.Timezone
@@ -93,7 +119,7 @@ func ParseWindows(b []byte) ([]Window, error) {
 		}
 		loc, err := time.LoadLocation(tz)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", name, err)
+			return fmt.Errorf("%s: %w", name, err)
 		}
 
 		actions := fw.Actions
@@ -105,7 +131,7 @@ func ParseWindows(b []byte) ([]Window, error) {
 		}
 		for _, a := range actions {
 			if entity, verb, ok := strings.Cut(a, ":"); !ok || entity == "" || verb == "" {
-				return nil, fmt.Errorf("%s: action %q is not like \"instance:deploy\"", name, a)
+				return fmt.Errorf("%s: action %q is not like \"instance:deploy\"", name, a)
 			}
 		}
 
@@ -113,13 +139,14 @@ func ParseWindows(b []byte) ([]Window, error) {
 			Name:         name,
 			Actions:      sortedUnique(actions),
 			ExemptGroups: sortedUnique(append(slices.Clone(file.ExemptGroups), fw.ExemptGroups...)),
+			Slack:        fw.Slack.Or(file.Slack),
 			loc:          loc,
 		}
 		if len(fw.Match) > 0 {
 			w.Conditions = map[string][]string{}
 			for k, v := range fw.Match {
 				if len(v) == 0 {
-					return nil, fmt.Errorf("%s: match %s has no value", name, k)
+					return fmt.Errorf("%s: match %s has no value", name, k)
 				}
 				w.Conditions[k] = sortedUnique(v)
 			}
@@ -127,36 +154,37 @@ func ParseWindows(b []byte) ([]Window, error) {
 
 		fixed := fw.From != "" || fw.To != ""
 		if fixed == (len(fw.Weekly) > 0) {
-			return nil, fmt.Errorf("%s: set either weekly or from and to", name)
+			return fmt.Errorf("%s: set either weekly or from and to", name)
 		}
 		if fixed {
 			if w.from, err = parseTime(fw.From, loc); err != nil {
-				return nil, fmt.Errorf("%s: from: %w", name, err)
+				return fmt.Errorf("%s: from: %w", name, err)
 			}
 			if w.to, err = parseTime(fw.To, loc); err != nil {
-				return nil, fmt.Errorf("%s: to: %w", name, err)
+				return fmt.Errorf("%s: to: %w", name, err)
 			}
 			if !w.to.After(w.from) {
-				return nil, fmt.Errorf("%s: to must be after from", name)
+				return fmt.Errorf("%s: to must be after from", name)
 			}
 		}
 		for _, r := range fw.Weekly {
 			from, err := parseWeekTime(r.From)
 			if err != nil {
-				return nil, fmt.Errorf("%s: weekly from: %w", name, err)
+				return fmt.Errorf("%s: weekly from: %w", name, err)
 			}
 			to, err := parseWeekTime(r.To)
 			if err != nil {
-				return nil, fmt.Errorf("%s: weekly to: %w", name, err)
+				return fmt.Errorf("%s: weekly to: %w", name, err)
 			}
 			if from == to {
-				return nil, fmt.Errorf("%s: weekly from and to are the same", name)
+				return fmt.Errorf("%s: weekly from and to are the same", name)
 			}
 			w.weekly = append(w.weekly, [2]int{from, to})
 		}
 		out = append(out, w)
 	}
-	return out, nil
+	c.windows = out
+	return nil
 }
 
 func sortedUnique(in []string) []string {

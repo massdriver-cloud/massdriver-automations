@@ -2,6 +2,7 @@ package autodeploydownstream
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -136,7 +137,7 @@ func TestDeploysOptedInProvisionedDependents(t *testing.T) {
 	srv := httptest.NewServer(api)
 	defer srv.Close()
 
-	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, envRules(t, nil))
+	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, configRules(t, ""))
 	a.run = func(f func()) { f() }
 
 	if code := post(t, automation.Handler(a, secret), completedEvent("evt-1", "PROVISION", "api-prod-db"), true); code != http.StatusNoContent {
@@ -165,7 +166,7 @@ func TestIgnoresOtherActionsAndUnsignedRequests(t *testing.T) {
 	srv := httptest.NewServer(api)
 	defer srv.Close()
 
-	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, envRules(t, nil))
+	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, configRules(t, ""))
 	a.run = func(f func()) { f() }
 	h := automation.Handler(a, secret)
 
@@ -188,7 +189,7 @@ func TestRedeliveredEventDeploysOnce(t *testing.T) {
 	srv := httptest.NewServer(api)
 	defer srv.Close()
 
-	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, envRules(t, nil))
+	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, configRules(t, ""))
 	calls := 0
 	a.run = func(f func()) { calls++; f() }
 	h := automation.Handler(a, secret)
@@ -200,22 +201,16 @@ func TestRedeliveredEventDeploysOnce(t *testing.T) {
 	}
 }
 
-func envRules(t *testing.T, env map[string]string) []Rule {
-	t.Helper()
-	rules, err := RulesFromEnv(func(k string) string { return env[k] })
-	if err != nil {
-		t.Fatal(err)
-	}
-	return rules
-}
-
 func configRules(t *testing.T, yaml string) []Rule {
 	t.Helper()
-	rules, err := ParseConfig([]byte(yaml))
-	if err != nil {
+	var cfg Config
+	if err := automation.DecodeConfig([]byte(yaml), &cfg); err != nil {
 		t.Fatal(err)
 	}
-	return rules
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return cfg.Rules
 }
 
 func runCascade(t *testing.T, rules []Rule, event []byte) *fakeAPI {
@@ -240,8 +235,8 @@ func deployedIDs(m map[string]map[string]any) []string {
 	return ids
 }
 
-func TestEnvVarsSelectAnotherAttribute(t *testing.T) {
-	rules := envRules(t, map[string]string{"AUTO_DEPLOY_ATTR_KEY": "tier", "AUTO_DEPLOY_ATTR_VALUE": "frontend"})
+func TestRuleSelectsAnotherAttribute(t *testing.T) {
+	rules := configRules(t, "rules:\n  - name: tier=frontend\n    downstream: {tier: frontend}\n")
 	api := runCascade(t, rules, completedEvent("evt-1", "PROVISION", "api-prod-db"))
 
 	if got := deployedIDs(api.deployed); !slices.Equal(got, []string{"api-prod-app"}) {
@@ -358,37 +353,49 @@ func TestStartRefusesBadConfig(t *testing.T) {
 		}
 		return p
 	}
-	good := write("good.yaml", "rules:\n  - name: all\n    downstream: {autodeploy: \"true\"}\n")
 
 	cases := []struct {
 		name string
-		env  map[string]string
+		file string
 		want string
 	}{
-		{"unknown key", map[string]string{"AUTODEPLOY_CONFIG": write("unknown.yaml", "rules:\n  - name: all\n    downstream: {autodeploy: \"true\"}\n    when: always\n")}, "field when not found"},
-		{"no rules", map[string]string{"AUTODEPLOY_CONFIG": write("empty.yaml", "rules: []\n")}, "at least one rule"},
-		{"no downstream", map[string]string{"AUTODEPLOY_CONFIG": write("nodown.yaml", "rules:\n  - name: all\n    upstream: {md-environment: prod}\n")}, "all: downstream needs at least one attribute"},
-		{"bad action", map[string]string{"AUTODEPLOY_CONFIG": write("action.yaml", "rules:\n  - name: all\n    downstream: {autodeploy: \"true\"}\n    action: plan\n")}, `action "plan"`},
-		{"missing file", map[string]string{"AUTODEPLOY_CONFIG": filepath.Join(dir, "missing.yaml")}, "AUTODEPLOY_CONFIG"},
-		{"config and key", map[string]string{"AUTODEPLOY_CONFIG": good, "AUTO_DEPLOY_ATTR_KEY": "autodeploy"}, "not both"},
-		{"config and value", map[string]string{"AUTODEPLOY_CONFIG": good, "AUTO_DEPLOY_ATTR_VALUE": "true"}, "not both"},
+		{"unknown key", write("unknown.yaml", "rules:\n  - name: all\n    downstream: {autodeploy: \"true\"}\n    when: always\n"), "line 4: field when not found"},
+		{"no downstream", write("nodown.yaml", "rules:\n  - name: all\n    upstream: {md-environment: prod}\n"), "all: downstream needs at least one attribute"},
+		{"bad action", write("action.yaml", "rules:\n  - name: all\n    downstream: {autodeploy: \"true\"}\n    action: plan\n"), `action "plan"`},
+		{"two names", write("dup.yaml", "rules:\n  - name: a\n    downstream: {x: y}\n  - name: a\n    downstream: {x: z}\n"), "a: name is used by two rules"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, k := range []string{"AUTODEPLOY_CONFIG", "AUTO_DEPLOY_ATTR_KEY", "AUTO_DEPLOY_ATTR_VALUE"} {
-				t.Setenv(k, tc.env[k])
-			}
+			t.Setenv("CONFIG_FILE", tc.file)
 			_, err := Definition.New()
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
+			var ce *automation.ConfigError
+			if !errors.As(err, &ce) || !strings.Contains(err.Error(), tc.file+": ") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want a config error for %s that contains %q", err, tc.file, tc.want)
 			}
 		})
 	}
+}
 
-	t.Setenv("AUTODEPLOY_CONFIG", good)
-	t.Setenv("AUTO_DEPLOY_ATTR_KEY", "")
-	t.Setenv("AUTO_DEPLOY_ATTR_VALUE", "")
-	if _, err := Definition.New(); err != nil {
-		t.Fatalf("good config: %v", err)
+func TestNoConfigFileDeploysTheAutodeployAttribute(t *testing.T) {
+	t.Setenv("MASSDRIVER_ORGANIZATION_ID", "acme")
+	t.Setenv("MASSDRIVER_API_KEY", "md_test")
+	t.Setenv("CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
+	a, err := Definition.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := a.(*Autodeploy).rules
+	if len(rules) != 1 || rules[0].Name != "autodeploy=true" || !reflect.DeepEqual(rules[0].Downstream, map[string]Values{"autodeploy": {"true"}}) {
+		t.Fatalf("rules = %+v", rules)
+	}
+}
+
+func TestExampleConfigLoads(t *testing.T) {
+	var cfg Config
+	if err := automation.LoadConfigFile("config.example.yaml", &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Rules) != 2 || cfg.Rules[1].Action != ActionPropose {
+		t.Fatalf("rules = %+v", cfg.Rules)
 	}
 }

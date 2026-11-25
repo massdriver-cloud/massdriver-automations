@@ -1,0 +1,20 @@
+# sandbox-on-join config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+# Required: at least one rule. A group can have more than one rule.
+
+sandboxes:
+  - # Required. The group name, as shown in Massdriver. Each person who joins it gets a sandbox.
+    group: Developers
+    # Required. The project of the template environment. Forks go into the same project.
+    project: api
+    # Required. The template environment.
+    environment: staging
+    # Deploy the fork after it is created. Default: false.
+    deploy: true
+    # Delete the fork after its decommission completes, when the person leaves. Default: false.
+    deleteAfterDecommission: true
+    # Copy the template's environment defaults to the fork. Default: false.
+    copyEnvironmentDefaults: true
+    # Copy the secrets of the template's instances to the fork. Default: false.
+    copySecrets: false
+    # Copy the template's remote references to the fork. Default: false.
+    copyRemoteReferences: false

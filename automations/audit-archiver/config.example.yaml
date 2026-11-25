@@ -1,0 +1,47 @@
+# audit-archiver config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+#
+# Each section that is set turns on its sink. Set at least one. Every event goes to every sink.
+
+# S3, or an S3-compatible store. Credentials come from the standard AWS sources: AWS_ACCESS_KEY_ID and
+# AWS_SECRET_ACCESS_KEY, a profile, web identity (IRSA, EKS Pod Identity), or the instance or task role.
+s3:
+  # Required.
+  bucket: acme-massdriver-audit
+  # The region of the bucket. Default: AWS_REGION. Use auto for Cloudflare R2.
+  region: us-east-1
+  # The first part of each key. Default: events.
+  prefix: events
+  # The URL of an S3-compatible store, such as MinIO or Cloudflare R2. The sink then uses path-style URLs.
+  endpoint: ""
+  # Each object gets this retention. The bucket must have Object Lock turned on. Leave it out for no retention.
+  object_lock:
+    # GOVERNANCE or COMPLIANCE.
+    mode: COMPLIANCE
+    # Days to retain each object, counted from when the sink writes it. 1 or more.
+    days: 365
+
+# A Splunk HTTP Event Collector.
+splunk:
+  # Required. The base URL of the collector.
+  url: https://splunk.example.com:8088
+  # The environment variable that holds the HEC token. Default: SPLUNK_HEC_TOKEN.
+  token_env: SPLUNK_HEC_TOKEN
+  # Empty uses the default index of the token.
+  index: massdriver
+  # Default: massdriver.
+  source: massdriver
+  # Default: massdriver:cloudevent.
+  sourcetype: massdriver:cloudevent
+
+# The Datadog Logs intake.
+datadog:
+  # Your Datadog site, such as datadoghq.eu or us5.datadoghq.com. Default: datadoghq.com.
+  site: datadoghq.com
+  # The intake URL, for a proxy. Default: https://http-intake.logs.<site>.
+  url: ""
+  # The environment variable that holds the API key. Default: DD_API_KEY.
+  api_key_env: DD_API_KEY
+  # Default: massdriver.
+  service: massdriver
+  # Tags for each log.
+  tags: [env:prod, team:platform]
