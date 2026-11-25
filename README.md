@@ -53,6 +53,112 @@ Two Massdriver bundles run any set of the automations, with one event destinatio
 
 Every automation receives events on `POST /hooks/massdriver` and answers health checks on `GET /healthz`.
 
+## Run locally
+
+Run an automation on your computer, and give Massdriver a public URL with a tunnel.
+
+### 1. Start the automation
+
+From a clone of this repository:
+
+```bash
+export MASSDRIVER_ORGANIZATION_ID=acme
+export MASSDRIVER_API_KEY=md_...
+export MASSDRIVER_SIGNING_SECRET=whsec_...   # set after step 3; any whsec_ value works until then
+go run ./cmd/massdriver-automations run autodeploy-downstream
+```
+
+Or with Docker:
+
+```bash
+docker run --rm -p 8080:8080 \
+  -e MASSDRIVER_ORGANIZATION_ID -e MASSDRIVER_API_KEY -e MASSDRIVER_SIGNING_SECRET \
+  massdrivercloud/massdriver-automations:latest run autodeploy-downstream
+```
+
+The automation listens on port 8080. Set `PORT` to change it.
+
+### 2. Open a tunnel
+
+Each of these prints a public `https://` URL that forwards to port 8080.
+
+**ngrok.** Install [ngrok](https://ngrok.com/download) and add your auth token.
+
+```bash
+ngrok http 8080
+```
+
+The `Forwarding` line shows the URL. The inspector at `http://localhost:4040` shows each request and response, and
+can replay a request.
+
+**Cloudflare Tunnel.** Install
+[`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/). A quick
+tunnel needs no account.
+
+```bash
+cloudflared tunnel --url http://localhost:8080
+```
+
+The output shows a `https://<words>.trycloudflare.com` URL.
+
+**localhost.run.** No install; it uses SSH.
+
+```bash
+ssh -R 80:localhost:8080 nokey@localhost.run
+```
+
+**Tailscale Funnel.** On a machine in your tailnet with Funnel turned on:
+
+```bash
+tailscale funnel 8080
+```
+
+These URLs change each time the tunnel starts, unless you have a fixed domain.
+
+### 3. Create the event destination
+
+Use the command in the automation's README, with the tunnel URL and the `/hooks/massdriver` path:
+
+```bash
+mass event destination create \
+  --name autodeploy-downstream-local \
+  --url https://<tunnel-host>/hooks/massdriver \
+  --event-type deployment.completed \
+  --condition '.data.metadata.deployment_action == "PROVISION"'
+```
+
+Copy the signing secret from the destination's **Overview** tab into `MASSDRIVER_SIGNING_SECRET`, and restart the
+automation. Click **Send test event** on the destination: the automation answers `204` to the
+`event_destination.tested` event, which shows that the URL and the secret work.
+
+When the tunnel URL changes, update the destination:
+
+```bash
+mass event destination update <id> --url https://<new-tunnel-host>/hooks/massdriver
+```
+
+Events that arrived while the tunnel was down wait as failed deliveries. Send them again with
+`mass event destination redeliver <id>`.
+
+### Send an event without Massdriver
+
+`scripts/send-event.sh` signs a CloudEvent file the way Massdriver does and posts it. It needs `jq`, `openssl`,
+`xxd`, and `curl`.
+
+```bash
+cat > event.json <<'JSON'
+{"specversion":"1.0","id":"4b0b5a8e-0f6c-4a53-9d0c-5a1f4ad5c1c2","type":"deployment.completed",
+ "subject":"mri:acme:api:prod:database","time":"2026-11-24T05:54:03Z",
+ "data":{"entity":{"id":"b9dc3d18-19fc-429c-8d36-6753615fe17c","action":"PROVISION"},
+         "attributes":{"md-instance":"api-prod-database"},
+         "metadata":{"deployment_action":"PROVISION"}}}
+JSON
+MASSDRIVER_SIGNING_SECRET=whsec_... scripts/send-event.sh event.json http://localhost:8080/hooks/massdriver
+```
+
+It prints the status code. Each automation drops an event id it has already handled, so change `id` to send the
+same event again. To copy real events, run `mass event destination preview --event-type <type> -o json`.
+
 ## Write an automation
 
 An automation is a Go package that implements one method:
