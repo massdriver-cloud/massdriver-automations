@@ -1,0 +1,25 @@
+query InstanceDeployments($org: ID!, $instance: ID!) {
+  inProgress: deployments(
+    organizationId: $org
+    filter: { instanceId: { eq: $instance }, status: { in: [PENDING, APPROVED, RUNNING] } }
+    cursor: { limit: 1 }
+  ) {
+    items { id status }
+  }
+  lastCompleted: deployments(
+    organizationId: $org
+    filter: { instanceId: { eq: $instance }, status: { eq: COMPLETED }, action: { eq: PROVISION } }
+    sort: { field: CREATED_AT, order: DESC }
+    cursor: { limit: 1 }
+  ) {
+    items { id version createdAt }
+  }
+  proposed: deployments(
+    organizationId: $org
+    filter: { instanceId: { eq: $instance }, status: { eq: PROPOSED }, action: { eq: PROVISION } }
+    sort: { field: CREATED_AT, order: DESC }
+    cursor: { limit: 100 }
+  ) {
+    items { id message }
+  }
+}
