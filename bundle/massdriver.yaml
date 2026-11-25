@@ -1,0 +1,548 @@
+name: massdriver-automations
+description: >-
+  Runs Massdriver automations on a Kubernetes cluster. Each enabled automation gets a Deployment, a Service, an
+  Ingress host, and an event destination that sends it only the events it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundle
+version: 0.1.0
+
+steps:
+  - path: src
+    provisioner: opentofu:1.10
+
+params:
+  required:
+    - image
+    - massdriver
+    - ingress
+    - attribute_enforcer
+    - audit_archiver
+    - autodeploy_downstream
+    - bundle_scanner
+    - decommission_cleanup
+    - freeze_guard
+    - github_deployments
+    - proposal_chatops
+    - release_notes
+    - sandbox_on_join
+    - statuspage
+  properties:
+    image:
+      type: object
+      title: Image
+      required:
+        - repository
+        - tag
+      properties:
+        repository:
+          type: string
+          title: Repository
+          description: >-
+            The automations image. bundle-scanner uses the same repository with `-scanner` after the tag.
+          default: massdrivercloud/massdriver-automations
+        tag:
+          type: string
+          title: Tag
+          description: The image tag, such as `1.2.0`. Pin a version so that a redeploy runs the same code.
+          default: latest
+          pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
+          message:
+            pattern: Must be a valid image tag.
+    massdriver:
+      type: object
+      title: Massdriver
+      required:
+        - organization_id
+        - url
+        - app_url
+      properties:
+        organization_id:
+          type: string
+          title: Organization ID
+          description: >-
+            Your organization's identifier. The service account of the `MASSDRIVER_API_KEY` secret must belong to it.
+          pattern: ^[a-z0-9-]+$
+        url:
+          type: string
+          title: API URL
+          description: The URL of your Massdriver API.
+          default: https://api.massdriver.cloud
+          format: uri
+        app_url:
+          type: string
+          title: App URL
+          description: The URL of the Massdriver UI. github-deployments links each status to it.
+          default: https://app.massdriver.cloud
+          format: uri
+    ingress:
+      type: object
+      title: Ingress
+      required:
+        - domain
+      properties:
+        domain:
+          type: string
+          title: Domain
+          description: >-
+            Each automation is served at `<automation>.<domain>`, such as `freeze-guard.automations.acme.com`.
+            Point a wildcard DNS record for `*.<domain>` at the ingress controller. Massdriver sends events to
+            `https://<automation>.<domain>/hooks/massdriver`.
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          message:
+            pattern: Must be a lowercase DNS name with at least one dot, such as automations.acme.com.
+        class_name:
+          type: string
+          title: Ingress class
+          description: The IngressClass to use. Leave empty to use the default class of the cluster.
+        cluster_issuer:
+          type: string
+          title: cert-manager ClusterIssuer
+          description: >-
+            Issues a certificate for each host with cert-manager. Leave empty when TLS ends in front of the
+            ingress controller, or when you set a TLS secret.
+        tls_secret_name:
+          type: string
+          title: TLS secret
+          description: >-
+            A Secret in the namespace that holds a certificate for `*.<domain>`. Ignored when a ClusterIssuer is
+            set.
+
+    attribute_enforcer:
+      type: object
+      title: attribute-enforcer
+      description: Sets default attributes on new projects, environments, and components, and reports missing ones.
+      required: [enabled, config, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        config:
+          type: string
+          title: Configuration
+          description: >-
+            The `config.yaml` of attribute-enforcer. The event destination condition is built from it, so only
+            entities that break a rule are sent. `notify` needs the `ATTRIBUTE_ENFORCER_SLACK_WEBHOOK_URL` secret.
+          default: |
+            actions: [notify]
+            project: []
+            environment: []
+            component: []
+        attributes: &attributes
+          type: object
+          title: Event attributes
+          description: >-
+            Attribute values that an event's entity must have, such as `md-environment` = `prod`. Empty sends
+            events of any attributes.
+          default: {}
+          additionalProperties:
+            type: string
+
+    audit_archiver:
+      type: object
+      title: audit-archiver
+      description: >-
+        Archives every event in S3, Splunk, or Datadog. Set at least one sink. The secrets hold the credentials.
+      required: [enabled, s3_prefix, s3_object_lock_days, datadog_site]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        s3_bucket:
+          type: string
+          title: S3 bucket
+          description: Turns on the S3 sink. Credentials come from the `AUDIT_ARCHIVER_AWS_*` secrets.
+        s3_region:
+          type: string
+          title: S3 region
+          description: The region of the bucket. Use `auto` for Cloudflare R2.
+        s3_prefix:
+          type: string
+          title: S3 key prefix
+          default: events
+        s3_endpoint:
+          type: string
+          title: S3 endpoint
+          description: The URL of an S3-compatible store, such as MinIO or Cloudflare R2.
+        s3_object_lock_mode:
+          type: string
+          title: S3 Object Lock mode
+          description: The retention mode of each object. The bucket must have Object Lock turned on.
+          enum: [GOVERNANCE, COMPLIANCE]
+        s3_object_lock_days:
+          type: integer
+          title: S3 Object Lock days
+          description: Days to retain each object. Used with an Object Lock mode.
+          default: 0
+          minimum: 0
+        splunk_hec_url:
+          type: string
+          title: Splunk HEC URL
+          description: >-
+            Turns on the Splunk sink, such as `https://splunk.example.com:8088`. Needs the
+            `AUDIT_ARCHIVER_SPLUNK_HEC_TOKEN` secret.
+        splunk_index:
+          type: string
+          title: Splunk index
+          description: Empty uses the default index of the token.
+        datadog_site:
+          type: string
+          title: Datadog site
+          description: Your Datadog site. The Datadog sink is on when the `AUDIT_ARCHIVER_DD_API_KEY` secret is set.
+          default: datadoghq.com
+        datadog_tags:
+          type: string
+          title: Datadog tags
+          description: Tags for each log, such as `env:prod,team:platform`.
+
+    autodeploy_downstream:
+      type: object
+      title: autodeploy-downstream
+      description: Deploys opted-in dependents when an instance deploys.
+      required: [enabled, attribute_key, attribute_value, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        attribute_key:
+          type: string
+          title: Opt-in attribute key
+          default: autodeploy
+        attribute_value:
+          type: string
+          title: Opt-in attribute value
+          default: "true"
+        attributes: *attributes
+
+    bundle_scanner:
+      type: object
+      title: bundle-scanner
+      description: >-
+        Scans each new bundle version with Trivy and Checkov. Results go to the
+        `BUNDLE_SCANNER_SLACK_WEBHOOK_URL` secret, or to the logs only.
+      required: [enabled, scanners, fail_severity, timeout, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        scanners:
+          type: string
+          title: Scanners
+          description: The scanners to run, separated by commas.
+          default: trivy,checkov
+        fail_severity:
+          type: string
+          title: Fail severity
+          description: A version fails when a finding has this severity or higher.
+          default: HIGH
+          enum: [UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL]
+        result_attribute_key:
+          type: string
+          title: Result attribute key
+          description: >-
+            Records `<key>=passed` or `<key>=failed` on the bundle's repo. Must be a repo custom attribute. Empty
+            sets no attribute.
+        timeout:
+          type: string
+          title: Timeout
+          description: The longest time for one bundle version, such as `10m`.
+          default: 10m
+          pattern: ^[0-9]+(s|m|h)$
+        attributes: *attributes
+
+    decommission_cleanup:
+      type: object
+      title: decommission-cleanup
+      description: >-
+        Runs HTTP hooks when infrastructure is decommissioned. The `DECOMMISSION_CLEANUP_HOOK_ENV` secret is a JSON
+        object of extra environment variables, for `{{ env "NAME" }}` in hooks.
+      required: [enabled, hooks, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        hooks:
+          type: string
+          title: Hooks
+          description: The `hooks.yaml` of decommission-cleanup.
+          default: |
+            hooks: []
+        attributes: *attributes
+
+    freeze_guard:
+      type: object
+      title: freeze-guard
+      description: Aborts deployments that start inside a change freeze window.
+      required: [enabled, windows, override_token, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        windows:
+          type: string
+          title: Freeze windows
+          description: The windows file of freeze-guard.
+          default: |
+            timezone: UTC
+            windows: []
+        override_token:
+          type: string
+          title: Override token
+          description: A deployment whose message contains this text runs during a freeze.
+          default: "[freeze-override]"
+        attributes: *attributes
+
+    github_deployments:
+      type: object
+      title: github-deployments
+      description: Shows Massdriver deployments as GitHub Deployments. Needs the `GITHUB_DEPLOYMENTS_TOKEN` secret.
+      required: [enabled, api_url, repo_attribute_key, ref_attribute_key, environment_name]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        api_url:
+          type: string
+          title: GitHub API URL
+          description: For GitHub Enterprise Server, `https://<host>/api/v3`.
+          default: https://api.github.com
+        repo_attribute_key:
+          type: string
+          title: Repository attribute key
+          default: github_repo
+        ref_attribute_key:
+          type: string
+          title: Ref attribute key
+          default: github_ref
+        environment_name:
+          type: string
+          title: GitHub environment name
+          default: environment
+          oneOf:
+            - const: environment
+              title: Environment, such as prod
+            - const: project-environment
+              title: Project and environment, such as api-prod
+
+    proposal_chatops:
+      type: object
+      title: proposal-chatops
+      description: >-
+        Approve or reject proposed deployments from Slack. Needs the `PROPOSAL_CHATOPS_SLACK_BOT_TOKEN` and
+        `PROPOSAL_CHATOPS_SLACK_SIGNING_SECRET` secrets. Set the Slack app's interactivity URL to
+        `https://proposal-chatops.<domain>/slack/interactions`.
+      required: [enabled, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        channel:
+          type: string
+          title: Channel
+          description: The channel name or ID for proposals.
+        channel_attribute_key:
+          type: string
+          title: Channel attribute key
+          description: When an instance has this attribute, its value names the channel.
+        allowed_users:
+          type: string
+          title: Allowed Slack users
+          description: Slack user IDs that can click the buttons, separated by commas. Empty allows everybody.
+        attributes: *attributes
+
+    release_notes:
+      type: object
+      title: release-notes
+      description: >-
+        Posts new bundle versions to Slack or Teams. Set the `RELEASE_NOTES_SLACK_WEBHOOK_URL` secret, the
+        `RELEASE_NOTES_TEAMS_WEBHOOK_URL` secret, or both.
+      required: [enabled, include_development]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        include_development:
+          type: boolean
+          title: Include development versions
+          default: false
+
+    sandbox_on_join:
+      type: object
+      title: sandbox-on-join
+      description: >-
+        Forks a sandbox environment for each new group member, and removes it when they leave. The event
+        destination condition is built from the groups in the rules.
+      required: [enabled, config]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        config:
+          type: string
+          title: Sandbox rules
+          description: The `sandboxes.yaml` of sandbox-on-join.
+          default: |
+            sandboxes: []
+
+    statuspage:
+      type: object
+      title: statuspage
+      description: >-
+        Serves a public status page. The event destination condition is built from the environments in the
+        configuration.
+      required: [enabled, config, storage_size_gi, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        host:
+          type: string
+          title: Host
+          description: The public host of the status site, such as `status.acme.com`. Empty uses `statuspage.<domain>`.
+        config:
+          type: string
+          title: Configuration
+          description: The `statuspage.yaml` of statuspage.
+          default: |
+            pages: []
+        storage_size_gi:
+          type: integer
+          title: History storage (GiB)
+          description: The volume for incident and uptime history.
+          default: 1
+          minimum: 1
+          maximum: 10
+          $md.immutable: true
+        attributes: *attributes
+
+dependencies:
+  kubernetes_cluster:
+    resource_type: kubernetes-cluster
+    required: true
+
+resources: {}
+
+app:
+  secrets:
+    MASSDRIVER_API_KEY:
+      title: Massdriver service account token
+      description: >-
+        An `md_` token of a service account. It creates the event destinations and is given to the automations
+        that call the Massdriver API.
+      required: true
+    ATTRIBUTE_ENFORCER_SLACK_WEBHOOK_URL:
+      title: attribute-enforcer Slack webhook URL
+    AUDIT_ARCHIVER_AWS_ACCESS_KEY_ID:
+      title: audit-archiver AWS access key ID
+    AUDIT_ARCHIVER_AWS_SECRET_ACCESS_KEY:
+      title: audit-archiver AWS secret access key
+    AUDIT_ARCHIVER_SPLUNK_HEC_TOKEN:
+      title: audit-archiver Splunk HEC token
+    AUDIT_ARCHIVER_DD_API_KEY:
+      title: audit-archiver Datadog API key
+    BUNDLE_SCANNER_SLACK_WEBHOOK_URL:
+      title: bundle-scanner Slack webhook URL
+    DECOMMISSION_CLEANUP_HOOK_ENV:
+      title: decommission-cleanup hook environment
+      description: >-
+        A JSON object of environment variables for hooks, such as `{"DNS_TOKEN": "..."}`.
+      json: true
+    FREEZE_GUARD_SLACK_WEBHOOK_URL:
+      title: freeze-guard Slack webhook URL
+    GITHUB_DEPLOYMENTS_TOKEN:
+      title: github-deployments GitHub token
+      description: Needs `Deployments` write and `Metadata` read, or the `repo_deployment` scope.
+    PROPOSAL_CHATOPS_SLACK_BOT_TOKEN:
+      title: proposal-chatops Slack bot token
+    PROPOSAL_CHATOPS_SLACK_SIGNING_SECRET:
+      title: proposal-chatops Slack signing secret
+    RELEASE_NOTES_SLACK_WEBHOOK_URL:
+      title: release-notes Slack webhook URL
+    RELEASE_NOTES_TEAMS_WEBHOOK_URL:
+      title: release-notes Teams webhook URL
+
+ui:
+  ui:order:
+    - image
+    - massdriver
+    - ingress
+    - attribute_enforcer
+    - audit_archiver
+    - autodeploy_downstream
+    - bundle_scanner
+    - decommission_cleanup
+    - freeze_guard
+    - github_deployments
+    - proposal_chatops
+    - release_notes
+    - sandbox_on_join
+    - statuspage
+    - "*"
+  image:
+    ui:order: [repository, tag]
+  massdriver:
+    ui:order: [organization_id, url, app_url]
+  ingress:
+    ui:order: [domain, class_name, cluster_issuer, tls_secret_name]
+  attribute_enforcer:
+    ui:order: [enabled, config, attributes]
+    config:
+      ui:widget: textarea
+      ui:options:
+        rows: 12
+  audit_archiver:
+    ui:order:
+      - enabled
+      - s3_bucket
+      - s3_region
+      - s3_prefix
+      - s3_endpoint
+      - s3_object_lock_mode
+      - s3_object_lock_days
+      - splunk_hec_url
+      - splunk_index
+      - datadog_site
+      - datadog_tags
+  autodeploy_downstream:
+    ui:order: [enabled, attribute_key, attribute_value, attributes]
+  bundle_scanner:
+    ui:order: [enabled, scanners, fail_severity, result_attribute_key, timeout, attributes]
+  decommission_cleanup:
+    ui:order: [enabled, hooks, attributes]
+    hooks:
+      ui:widget: textarea
+      ui:options:
+        rows: 12
+  freeze_guard:
+    ui:order: [enabled, windows, override_token, attributes]
+    windows:
+      ui:widget: textarea
+      ui:options:
+        rows: 12
+  github_deployments:
+    ui:order: [enabled, api_url, repo_attribute_key, ref_attribute_key, environment_name]
+  proposal_chatops:
+    ui:order: [enabled, channel, channel_attribute_key, allowed_users, attributes]
+  release_notes:
+    ui:order: [enabled, include_development]
+  sandbox_on_join:
+    ui:order: [enabled, config]
+    config:
+      ui:widget: textarea
+      ui:options:
+        rows: 12
+  statuspage:
+    ui:order: [enabled, host, config, storage_size_gi, attributes]
+    config:
+      ui:widget: textarea
+      ui:options:
+        rows: 16
