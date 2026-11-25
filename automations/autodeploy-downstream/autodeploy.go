@@ -6,6 +6,8 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"os"
+	"slices"
 	"time"
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
@@ -23,6 +25,8 @@ var (
 	environmentInstancesQuery string
 	//go:embed queries/create_deployment.graphql
 	createDeploymentMutation string
+	//go:embed queries/propose_deployment.graphql
+	proposeDeploymentMutation string
 )
 
 // Definition registers the automation.
@@ -35,21 +39,24 @@ var Definition = automation.Definition{
 		if err != nil {
 			return nil, err
 		}
-		return New(api, automation.Env("AUTO_DEPLOY_ATTR_KEY", "autodeploy"), automation.Env("AUTO_DEPLOY_ATTR_VALUE", "true")), nil
+		rules, err := RulesFromEnv(os.Getenv)
+		if err != nil {
+			return nil, err
+		}
+		return New(api, rules), nil
 	},
 }
 
-// Autodeploy holds the API client and the opt-in attribute.
+// Autodeploy holds the API client and the rules that opt instances in.
 type Autodeploy struct {
-	api       *massdriver.Client
-	attrKey   string
-	attrValue string
-	run       func(func())
+	api   *massdriver.Client
+	rules []Rule
+	run   func(func())
 }
 
 // New returns the automation.
-func New(api *massdriver.Client, attrKey, attrValue string) *Autodeploy {
-	return &Autodeploy{api: api, attrKey: attrKey, attrValue: attrValue, run: func(f func()) { go f() }}
+func New(api *massdriver.Client, rules []Rule) *Autodeploy {
+	return &Autodeploy{api: api, rules: rules, run: func(f func()) { go f() }}
 }
 
 // Handle starts the downstream deploys after a completed PROVISION.
@@ -64,9 +71,19 @@ func (a *Autodeploy) Handle(ctx context.Context, ev automation.Event) error {
 	if err := ev.DecodeEntity(&dep); err != nil {
 		return err
 	}
+	var rules []Rule
+	for _, r := range a.rules {
+		if matches(r.Upstream, ev.Data.Attributes) {
+			rules = append(rules, r)
+		}
+	}
+	if len(rules) == 0 {
+		automation.Logger(ctx).Debug("deploy skipped", "upstream_instance", upstream, "reason", "no_upstream_rule")
+		return nil
+	}
 	// A cascade takes longer than the 10 seconds Massdriver waits for a response.
 	bg := context.WithoutCancel(ctx)
-	a.run(func() { a.deployDownstream(bg, upstream, dep.ID) })
+	a.run(func() { a.deployDownstream(bg, rules, upstream, dep.ID) })
 	return nil
 }
 
@@ -82,7 +99,7 @@ type instance struct {
 	} `json:"dependencies"`
 }
 
-func (a *Autodeploy) deployDownstream(ctx context.Context, upstream, deploymentID string) {
+func (a *Autodeploy) deployDownstream(ctx context.Context, rules []Rule, upstream, deploymentID string) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	log := automation.Logger(ctx).With("upstream_instance", upstream, "upstream_deployment_id", deploymentID)
@@ -95,16 +112,28 @@ func (a *Autodeploy) deployDownstream(ctx context.Context, upstream, deploymentI
 
 	for _, inst := range downstream {
 		l := log.With("instance", inst.ID)
-		if fmt.Sprint(inst.EffectiveAttributes[a.attrKey]) != a.attrValue {
+		i := slices.IndexFunc(rules, func(r Rule) bool { return matches(r.Downstream, inst.EffectiveAttributes) })
+		if i < 0 {
 			l.Debug("deploy skipped", "reason", "not_opted_in")
 			continue
 		}
+		rule := rules[i]
+		l = l.With("rule", rule.Name)
 		if inst.Status != "PROVISIONED" {
 			l.Debug("deploy skipped", "reason", "not_provisioned", "status", inst.Status)
 			continue
 		}
-		msg := fmt.Sprintf("Auto-deploy: upstream %s completed deployment %s", upstream, deploymentID)
-		id, err := a.deploy(ctx, inst, msg)
+		msg := fmt.Sprintf("Auto-deploy (rule %s): upstream %s completed deployment %s", rule.Name, upstream, deploymentID)
+		if rule.Action == ActionPropose {
+			id, err := a.deploy(ctx, proposeDeploymentMutation, "proposeDeployment", inst, msg)
+			if err != nil {
+				l.Error("deployment propose failed", "err", err)
+				continue
+			}
+			l.Info("deployment proposed", "deployment_id", id)
+			continue
+		}
+		id, err := a.deploy(ctx, createDeploymentMutation, "createDeployment", inst, msg)
 		if err != nil {
 			l.Error("deployment create failed", "err", err)
 			continue
@@ -237,18 +266,17 @@ func (a *Autodeploy) resourceConsumers(ctx context.Context, resourceID string) (
 	return insts, envs, nil
 }
 
-func (a *Autodeploy) deploy(ctx context.Context, inst instance, message string) (string, error) {
+// deploy runs createDeployment or proposeDeployment, which take the same arguments and return the same payload.
+func (a *Autodeploy) deploy(ctx context.Context, mutation, field string, inst instance, message string) (string, error) {
 	params := string(inst.Params)
 	if params == "" || params == "null" {
 		params = "{}"
 	}
 
-	var out struct {
-		CreateDeployment massdriver.Payload[struct {
-			ID string `json:"id"`
-		}] `json:"createDeployment"`
-	}
-	err := a.api.Do(ctx, createDeploymentMutation, map[string]any{
+	var out map[string]massdriver.Payload[struct {
+		ID string `json:"id"`
+	}]
+	err := a.api.Do(ctx, mutation, map[string]any{
 		"org":   a.api.OrganizationID,
 		"id":    inst.ID,
 		"input": map[string]any{"action": "PROVISION", "params": params, "message": message},
@@ -256,8 +284,9 @@ func (a *Autodeploy) deploy(ctx context.Context, inst instance, message string) 
 	if err != nil {
 		return "", err
 	}
-	if err := out.CreateDeployment.Err(); err != nil {
+	payload := out[field]
+	if err := payload.Err(); err != nil {
 		return "", err
 	}
-	return out.CreateDeployment.Result.ID, nil
+	return payload.Result.ID, nil
 }
