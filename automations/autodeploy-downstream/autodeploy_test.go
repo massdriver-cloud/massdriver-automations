@@ -360,9 +360,9 @@ func TestStartRefusesBadConfig(t *testing.T) {
 		want string
 	}{
 		{"unknown key", write("unknown.yaml", "rules:\n  - name: all\n    downstream: {autodeploy: \"true\"}\n    when: always\n"), "line 4: field when not found"},
-		{"no downstream", write("nodown.yaml", "rules:\n  - name: all\n    upstream: {md-environment: prod}\n"), "all: downstream needs at least one attribute"},
-		{"bad action", write("action.yaml", "rules:\n  - name: all\n    downstream: {autodeploy: \"true\"}\n    action: plan\n"), `action "plan"`},
-		{"two names", write("dup.yaml", "rules:\n  - name: a\n    downstream: {x: y}\n  - name: a\n    downstream: {x: z}\n"), "a: name is used by two rules"},
+		{"no downstream", write("nodown.yaml", "rules:\n  - name: all\n    upstream: {md-environment: prod}\n"), "rules[0].downstream needs at least one attribute"},
+		{"bad action", write("action.yaml", "rules:\n  - name: all\n    downstream: {autodeploy: \"true\"}\n    action: plan\n"), "rules[0].action: want deploy or propose"},
+		{"two names", write("dup.yaml", "rules:\n  - name: a\n    downstream: {x: y}\n  - name: a\n    downstream: {x: z}\n"), "rules[1].name is used by an earlier rule"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

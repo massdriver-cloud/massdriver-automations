@@ -108,7 +108,7 @@ type Duration time.Duration
 func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 	v, err := time.ParseDuration(n.Value)
 	if err != nil {
-		return fmt.Errorf("line %d: %w", n.Line, err)
+		return fmt.Errorf("line %d: want a duration, such as 2m", n.Line)
 	}
 	*d = Duration(v)
 	return nil
@@ -156,14 +156,14 @@ func (c *Config) Validate() error {
 		c.Site.AccentColor = "#2563eb"
 	}
 	if !colorPattern.MatchString(c.Site.AccentColor) {
-		fail("site.accent_color %q must be a hex color such as #2563eb", c.Site.AccentColor)
+		fail("site.accent_color must be a hex color such as #2563eb")
 	}
 	if c.Site.Timezone == "" {
 		c.Site.Timezone = "UTC"
 	}
 	loc, err := time.LoadLocation(c.Site.Timezone)
 	if err != nil {
-		fail("site.timezone: %v", err)
+		fail("site.timezone is not an IANA zone")
 		loc = time.UTC
 	}
 	c.location = loc
@@ -204,10 +204,10 @@ func (c *Config) Validate() error {
 			p.Slug = slugify(p.Title)
 		}
 		if !slugPattern.MatchString(p.Slug) || reserved[p.Slug] {
-			fail("pages[%d].slug %q must be lowercase letters, digits, and hyphens, and not one of api, hooks, healthz", i, p.Slug)
+			fail("pages[%d].slug must be lowercase letters, digits, and hyphens, and not one of api, hooks, healthz", i)
 		}
 		if slugs[p.Slug] {
-			fail("pages[%d].slug %q is used twice", i, p.Slug)
+			fail("pages[%d].slug is used by an earlier page", i)
 		}
 		slugs[p.Slug] = true
 		if len(p.Environments) == 0 {
@@ -247,9 +247,9 @@ func (c *Config) Validate() error {
 		if !levels[a.Level] {
 			fail("announcements[%d].level must be info, warning, or critical", i)
 		}
-		for _, s := range a.Pages {
+		for j, s := range a.Pages {
 			if !slugs[s] {
-				fail("announcements[%d].pages: no page has slug %q", i, s)
+				fail("announcements[%d].pages[%d] is not the slug of a page", i, j)
 			}
 		}
 	}
@@ -263,9 +263,9 @@ func (c *Config) Validate() error {
 		if len(m.Environments) == 0 {
 			fail("maintenance[%d].environments: at least one environment is required", i)
 		}
-		for _, e := range m.Environments {
+		for j, e := range m.Environments {
 			if !envs[e] {
-				fail("maintenance[%d].environments: %q is not on any page", i, e)
+				fail("maintenance[%d].environments[%d] is not on any page", i, j)
 			}
 		}
 	}

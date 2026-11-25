@@ -500,7 +500,7 @@ pages:
 		t.Fatal("want an error")
 	}
 	for _, want := range []string{
-		`pages[0].slug "Bad Slug" must be`,
+		"pages[0].slug must be",
 		"pages[0].environments[0].title is required",
 		"pages[0].environments[0].components[0].match needs at least one attribute",
 		"pages[0].environments[0].components[0].impact must be degraded, partial_outage, or major_outage",

@@ -98,7 +98,7 @@ func (cfg *Config) Validate() error {
 		cfg.Engine = engineJQ
 	}
 	if cfg.Engine != engineJQ && cfg.Engine != engineGo {
-		return fmt.Errorf("engine %q: use jq or go", cfg.Engine)
+		return errors.New("engine: use jq or go")
 	}
 	if len(cfg.Routes) == 0 {
 		return errors.New("routes: at least one route is required")
@@ -107,14 +107,14 @@ func (cfg *Config) Validate() error {
 	names := map[string]bool{}
 	for i, r := range cfg.Routes {
 		if r.Name == "" {
-			return fmt.Errorf("route %d has no name", i+1)
+			return fmt.Errorf("routes[%d].name is required", i)
 		}
 		if names[r.Name] {
-			return fmt.Errorf("route name %q is used twice", r.Name)
+			return fmt.Errorf("routes[%d].name is used by an earlier route", i)
 		}
 		names[r.Name] = true
 		if err := r.compile(c); err != nil {
-			return fmt.Errorf("route %q: %w", r.Name, err)
+			return fmt.Errorf("routes[%d]: %w", i, err)
 		}
 	}
 	return nil
@@ -150,7 +150,7 @@ func (r *Route) compile(c *compiler) error {
 	}
 	for _, e := range r.Events {
 		if !eventPattern.MatchString(e) {
-			return fmt.Errorf("event %q: use an event type, such as deployment.failed, or <entity>.*", e)
+			return errors.New("events: use event types, such as deployment.failed, or <entity>.*")
 		}
 	}
 	switch {
@@ -161,7 +161,7 @@ func (r *Route) compile(c *compiler) error {
 	case r.Timeout == 0:
 		r.Timeout = syncLimit
 	case !r.Async && r.Timeout > syncLimit:
-		return fmt.Errorf("timeout %s is longer than %s; set async: true", r.Timeout, syncLimit)
+		return fmt.Errorf("timeout is longer than %s; set async: true", syncLimit)
 	}
 	if r.When != "" {
 		p, err := c.value("when", r.When)

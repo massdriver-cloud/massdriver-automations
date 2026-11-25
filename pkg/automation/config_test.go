@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type testConfig struct {
@@ -90,5 +91,27 @@ func TestLoadConfigBadYAML(t *testing.T) {
 	path := writeConfig(t, "rules: [a\n")
 	if err := LoadConfigFile(path, &testConfig{}); err == nil || !strings.HasPrefix(err.Error(), path+": yaml: line ") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestLoadConfigErrorsNeverQuoteValues(t *testing.T) {
+	type cfg struct {
+		Timeout time.Duration `yaml:"timeout"`
+		Tags    []string      `yaml:"tags"`
+		Count   int           `yaml:"count"`
+	}
+	path := writeConfig(t, "timeout: xoxb-not-a-duration\ntags: env:secret-tag\ncount: hunter2\n")
+	err := LoadConfigFile(path, &cfg{})
+	if err == nil {
+		t.Fatal("no error")
+	}
+	for _, v := range []string{"xoxb-not-a-duration", "secret-tag", "hunter2", "time.Duration", "[]string"} {
+		if strings.Contains(err.Error(), v) {
+			t.Errorf("error quotes %q: %v", v, err)
+		}
+	}
+	want := path + ": line 1: a str value is the wrong type here; line 2: a str value is the wrong type here; line 3: a str value is the wrong type here"
+	if err.Error() != want {
+		t.Errorf("err = %q\nwant  %q", err, want)
 	}
 }

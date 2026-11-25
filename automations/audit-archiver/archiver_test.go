@@ -267,10 +267,10 @@ func TestStartRefusesBadConfig(t *testing.T) {
 	cases := map[string]string{
 		"":         "no sink configured",
 		"s3: {}\n": "s3.bucket is required",
-		"s3: {bucket: a, object_lock: {mode: forever, days: 1}}\n": `s3.object_lock.mode must be GOVERNANCE or COMPLIANCE, got "FOREVER"`,
+		"s3: {bucket: a, object_lock: {mode: forever, days: 1}}\n": "s3.object_lock.mode must be GOVERNANCE or COMPLIANCE",
 		"s3: {bucket: a, object_lock: {mode: COMPLIANCE}}\n":       "s3.object_lock.days must be 1 or more",
 		"splunk: {index: main}\n":                                  "splunk.url is required",
-		"datadog: {site: datadoghq.eu, tags: env:prod}\n":          "cannot unmarshal",
+		"datadog: {site: datadoghq.eu, tags: env:prod}\n":          "line 1: a str value is the wrong type here",
 		"s3: {bucket: a, lock_days: 3}\n":                          "field lock_days not found",
 	}
 	for body, want := range cases {

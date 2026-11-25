@@ -107,7 +107,7 @@ func (c *Config) Validate() error {
 			fail("checks[%d].name is required", i)
 		}
 		if names[ch.Name] {
-			fail("checks[%d].name %q is used twice", i, ch.Name)
+			fail("checks[%d].name is used by an earlier check", i)
 		}
 		names[ch.Name] = true
 
@@ -115,10 +115,10 @@ func (c *Config) Validate() error {
 			ch.Timezone = "UTC"
 		}
 		if _, err := time.LoadLocation(ch.Timezone); err != nil {
-			fail("checks[%d].timezone: %v", i, err)
+			fail("checks[%d].timezone is not an IANA zone", i)
 		} else if ch.Schedule != "" {
 			if _, err := cron.ParseStandard(ch.spec()); err != nil {
-				fail("checks[%d].schedule: %v", i, err)
+				fail("checks[%d].schedule is not a cron schedule", i)
 			}
 		}
 		for k, v := range ch.Match {
@@ -152,7 +152,7 @@ func (c *Config) Validate() error {
 			}
 			re, err := regexp.Compile(src)
 			if err != nil {
-				fail("checks[%d].patterns.%s: %v", i, field, err)
+				fail("checks[%d].patterns.%s is not a valid regular expression", i, field)
 			}
 			return re
 		}

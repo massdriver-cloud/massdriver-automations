@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -73,7 +74,7 @@ func DefaultConfig() Config {
 func (c *Config) Validate() error {
 	g := &c.GitHub
 	if g.EnvironmentName != "environment" && g.EnvironmentName != "project-environment" {
-		return fmt.Errorf("github.environment_name must be environment or project-environment, got %q", g.EnvironmentName)
+		return errors.New("github.environment_name must be environment or project-environment")
 	}
 	for key, v := range map[string]string{"api_url": g.APIURL, "token_env": g.TokenEnv, "repo_attribute": g.RepoAttribute, "ref_attribute": g.RefAttribute} {
 		if v == "" {

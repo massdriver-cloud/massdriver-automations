@@ -351,11 +351,11 @@ func TestConfig(t *testing.T) {
 	}
 
 	for body, want := range map[string]string{
-		"fail_severity: severe\n": `fail_severity "SEVERE"`,
-		"scanners: [tfsec]\n":     `unknown scanner "tfsec"`,
+		"fail_severity: severe\n": "fail_severity must be UNKNOWN",
+		"scanners: [tfsec]\n":     "scanners: use trivy, checkov, or both",
 		"scanners: []\n":          "scanners: set trivy, checkov, or both",
 		"timeout: 0s\n":           "timeout must be more than 0",
-		"timeout: soon\n":         "cannot unmarshal",
+		"timeout: soon\n":         "line 1: a str value is the wrong type here",
 	} {
 		cfg := DefaultConfig()
 		err := automation.DecodeConfig([]byte(body), &cfg)

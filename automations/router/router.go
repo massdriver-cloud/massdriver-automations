@@ -27,7 +27,9 @@ const (
 	automationName = "router"
 	queueSize      = 100
 	maxOutputBytes = 4096
-	doneTTL        = time.Hour
+	// errorOutputBytes is how much of a failed step's output an error record keeps.
+	errorOutputBytes = 512
+	doneTTL          = time.Hour
 )
 
 // Definition registers the automation.
@@ -95,6 +97,7 @@ func (r *Router) Handle(ctx context.Context, ev automation.Event) error {
 		}
 		ok, err := rt.selects(ctx, in)
 		if err != nil {
+			automation.Logger(ctx).Debug("route match failed", "route", rt.Name, "detail", exprDetail(err))
 			automation.Logger(ctx).Error("route match failed", "route", rt.Name, "err", err)
 			errs = append(errs, fmt.Errorf("route %q: %w", rt.Name, err))
 			continue
@@ -186,9 +189,11 @@ func (r *Router) runRoute(ctx context.Context, rt *Route, in input) error {
 			err = fmt.Errorf("route timed out after %s: %w", rt.Timeout, err)
 		}
 		if err != nil {
-			// Output is the step's own response or command output, kept because it is what explains the failure.
+			// Output can hold whatever a response or a script printed, so the full text stays at debug. The tail
+			// usually explains the failure.
+			log.Debug("step failed", "step", i+1, "action", s.kind(), "output", out, "detail", exprDetail(err))
 			log.Error("route failed", "step", i+1, "action", s.kind(), "duration_ms", millis(time.Since(routeStart)),
-				"output", out, "err", err)
+				"output_tail", tail(out, errorOutputBytes), "err", err)
 			return fmt.Errorf("step %d (%s): %w", i+1, s.kind(), err)
 		}
 		log.Debug("step completed", "step", i+1, "action", s.kind(), "duration_ms", millis(time.Since(start)),
@@ -367,3 +372,11 @@ func (d *doneSet) add(id, route string) {
 }
 
 func millis(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
+
+// tail returns the last n bytes of s.
+func tail(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return "..." + s[len(s)-n:]
+}

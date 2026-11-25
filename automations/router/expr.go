@@ -3,6 +3,7 @@ package router
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -57,6 +58,24 @@ type program struct {
 	tmpl *template.Template
 }
 
+// exprError hides the cause from its text. jq and template errors quote the values they work on, which can be
+// config, event data, or an environment variable that holds a credential. The cause goes only to debug logs.
+type exprError struct {
+	name, msg string
+	cause     error
+}
+
+func (e *exprError) Error() string { return e.name + ": " + e.msg }
+
+// exprDetail returns the hidden cause of an expression error in err, or "".
+func exprDetail(err error) string {
+	var e *exprError
+	if errors.As(err, &e) {
+		return e.cause.Error()
+	}
+	return ""
+}
+
 // input is what every expression sees: the event as Massdriver sent it.
 type input struct {
 	ev   automation.Event
@@ -71,7 +90,7 @@ func (c *compiler) text(name, src string) (*program, error) {
 	}
 	lit, err := jqStringLiteral(src)
 	if err != nil {
-		return nil, fmt.Errorf("%s: jq: %w", name, err)
+		return nil, &exprError{name: name, msg: "an interpolation does not compile as jq", cause: err}
 	}
 	return c.jq(name, lit)
 }
@@ -100,7 +119,7 @@ func jqStringLiteral(src string) (string, error) {
 			}
 		}
 		if end < 0 {
-			return "", fmt.Errorf("no valid expression closes %q", src[start:])
+			return "", errors.New("no valid expression closes an interpolation")
 		}
 		b.WriteString(`\(` + rest[:end] + `)`)
 		src = rest[end+1:]
@@ -124,11 +143,11 @@ func (c *compiler) value(name, src string) (*program, error) {
 func (c *compiler) jq(name, src string) (*program, error) {
 	q, err := gojq.Parse(src)
 	if err != nil {
-		return nil, fmt.Errorf("%s: jq: %w", name, err)
+		return nil, &exprError{name: name, msg: "does not compile as jq", cause: err}
 	}
 	code, err := gojq.Compile(q, gojq.WithEnvironLoader(routeEnviron))
 	if err != nil {
-		return nil, fmt.Errorf("%s: jq: %w", name, err)
+		return nil, &exprError{name: name, msg: "does not compile as jq", cause: err}
 	}
 	return &program{name: name, jq: code}, nil
 }
@@ -136,7 +155,7 @@ func (c *compiler) jq(name, src string) (*program, error) {
 func (c *compiler) tmpl(name, src string) (*program, error) {
 	t, err := template.New(name).Option("missingkey=error").Funcs(templateFuncs(automation.Event{})).Parse(src)
 	if err != nil {
-		return nil, fmt.Errorf("%s: template: %w", name, err)
+		return nil, &exprError{name: name, msg: "does not compile as a Go template", cause: err}
 	}
 	return &program{name: name, tmpl: t}, nil
 }
@@ -151,7 +170,7 @@ func (p *program) eval(ctx context.Context, in input) (any, error) {
 			return nil, fmt.Errorf("%s: jq produced no output", p.name)
 		}
 		if err, ok := v.(error); ok {
-			return nil, fmt.Errorf("%s: jq: %w", p.name, err)
+			return nil, &exprError{name: p.name, msg: "jq evaluation failed", cause: err}
 		}
 		return v, nil
 	}
@@ -161,7 +180,7 @@ func (p *program) eval(ctx context.Context, in input) (any, error) {
 	}
 	var b strings.Builder
 	if err := t.Funcs(templateFuncs(in.ev)).Execute(&b, in.data); err != nil {
-		return nil, fmt.Errorf("%s: template: %w", p.name, err)
+		return nil, &exprError{name: p.name, msg: "template evaluation failed", cause: err}
 	}
 	return b.String(), nil
 }

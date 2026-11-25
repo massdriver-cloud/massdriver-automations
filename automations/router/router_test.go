@@ -1,9 +1,11 @@
 package router
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -535,5 +537,35 @@ func TestNoConfigFileRefusesStart(t *testing.T) {
 	var ce *automation.ConfigError
 	if !errors.As(err, &ce) || !strings.HasSuffix(err.Error(), "routes: at least one route is required") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestFailedStepLogsOnlyTheOutputTailAtError(t *testing.T) {
+	_, h := setup(t, `
+routes:
+  - name: noisy
+    events: [instance.deleted]
+    do:
+      - exec: [/bin/sh, -c, 'printf "printed-token-%01000d-last-line" 0; exit 3']
+`, nil)
+
+	run := func(level slog.Level) string {
+		var buf bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: level})))
+		defer slog.SetDefault(prev)
+		body := event("evt-"+level.String(), "instance.deleted", map[string]any{"identifier": "x"}, instanceAttrs, map[string]any{})
+		if code := post(t, h, body); code != http.StatusInternalServerError {
+			t.Fatalf("status = %d", code)
+		}
+		return buf.String()
+	}
+
+	info := run(slog.LevelInfo)
+	if strings.Contains(info, "printed-token") || !strings.Contains(info, "-last-line") || !strings.Contains(info, "exit status 3") {
+		t.Fatalf("info logs = %s", info)
+	}
+	if debug := run(slog.LevelDebug); !strings.Contains(debug, "printed-token") {
+		t.Fatalf("debug logs = %s", debug)
 	}
 }

@@ -77,15 +77,20 @@ func DecodeConfig(b []byte, cfg any) error {
 	return nil
 }
 
-var goTypeName = regexp.MustCompile(` in type .*$`)
+var (
+	goTypeName = regexp.MustCompile(` in type .*$`)
+	// yaml.v3 quotes the value that does not fit, and a config value must never reach a log.
+	wrongType = regexp.MustCompile("cannot unmarshal !!(\\w+)( `[^`]*`)? into .*$")
+)
 
-// yaml.v3 puts each field error on its own line and names the Go type. One line without Go names reads better in
-// a log record and means something to the person who wrote the file.
+// yaml.v3 puts each field error on its own line, quotes values, and names Go types. One line with only line numbers
+// and keys is safe to log and means something to the person who wrote the file.
 func cleanYAMLError(err error) error {
 	msg := strings.TrimPrefix(err.Error(), "yaml: unmarshal errors:\n")
 	lines := strings.Split(msg, "\n")
 	for i := range lines {
-		lines[i] = goTypeName.ReplaceAllString(strings.TrimSpace(lines[i]), "")
+		l := goTypeName.ReplaceAllString(strings.TrimSpace(lines[i]), "")
+		lines[i] = wrongType.ReplaceAllString(l, "a $1 value is the wrong type here")
 	}
 	return errors.New(strings.Join(lines, "; "))
 }

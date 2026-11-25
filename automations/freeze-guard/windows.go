@@ -1,6 +1,7 @@
 package freezeguard
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -107,7 +108,7 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("windows[%d]: name is required", i)
 		}
 		if seen[name] {
-			return fmt.Errorf("%s: name is used by two windows", name)
+			return fmt.Errorf("windows[%d].name is used by an earlier window", i)
 		}
 		seen[name] = true
 		tz := fw.Timezone
@@ -119,7 +120,7 @@ func (c *Config) Validate() error {
 		}
 		loc, err := time.LoadLocation(tz)
 		if err != nil {
-			return fmt.Errorf("%s: %w", name, err)
+			return fmt.Errorf("windows[%d].timezone is not an IANA zone", i)
 		}
 
 		actions := fw.Actions
@@ -131,7 +132,7 @@ func (c *Config) Validate() error {
 		}
 		for _, a := range actions {
 			if entity, verb, ok := strings.Cut(a, ":"); !ok || entity == "" || verb == "" {
-				return fmt.Errorf("%s: action %q is not like \"instance:deploy\"", name, a)
+				return fmt.Errorf("windows[%d].actions: each action must be like instance:deploy", i)
 			}
 		}
 
@@ -146,7 +147,7 @@ func (c *Config) Validate() error {
 			w.Conditions = map[string][]string{}
 			for k, v := range fw.Match {
 				if len(v) == 0 {
-					return fmt.Errorf("%s: match %s has no value", name, k)
+					return fmt.Errorf("windows[%d].match.%s has no value", i, k)
 				}
 				w.Conditions[k] = sortedUnique(v)
 			}
@@ -154,30 +155,30 @@ func (c *Config) Validate() error {
 
 		fixed := fw.From != "" || fw.To != ""
 		if fixed == (len(fw.Weekly) > 0) {
-			return fmt.Errorf("%s: set either weekly or from and to", name)
+			return fmt.Errorf("windows[%d]: set either weekly or from and to", i)
 		}
 		if fixed {
 			if w.from, err = parseTime(fw.From, loc); err != nil {
-				return fmt.Errorf("%s: from: %w", name, err)
+				return fmt.Errorf("windows[%d]: from: %w", i, err)
 			}
 			if w.to, err = parseTime(fw.To, loc); err != nil {
-				return fmt.Errorf("%s: to: %w", name, err)
+				return fmt.Errorf("windows[%d]: to: %w", i, err)
 			}
 			if !w.to.After(w.from) {
-				return fmt.Errorf("%s: to must be after from", name)
+				return fmt.Errorf("windows[%d]: to must be after from", i)
 			}
 		}
 		for _, r := range fw.Weekly {
 			from, err := parseWeekTime(r.From)
 			if err != nil {
-				return fmt.Errorf("%s: weekly from: %w", name, err)
+				return fmt.Errorf("windows[%d]: weekly from: %w", i, err)
 			}
 			to, err := parseWeekTime(r.To)
 			if err != nil {
-				return fmt.Errorf("%s: weekly to: %w", name, err)
+				return fmt.Errorf("windows[%d]: weekly to: %w", i, err)
 			}
 			if from == to {
-				return fmt.Errorf("%s: weekly from and to are the same", name)
+				return fmt.Errorf("windows[%d]: weekly from and to are the same", i)
 			}
 			w.weekly = append(w.weekly, [2]int{from, to})
 		}
@@ -202,7 +203,7 @@ func parseTime(s string, loc *time.Location) (time.Time, error) {
 			return t, nil
 		}
 	}
-	return time.Time{}, fmt.Errorf("%q is not RFC 3339, YYYY-MM-DD HH:MM, or YYYY-MM-DD", s)
+	return time.Time{}, errors.New("want RFC 3339, YYYY-MM-DD HH:MM, or YYYY-MM-DD")
 }
 
 var weekdays = map[string]int{"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
@@ -212,11 +213,11 @@ func parseWeekTime(s string) (int, error) {
 	day, clock, ok := strings.Cut(strings.TrimSpace(s), " ")
 	d, known := weekdays[strings.ToLower(day)[:min(3, len(day))]]
 	if !ok || !known {
-		return 0, fmt.Errorf("%q is not like \"Fri 17:00\"", s)
+		return 0, errors.New(`want a day and a time, such as "Fri 17:00"`)
 	}
 	t, err := time.Parse("15:04", strings.TrimSpace(clock))
 	if err != nil {
-		return 0, fmt.Errorf("%q is not like \"Fri 17:00\"", s)
+		return 0, errors.New(`want a day and a time, such as "Fri 17:00"`)
 	}
 	return d*24*60 + t.Hour()*60 + t.Minute(), nil
 }

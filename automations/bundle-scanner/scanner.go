@@ -75,7 +75,7 @@ func DefaultConfig() Config {
 func (c *Config) Validate() error {
 	c.FailSeverity = strings.ToUpper(c.FailSeverity)
 	if _, ok := severityRank[c.FailSeverity]; !ok {
-		return fmt.Errorf("fail_severity %q is not one of UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL", c.FailSeverity)
+		return errors.New("fail_severity must be UNKNOWN, LOW, MEDIUM, HIGH, or CRITICAL")
 	}
 	if c.Timeout <= 0 {
 		return errors.New("timeout must be more than 0, such as 10m")
@@ -87,7 +87,7 @@ func (c *Config) Validate() error {
 	for _, name := range c.Scanners {
 		tool, ok := tools[name]
 		if !ok {
-			return fmt.Errorf("scanners: unknown scanner %q; use trivy, checkov, or both", name)
+			return errors.New("scanners: use trivy, checkov, or both")
 		}
 		c.tools = append(c.tools, tool)
 	}

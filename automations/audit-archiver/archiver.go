@@ -123,10 +123,10 @@ func (c *Config) Validate() error {
 		if l := s.ObjectLock; l != nil {
 			l.Mode = types.ObjectLockMode(strings.ToUpper(string(l.Mode)))
 			if l.Mode != types.ObjectLockModeGovernance && l.Mode != types.ObjectLockModeCompliance {
-				return fmt.Errorf("s3.object_lock.mode must be GOVERNANCE or COMPLIANCE, got %q", l.Mode)
+				return errors.New("s3.object_lock.mode must be GOVERNANCE or COMPLIANCE")
 			}
 			if l.Days < 1 {
-				return fmt.Errorf("s3.object_lock.days must be 1 or more, got %d", l.Days)
+				return errors.New("s3.object_lock.days must be 1 or more")
 			}
 		}
 	}

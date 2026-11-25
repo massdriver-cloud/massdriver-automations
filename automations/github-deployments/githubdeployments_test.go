@@ -358,7 +358,7 @@ func TestStartReadsTheTokenFromTheNamedEnvVar(t *testing.T) {
 
 func TestStartRefusesBadConfig(t *testing.T) {
 	for body, want := range map[string]string{
-		"github: {environment_name: team}\n": `github.environment_name must be environment or project-environment, got "team"`,
+		"github: {environment_name: team}\n": "github.environment_name must be environment or project-environment",
 		"github: {repo_attribute: \"\"}\n":   "github.repo_attribute must not be empty",
 		"github: {token: ghp_x}\n":           "field token not found",
 	} {

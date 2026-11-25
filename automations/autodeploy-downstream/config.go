@@ -68,27 +68,27 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("rules[%d]: name is required", i)
 		}
 		if seen[r.Name] {
-			return fmt.Errorf("%s: name is used by two rules", r.Name)
+			return fmt.Errorf("rules[%d].name is used by an earlier rule", i)
 		}
 		seen[r.Name] = true
 		if len(r.Downstream) == 0 {
-			return fmt.Errorf("%s: downstream needs at least one attribute", r.Name)
+			return fmt.Errorf("rules[%d].downstream needs at least one attribute", i)
 		}
 		for k, v := range r.Downstream {
 			if len(v) == 0 {
-				return fmt.Errorf("%s: downstream %s has no values", r.Name, k)
+				return fmt.Errorf("rules[%d].downstream.%s has no values", i, k)
 			}
 		}
 		for k, v := range r.Upstream {
 			if len(v) == 0 {
-				return fmt.Errorf("%s: upstream %s has no values", r.Name, k)
+				return fmt.Errorf("rules[%d].upstream.%s has no values", i, k)
 			}
 		}
 		if r.Action == "" {
 			r.Action = ActionDeploy
 		}
 		if r.Action != ActionDeploy && r.Action != ActionPropose {
-			return fmt.Errorf("%s: action %q: want deploy or propose", r.Name, r.Action)
+			return fmt.Errorf("rules[%d].action: want deploy or propose", i)
 		}
 	}
 	return nil
