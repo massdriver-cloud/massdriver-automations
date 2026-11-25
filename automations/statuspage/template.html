@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · {{.Site.Title}}</title>
+<meta name="description" content="{{.Headline}}">
+<link rel="alternate" type="application/atom+xml" title="{{.Title}} incidents" href="{{.FeedHref}}">
+<style>
+:root {
+  --accent: {{.Site.Accent}};
+  --bg: #f7f8fa;
+  --card: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --operational: #16a34a;
+  --maintenance: #2563eb;
+  --degraded: #ca8a04;
+  --partial_outage: #ea580c;
+  --major_outage: #dc2626;
+  --none: #d1d5db;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0f17;
+    --card: #131a26;
+    --text: #e5e7eb;
+    --muted: #9ca3af;
+    --border: #243042;
+    --operational: #22c55e;
+    --maintenance: #3b82f6;
+    --degraded: #eab308;
+    --partial_outage: #f97316;
+    --major_outage: #ef4444;
+    --none: #374151;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+a { color: var(--accent); }
+.wrap { max-width: 860px; margin: 0 auto; padding: 32px 16px 48px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; color: var(--text); }
+.brand img { height: 32px; width: auto; }
+.brand span { font-size: 20px; font-weight: 650; }
+nav { display: flex; gap: 4px; flex-wrap: wrap; }
+nav a { padding: 6px 12px; border-radius: 999px; text-decoration: none; color: var(--muted); font-size: 14px; }
+nav a[aria-current="page"] { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+.description { color: var(--muted); margin: -12px 0 24px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 24px; overflow: hidden; }
+.card > h2 { font-size: 16px; margin: 0; padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.card > h2 small { font-weight: 500; font-size: 13px; }
+.notice { border-radius: 12px; padding: 12px 16px; margin-bottom: 12px; border: 1px solid var(--border); background: var(--card); border-left: 4px solid var(--maintenance); }
+.notice.warning { border-left-color: var(--degraded); }
+.notice.critical { border-left-color: var(--major_outage); }
+.banner { border-radius: 12px; padding: 18px 20px; margin-bottom: 24px; color: #fff; font-size: 18px; font-weight: 650; display: flex; align-items: center; gap: 12px; }
+.banner.operational { background: var(--operational); }
+.banner.maintenance { background: var(--maintenance); }
+.banner.degraded { background: var(--degraded); }
+.banner.partial_outage { background: var(--partial_outage); }
+.banner.major_outage { background: var(--major_outage); }
+.dot { width: 10px; height: 10px; border-radius: 50%; flex: none; display: inline-block; }
+.banner .dot { background: #fff; width: 12px; height: 12px; }
+.operational .dot, .dot.operational { background: var(--operational); }
+.maintenance .dot, .dot.maintenance { background: var(--maintenance); }
+.degraded .dot, .dot.degraded { background: var(--degraded); }
+.partial_outage .dot, .dot.partial_outage { background: var(--partial_outage); }
+.major_outage .dot, .dot.major_outage { background: var(--major_outage); }
+.label.operational { color: var(--operational); }
+.label.maintenance { color: var(--maintenance); }
+.label.degraded { color: var(--degraded); }
+.label.partial_outage { color: var(--partial_outage); }
+.label.major_outage { color: var(--major_outage); }
+.component { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.component:last-child { border-bottom: 0; }
+.row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.row h3 { font-size: 15px; margin: 0; font-weight: 600; }
+.row .label { font-size: 14px; white-space: nowrap; }
+.component p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.bars { display: flex; gap: 2px; height: 32px; margin-top: 10px; }
+.bars span { flex: 1 1 0; min-width: 0; border-radius: 2px; background: var(--none); }
+.bars .operational { background: var(--operational); }
+.bars .maintenance { background: var(--maintenance); }
+.bars .degraded { background: var(--degraded); }
+.bars .partial_outage { background: var(--partial_outage); }
+.bars .major_outage { background: var(--major_outage); }
+.bars span:hover { opacity: .7; }
+.scale { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; margin-top: 6px; }
+.scale .short { display: none; }
+.incident { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.incident:last-child { border-bottom: 0; }
+.incident h3 { margin: 0; font-size: 15px; }
+.meta { color: var(--muted); font-size: 13px; }
+.updates { list-style: none; margin: 10px 0 0; padding: 0; }
+.updates li { padding: 6px 0 6px 12px; border-left: 2px solid var(--border); font-size: 14px; }
+.updates b { text-transform: capitalize; }
+.empty { padding: 16px 20px; color: var(--muted); }
+footer { color: var(--muted); font-size: 13px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+footer a { color: var(--muted); }
+footer .links { display: flex; gap: 16px; flex-wrap: wrap; }
+@media (max-width: 640px) {
+  .wrap { padding-top: 20px; }
+  .bars span:not(.recent) { display: none; }
+  .scale .long { display: none; }
+  .scale .short { display: inline; }
+  .banner { font-size: 16px; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="brand" href="{{.Home}}">
+      {{if .Site.Logo}}<img src="{{.Site.Logo}}" alt="">{{end}}
+      <span>{{.Site.Title}}</span>
+    </a>
+    {{if .Nav}}
+    <nav>
+      {{range .Nav}}<a href="{{.Href}}"{{if .Current}} aria-current="page"{{end}}>{{.Title}}</a>{{end}}
+    </nav>
+    {{end}}
+  </header>
+  {{if .Description}}<p class="description">{{.Description}}</p>{{end}}
+
+  {{range .Announcements}}
+  <div class="notice {{.Level}}" role="note">{{.Message}}{{if .URL}} <a href="{{.URL}}">More</a>{{end}}</div>
+  {{end}}
+
+  <section class="banner {{.Status}}" id="status" role="status">
+    <span class="dot"></span>{{.Headline}}
+  </section>
+
+  {{if .ActiveIncidents}}
+  <section class="card" id="active-incidents">
+    <h2>Active incidents</h2>
+    {{range .ActiveIncidents}}
+    <article class="incident" id="incident-{{.ID}}">
+      <h3>{{.Title}}</h3>
+      <div class="meta"><span class="label {{.Impact}}">{{.ImpactLabel}}</span> · {{.Environment}} · Started {{.Started}} · {{.Duration}}</div>
+      <ul class="updates">
+        {{range .Updates}}<li><b>{{.Status}}</b> · {{.At}}<br>{{.Message}}</li>{{end}}
+      </ul>
+    </article>
+    {{end}}
+  </section>
+  {{end}}
+
+  {{if .Maintenance}}
+  <section class="card" id="maintenance">
+    <h2>Maintenance</h2>
+    {{range .Maintenance}}
+    <article class="incident">
+      <h3><span class="label maintenance">{{if .Active}}In progress{{else}}Scheduled{{end}}</span> · {{.Title}}</h3>
+      <div class="meta">{{.Scope}}{{if .Window}} · {{.Window}}{{end}}</div>
+      {{if .Description}}<p>{{.Description}}</p>{{end}}
+    </article>
+    {{end}}
+  </section>
+  {{end}}
+
+  {{range .Environments}}
+  <section class="card environment">
+    <h2>{{.Title}} <small class="label {{.Status}}">{{.StatusLabel}}</small></h2>
+    {{if .Description}}<p class="empty">{{.Description}}</p>{{end}}
+    {{range .Components}}
+    <div class="component">
+      <div class="row">
+        <h3>{{.Title}}</h3>
+        <span class="label {{.Status}}">{{.StatusLabel}}</span>
+      </div>
+      {{if .Description}}<p>{{.Description}}</p>{{end}}
+      <div class="bars" role="img" aria-label="Daily status for {{.Title}}">
+        {{range .Days}}<span class="{{.Status}}{{if .Recent}} recent{{end}}" title="{{.Label}}"></span>{{end}}
+      </div>
+      <div class="scale">
+        <span><span class="long">{{$.HistoryDays}} days ago</span><span class="short">30 days ago</span></span>
+        {{if .Uptime}}<span>{{.Uptime}} uptime</span>{{end}}
+        <span>Today</span>
+      </div>
+    </div>
+    {{else}}
+    <p class="empty">No components.</p>
+    {{end}}
+  </section>
+  {{end}}
+
+  <section class="card" id="history">
+    <h2>Past incidents</h2>
+    {{range .PastIncidents}}
+    <article class="incident" id="incident-{{.ID}}">
+      <h3>{{.Title}}</h3>
+      <div class="meta">{{.Environment}} · {{.Started}} to {{.Resolved}} · {{.Duration}}</div>
+      <ul class="updates">
+        {{range .Updates}}<li><b>{{.Status}}</b> · {{.At}}<br>{{.Message}}</li>{{end}}
+      </ul>
+    </article>
+    {{else}}
+    <p class="empty">No incidents in the last {{.HistoryDays}} days.</p>
+    {{end}}
+  </section>
+
+  <footer>
+    <span>{{if .Updated}}Last change {{.Updated}}{{end}}</span>
+    <span class="links">
+      {{range .Site.FooterLinks}}<a href="{{.URL}}">{{.Title}}</a>{{end}}
+      <a href="{{.FeedHref}}">Atom feed</a>
+      <a href="{{.JSONHref}}">JSON</a>
+    </span>
+  </footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,6 @@
+query Upstream($org: ID!, $id: ID!) {
+  instance(organizationId: $org, id: $id) {
+    environment { id }
+    resources { resource { id } }
+  }
+}

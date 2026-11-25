@@ -1,0 +1,6 @@
+query ComponentAttributes($org: ID!, $id: ID!) {
+  component(organizationId: $org, id: $id) {
+    attributes
+    effectiveAttributes
+  }
+}

@@ -1,0 +1,7 @@
+mutation ApproveDeployment($org: ID!, $id: UUID!) {
+  approveDeployment(organizationId: $org, id: $id) {
+    successful
+    messages { field message }
+    result { id status }
+  }
+}

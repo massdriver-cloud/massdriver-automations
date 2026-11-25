@@ -1,0 +1,77 @@
+site:
+  title: Acme Status
+  # Absolute URLs in the Atom feed and status.json start with this.
+  base_url: https://status.acme.com
+  logo: https://acme.com/logo.svg
+  accent_color: "#4f46e5"
+  # Dates on the page and the day boundaries of the uptime bars use this zone.
+  timezone: America/Los_Angeles
+  # A Go html/template file that replaces the built-in page. Relative to this file.
+  # template: ./template.html
+  # Alarm names and provider messages can name internal resources. Off by default.
+  show_alarm_details: false
+  footer_links:
+    - title: Support
+      url: https://acme.com/support
+    - title: Privacy
+      url: https://acme.com/privacy
+
+# Days of uptime bars and incident history.
+history_days: 90
+
+# A running PROVISION or DECOMMISSION deployment shows its component as under maintenance.
+deploys_as_maintenance: true
+
+# An alarm must fire this long before it counts. Shorter alarms leave no incident.
+min_duration: 2m
+
+# Custom attributes that change how an instance appears. These are the defaults.
+attributes:
+  title: status_title    # the row title when an environment lists no components
+  hidden: status_hidden  # "true" hides the instance
+  impact: status_impact  # degraded, partial_outage, or major_outage when one of its alarms fires
+
+announcements:
+  - message: We are moving to a new data center on December 6.
+    level: info          # info, warning, or critical
+    url: https://acme.com/blog/new-data-center
+    pages: [acme]        # leave out to show on every page
+    starts_at: 2026-11-20T00:00:00Z
+    ends_at: 2026-12-07T00:00:00Z
+
+maintenance:
+  - title: Database upgrade
+    description: The database restarts once. Writes pause for about a minute.
+    starts_at: 2026-12-06T10:00:00Z
+    ends_at: 2026-12-06T11:00:00Z
+    environments: [api-prod]
+    components: [Database]  # component titles; leave out for the whole environment
+
+pages:
+  # The first page is also served at /.
+  - title: Acme
+    slug: acme
+    description: Status of the Acme API and dashboard.
+    environments:
+      - id: api-prod
+        title: Production
+        components:
+          # Rows appear in this order. An instance belongs to the first component it matches.
+          - title: API
+            description: REST and GraphQL endpoints.
+            match: {md-component: api}
+          - title: Database
+            match: {md-component: database}
+            impact: partial_outage
+          - title: Background jobs
+            match: {md-component: worker}
+      - id: web-prod
+        title: Dashboard
+        deploys_as_maintenance: false
+        # No components: one row for each instance, titled by status_title or the instance name.
+
+  - title: Internal
+    slug: internal
+    environments:
+      - id: api-staging
+        title: Staging

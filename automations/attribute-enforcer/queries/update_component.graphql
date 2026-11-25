@@ -1,0 +1,7 @@
+mutation UpdateComponentAttributes($org: ID!, $id: ID!, $input: UpdateComponentInput!) {
+  updateComponent(organizationId: $org, id: $id, input: $input) {
+    successful
+    messages { field message }
+    result { id }
+  }
+}

@@ -1,0 +1,7 @@
+mutation UpdateEnvironmentAttributes($org: ID!, $id: ID!, $input: UpdateEnvironmentInput!) {
+  updateEnvironment(organizationId: $org, id: $id, input: $input) {
+    successful
+    messages { field message }
+    result { id }
+  }
+}

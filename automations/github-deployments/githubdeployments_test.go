@@ -1,0 +1,337 @@
+package githubdeployments
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
+)
+
+var secret = []byte("0123456789abcdef0123456789abcdef")
+
+func deploymentEvent(id, typ, action string, attrs map[string]any) []byte {
+	attributes := map[string]any{
+		"md-project":     "api",
+		"md-environment": "prod",
+		"md-component":   "database",
+		"md-instance":    "api-prod-database",
+		"md-bundle":      "aws-aurora@1.2.3",
+		"github_repo":    "acme/api",
+	}
+	for k, v := range attrs {
+		if v == nil {
+			delete(attributes, k)
+		} else {
+			attributes[k] = v
+		}
+	}
+	b, _ := json.Marshal(map[string]any{
+		"id":      id,
+		"type":    typ,
+		"subject": "mri:acme:api:prod:deployment:5c1de0a7-92b4-4f1e-8d3a-6e27c9f0b815",
+		"data": map[string]any{
+			"entity": map[string]any{
+				"id":               "5c1de0a7-92b4-4f1e-8d3a-6e27c9f0b815",
+				"action":           action,
+				"version":          "1.2.3",
+				"message":          nil,
+				"deployed_by_name": "Jane Doe",
+			},
+			"attributes": attributes,
+			"metadata":   map[string]any{"deployment_action": action},
+		},
+	})
+	return b
+}
+
+type call struct {
+	Method string
+	Path   string
+	Body   map[string]any
+}
+
+type fakeGitHub struct {
+	mu       sync.Mutex
+	calls    []call
+	existing []map[string]any
+	statuses map[string][]string
+	nextID   int64
+	fail     bool
+}
+
+func newFakeGitHub() *fakeGitHub {
+	return &fakeGitHub{statuses: map[string][]string{}, nextID: 9001}
+}
+
+func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	var body map[string]any
+	b, _ := io.ReadAll(r.Body)
+	_ = json.Unmarshal(b, &body)
+	f.calls = append(f.calls, call{Method: r.Method, Path: r.URL.RequestURI(), Body: body})
+	if f.fail {
+		http.Error(w, `{"message":"Server Error"}`, http.StatusBadGateway)
+		return
+	}
+
+	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/api":
+		_ = json.NewEncoder(w).Encode(map[string]any{"default_branch": "trunk"})
+	case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/api/deployments":
+		_ = json.NewEncoder(w).Encode(f.existing)
+	case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/api/deployments":
+		id := f.nextID
+		f.nextID++
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": id})
+	case strings.HasSuffix(r.URL.Path, "/statuses"):
+		id := strings.Split(r.URL.Path, "/")[5]
+		if r.Method == http.MethodPost {
+			f.statuses[id] = append([]string{body["state"].(string)}, f.statuses[id]...)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		out := []map[string]any{}
+		for _, s := range f.statuses[id] {
+			out = append(out, map[string]any{"state": s})
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (f *fakeGitHub) writes() []call {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []call
+	for _, c := range f.calls {
+		if c.Method == http.MethodPost {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+func testConfig(githubURL string) Config {
+	return Config{
+		GitHubURL:       githubURL,
+		GitHubToken:     "ghp_test",
+		AppURL:          "https://app.massdriver.cloud",
+		RepoAttrKey:     "github_repo",
+		RefAttrKey:      "github_ref",
+		EnvironmentName: "environment",
+	}
+}
+
+func post(t *testing.T, h http.Handler, id string, body []byte) int {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, automation.HookPath, strings.NewReader(string(body)))
+	automation.SignRequest(req, secret, id, body, time.Now())
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	return w.Code
+}
+
+const logURL = "https://app.massdriver.cloud/orgs/acme/projects/api/environments/prod/instances/database?deployment=5c1de0a7-92b4-4f1e-8d3a-6e27c9f0b815&tab=history"
+
+func TestStartedThenCompletedCreatesOneDeploymentWithTwoStatuses(t *testing.T) {
+	gh := newFakeGitHub()
+	srv := httptest.NewServer(gh)
+	defer srv.Close()
+	h := automation.Handler("github-deployments", New(testConfig(srv.URL)), secret)
+
+	if code := post(t, h, "ev-1", deploymentEvent("ev-1", "deployment.started", "PROVISION", nil)); code != http.StatusNoContent {
+		t.Fatalf("started: got %d", code)
+	}
+	if code := post(t, h, "ev-2", deploymentEvent("ev-2", "deployment.completed", "PROVISION", nil)); code != http.StatusNoContent {
+		t.Fatalf("completed: got %d", code)
+	}
+
+	want := []call{
+		{Method: "POST", Path: "/repos/acme/api/deployments", Body: map[string]any{
+			"ref":         "trunk",
+			"task":        "massdriver",
+			"environment": "prod",
+			"description": "Deploy of api-prod-database (aws-aurora@1.2.3) by Jane Doe",
+			"payload": map[string]any{
+				"massdriver_deployment_id": "5c1de0a7-92b4-4f1e-8d3a-6e27c9f0b815",
+				"instance":                 "api-prod-database",
+				"bundle":                   "aws-aurora@1.2.3",
+				"action":                   "PROVISION",
+			},
+			"auto_merge":        false,
+			"required_contexts": []any{},
+		}},
+		{Method: "POST", Path: "/repos/acme/api/deployments/9001/statuses", Body: map[string]any{
+			"state":       "in_progress",
+			"log_url":     logURL,
+			"description": "Deploy of api-prod-database started",
+			"environment": "prod",
+		}},
+		{Method: "POST", Path: "/repos/acme/api/deployments/9001/statuses", Body: map[string]any{
+			"state":       "success",
+			"log_url":     logURL,
+			"description": "Deploy of api-prod-database completed",
+			"environment": "prod",
+		}},
+	}
+	if got := gh.writes(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("writes:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+func TestRestartFindsExistingDeploymentByPayload(t *testing.T) {
+	gh := newFakeGitHub()
+	gh.existing = []map[string]any{
+		{"id": 7001, "payload": map[string]any{"massdriver_deployment_id": "someone-else"}},
+		{"id": 7002, "payload": map[string]any{"massdriver_deployment_id": "5c1de0a7-92b4-4f1e-8d3a-6e27c9f0b815"}},
+	}
+	srv := httptest.NewServer(gh)
+	defer srv.Close()
+	h := automation.Handler("github-deployments", New(testConfig(srv.URL)), secret)
+
+	post(t, h, "ev-3", deploymentEvent("ev-3", "deployment.failed", "PROVISION", nil))
+
+	want := []call{
+		{Method: "POST", Path: "/repos/acme/api/deployments/7002/statuses", Body: map[string]any{
+			"state":       "failure",
+			"log_url":     logURL,
+			"description": "Deploy of api-prod-database failed",
+			"environment": "prod",
+		}},
+	}
+	if got := gh.writes(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("writes:\n got %+v\nwant %+v", got, want)
+	}
+	gh.mu.Lock()
+	defer gh.mu.Unlock()
+	if got := gh.calls[0].Path; got != "/repos/acme/api/deployments?environment=prod&per_page=100&task=massdriver" {
+		t.Fatalf("lookup path: %s", got)
+	}
+}
+
+func TestStartedAfterCompletedDoesNotReopen(t *testing.T) {
+	gh := newFakeGitHub()
+	srv := httptest.NewServer(gh)
+	defer srv.Close()
+	h := automation.Handler("github-deployments", New(testConfig(srv.URL)), secret)
+
+	post(t, h, "ev-4", deploymentEvent("ev-4", "deployment.completed", "PROVISION", nil))
+	post(t, h, "ev-5", deploymentEvent("ev-5", "deployment.started", "PROVISION", nil))
+
+	gh.mu.Lock()
+	defer gh.mu.Unlock()
+	if got := gh.statuses["9001"]; !reflect.DeepEqual(got, []string{"success"}) {
+		t.Fatalf("statuses: %v", got)
+	}
+}
+
+func TestRefAttributeProjectEnvironmentNameAndDecommission(t *testing.T) {
+	gh := newFakeGitHub()
+	srv := httptest.NewServer(gh)
+	defer srv.Close()
+	cfg := testConfig(srv.URL)
+	cfg.EnvironmentName = "project-environment"
+	h := automation.Handler("github-deployments", New(cfg), secret)
+
+	post(t, h, "ev-6", deploymentEvent("ev-6", "deployment.completed", "DECOMMISSION", map[string]any{"github_ref": "release"}))
+
+	writes := gh.writes()
+	if len(writes) != 2 {
+		t.Fatalf("writes: %+v", writes)
+	}
+	if writes[0].Body["ref"] != "release" || writes[0].Body["environment"] != "api-prod" {
+		t.Fatalf("deployment: %+v", writes[0].Body)
+	}
+	if writes[1].Body["state"] != "inactive" || writes[1].Body["description"] != "Decommission of api-prod-database completed" {
+		t.Fatalf("status: %+v", writes[1].Body)
+	}
+	gh.mu.Lock()
+	defer gh.mu.Unlock()
+	for _, c := range gh.calls {
+		if c.Path == "/repos/acme/api" {
+			t.Fatal("fetched the default branch although github_ref is set")
+		}
+	}
+}
+
+func TestIgnoredEvents(t *testing.T) {
+	gh := newFakeGitHub()
+	srv := httptest.NewServer(gh)
+	defer srv.Close()
+	h := automation.Handler("github-deployments", New(testConfig(srv.URL)), secret)
+
+	cases := map[string][]byte{
+		"ev-7":  deploymentEvent("ev-7", "deployment.completed", "PLAN", nil),
+		"ev-8":  deploymentEvent("ev-8", "deployment.completed", "PROVISION", map[string]any{"github_repo": nil}),
+		"ev-9":  deploymentEvent("ev-9", "deployment.completed", "PROVISION", map[string]any{"github_repo": "acme"}),
+		"ev-10": deploymentEvent("ev-10", "deployment.created", "PROVISION", nil),
+	}
+	for id, body := range cases {
+		if code := post(t, h, id, body); code != http.StatusNoContent {
+			t.Errorf("%s: got %d", id, code)
+		}
+	}
+	if n := len(gh.calls); n != 0 {
+		t.Fatalf("GitHub was called %d times", n)
+	}
+}
+
+func TestGitHubErrorAsksForRetry(t *testing.T) {
+	gh := newFakeGitHub()
+	gh.fail = true
+	srv := httptest.NewServer(gh)
+	defer srv.Close()
+	h := automation.Handler("github-deployments", New(testConfig(srv.URL)), secret)
+
+	body := deploymentEvent("ev-11", "deployment.aborted", "PROVISION", nil)
+	if code := post(t, h, "ev-11", body); code != http.StatusInternalServerError {
+		t.Fatalf("got %d", code)
+	}
+
+	gh.mu.Lock()
+	gh.fail = false
+	gh.mu.Unlock()
+	if code := post(t, h, "ev-11", body); code != http.StatusNoContent {
+		t.Fatalf("retry: got %d", code)
+	}
+	gh.mu.Lock()
+	defer gh.mu.Unlock()
+	if got := gh.statuses["9001"]; !reflect.DeepEqual(got, []string{"error"}) {
+		t.Fatalf("statuses: %v", got)
+	}
+}
+
+func TestBadSignature(t *testing.T) {
+	h := automation.Handler("github-deployments", New(testConfig("http://unused")), secret)
+	body := deploymentEvent("ev-12", "deployment.completed", "PROVISION", nil)
+	req := httptest.NewRequest(http.MethodPost, automation.HookPath, strings.NewReader(string(body)))
+	automation.SignRequest(req, secret, "ev-12", body, time.Now())
+	req.Header.Set("webhook-signature", "v1,"+base64.StdEncoding.EncodeToString([]byte("forged")))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("got %d", w.Code)
+	}
+}
+
+func TestTruncate(t *testing.T) {
+	if got := truncate(strings.Repeat("a", 150), 140); len([]rune(got)) != 140 || !strings.HasSuffix(got, "…") {
+		t.Fatalf("got %q", got)
+	}
+	if got := truncate("short", 140); got != "short" {
+		t.Fatalf("got %q", got)
+	}
+}

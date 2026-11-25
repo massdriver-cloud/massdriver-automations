@@ -1,0 +1,18 @@
+query StatusPageInstanceAlarms($organizationId: ID!, $id: ID!, $cursor: Cursor) {
+  instance(organizationId: $organizationId, id: $id) {
+    alarms(cursor: $cursor) {
+      cursor {
+        next
+      }
+      items {
+        id
+        displayName
+        currentState {
+          status
+          message
+          occurredAt
+        }
+      }
+    }
+  }
+}

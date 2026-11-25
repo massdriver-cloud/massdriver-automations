@@ -1,0 +1,6 @@
+mutation DeleteEnvironment($org: ID!, $id: ID!) {
+  deleteEnvironment(organizationId: $org, id: $id) {
+    successful
+    messages { field message }
+  }
+}

@@ -1,0 +1,12 @@
+query RecentVersions($org: ID!, $id: ID!) {
+  ociRepo(organizationId: $org, id: $id) {
+    artifactType
+    attributes
+    tags(sort: { field: CREATED_AT, order: DESC }, cursor: { limit: 10 }) {
+      items {
+        tag
+        createdAt
+      }
+    }
+  }
+}
