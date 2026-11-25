@@ -117,3 +117,19 @@ func (p Payload[T]) Err() error {
 	}
 	return errors.New(strings.Join(parts, "; "))
 }
+
+// DefaultAppURL is the Massdriver Cloud UI.
+const DefaultAppURL = "https://app.massdriver.cloud"
+
+// AppConfig is the `massdriver` section of an automation's config: where links in messages point.
+type AppConfig struct {
+	AppURL string `yaml:"app_url"`
+}
+
+// URL returns the UI URL without a trailing slash, or DefaultAppURL when app_url is not set.
+func (c AppConfig) URL() string {
+	if c.AppURL == "" {
+		return DefaultAppURL
+	}
+	return strings.TrimRight(c.AppURL, "/")
+}

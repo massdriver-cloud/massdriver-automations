@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -59,6 +60,11 @@ func run(name string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	if err := serve(ctx, name); err != nil {
+		var ce *automation.ConfigError
+		if errors.As(err, &ce) {
+			log.Error("invalid config", "err", err)
+			return 1
+		}
 		log.Error("exit", "err", err)
 		return 1
 	}
