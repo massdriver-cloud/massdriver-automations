@@ -17,13 +17,13 @@ params:
     - audit_archiver
     - autodeploy_downstream
     - bundle_scanner
-    - decommission_cleanup
     - drift
     - freeze_guard
     - github_deployments
     - proposal_chatops
     - release_notes
     - rollback_on_failure
+    - router
     - sandbox_on_join
     - statuspage
   properties:
@@ -38,7 +38,8 @@ params:
           type: string
           title: Repository
           description: >-
-            The automations image. bundle-scanner uses the same repository with `-scanner` after the tag.
+            The automations image. bundle-scanner uses the same repository with `-scanner` after the tag, and router
+            with `-scripts` when it runs commands.
           default: massdrivercloud/massdriver-automations
         tag:
           type: string
@@ -230,26 +231,6 @@ params:
           pattern: ^[0-9]+(s|m|h)$
         attributes: *attributes
 
-    decommission_cleanup:
-      type: object
-      title: decommission-cleanup
-      description: >-
-        Runs HTTP hooks when infrastructure is decommissioned. The `DECOMMISSION_CLEANUP_HOOK_ENV` secret is a JSON
-        object of extra environment variables, for `{{ env "NAME" }}` in hooks.
-      required: [enabled, hooks, attributes]
-      properties:
-        enabled:
-          type: boolean
-          title: Enabled
-          default: false
-        hooks:
-          type: string
-          title: Hooks
-          description: The `hooks.yaml` of decommission-cleanup.
-          default: |
-            hooks: []
-        attributes: *attributes
-
     drift:
       type: object
       title: drift
@@ -406,6 +387,37 @@ params:
           default: "true"
         attributes: *attributes
 
+    router:
+      type: object
+      title: router
+      description: >-
+        Runs HTTP requests, commands, and Massdriver API calls for the events that match its routes. The event
+        destination sends the event types of every route. The `ROUTER_ENV` secret is a JSON object of extra
+        environment variables, for `env.NAME` in jq or `{{ env "NAME" }}` in Go templates.
+      required: [enabled, config, scripts]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        config:
+          type: string
+          title: Configuration
+          description: The `config.yaml` of router.
+          default: |
+            routes: []
+        scripts:
+          type: object
+          title: Scripts
+          description: >-
+            Files for `exec` steps, by file name, mounted as executables in `/scripts`. A configuration with an
+            `exec` step, or any script, runs the `-scripts` image, which has `sh`, `jq`, `curl`, and `python3`.
+          default: {}
+          propertyNames:
+            pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
+          additionalProperties:
+            type: string
+
     sandbox_on_join:
       type: object
       title: sandbox-on-join
@@ -482,11 +494,6 @@ app:
       title: audit-archiver Datadog API key
     BUNDLE_SCANNER_SLACK_WEBHOOK_URL:
       title: bundle-scanner Slack webhook URL
-    DECOMMISSION_CLEANUP_HOOK_ENV:
-      title: decommission-cleanup hook environment
-      description: >-
-        A JSON object of environment variables for hooks, such as `{"DNS_TOKEN": "..."}`.
-      json: true
     DRIFT_SLACK_WEBHOOK_URL:
       title: drift Slack webhook URL
     DRIFT_RUN_TOKEN:
@@ -508,6 +515,11 @@ app:
       title: release-notes Teams webhook URL
     ROLLBACK_ON_FAILURE_SLACK_WEBHOOK_URL:
       title: rollback-on-failure Slack webhook URL
+    ROUTER_ENV:
+      title: router environment
+      description: >-
+        A JSON object of environment variables for routes, such as `{"PAGERDUTY_ROUTING_KEY": "..."}`.
+      json: true
 
 ui:
   ui:order:
@@ -517,13 +529,13 @@ ui:
     - audit_archiver
     - autodeploy_downstream
     - bundle_scanner
-    - decommission_cleanup
     - drift
     - freeze_guard
     - github_deployments
     - proposal_chatops
     - release_notes
     - rollback_on_failure
+    - router
     - sandbox_on_join
     - statuspage
     - "*"
@@ -550,12 +562,6 @@ ui:
     ui:order: [enabled, attribute_key, attribute_value, attributes]
   bundle_scanner:
     ui:order: [enabled, scanners, fail_severity, result_attribute_key, timeout, attributes]
-  decommission_cleanup:
-    ui:order: [enabled, hooks, attributes]
-    hooks:
-      ui:widget: textarea
-      ui:options:
-        rows: 12
   drift:
     ui:order: [enabled, config, storage_size_gi, attributes]
     config:
@@ -576,6 +582,15 @@ ui:
     ui:order: [enabled, include_development]
   rollback_on_failure:
     ui:order: [enabled, attribute_key, attribute_value, attributes]
+  router:
+    ui:order: [enabled, config, scripts]
+    config:
+      ui:widget: textarea
+      ui:options:
+        rows: 16
+    scripts:
+      additionalProperties:
+        ui:widget: textarea
   sandbox_on_join:
     ui:order: [enabled, config]
     config:

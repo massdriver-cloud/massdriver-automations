@@ -34,13 +34,6 @@ variable "bundle_scanner" {
     timeout              = string
   })
 }
-variable "decommission_cleanup" {
-  type = object({
-    attributes = map(string)
-    enabled    = bool
-    hooks      = string
-  })
-}
 variable "drift" {
   type = object({
     attributes      = map(string)
@@ -143,6 +136,13 @@ variable "rollback_on_failure" {
     attribute_value = string
     attributes      = map(string)
     enabled         = bool
+  })
+}
+variable "router" {
+  type = object({
+    config  = string
+    enabled = bool
+    scripts = map(string)
   })
 }
 variable "sandbox_on_join" {

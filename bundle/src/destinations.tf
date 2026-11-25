@@ -21,6 +21,10 @@ resource "massdriver_event_destination" "main" {
       error_message = "proposal-chatops needs a channel."
     }
     precondition {
+      condition     = each.key != "router" || length(local.router_event_types) > 0
+      error_message = "router needs at least one route with events."
+    }
+    precondition {
       condition     = alltrue([for f, content in each.value.files : can(yamldecode(content))])
       error_message = "The YAML configuration of ${each.key} is not valid YAML."
     }
