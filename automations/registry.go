@@ -6,6 +6,7 @@ import (
 	"github.com/massdriver-cloud/massdriver-automations/automations/autodeploy-downstream"
 	"github.com/massdriver-cloud/massdriver-automations/automations/bundle-scanner"
 	"github.com/massdriver-cloud/massdriver-automations/automations/decommission-cleanup"
+	"github.com/massdriver-cloud/massdriver-automations/automations/drift"
 	"github.com/massdriver-cloud/massdriver-automations/automations/freeze-guard"
 	"github.com/massdriver-cloud/massdriver-automations/automations/github-deployments"
 	"github.com/massdriver-cloud/massdriver-automations/automations/proposal-chatops"
@@ -22,6 +23,7 @@ var All = []automation.Definition{
 	autodeploydownstream.Definition,
 	bundlescanner.Definition,
 	decommissioncleanup.Definition,
+	drift.Definition,
 	freezeguard.Definition,
 	githubdeployments.Definition,
 	proposalchatops.Definition,

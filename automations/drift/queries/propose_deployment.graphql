@@ -1,0 +1,7 @@
+mutation ProposeDeployment($org: ID!, $id: ID!, $input: ProposeDeploymentInput!) {
+  proposeDeployment(organizationId: $org, id: $id, input: $input) {
+    successful
+    messages { field message }
+    result { id }
+  }
+}

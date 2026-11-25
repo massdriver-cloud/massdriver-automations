@@ -119,6 +119,24 @@ locals {
       condition   = ".type != \"deployment.completed\" or .data.metadata.deployment_action == \"DECOMMISSION\""
     }
 
+    drift = {
+      enabled    = var.drift.enabled
+      image      = local.image
+      host       = "drift.${var.ingress.domain}"
+      files      = { "drift.yaml" = var.drift.config }
+      state_size = var.drift.storage_size_gi
+      env = merge(local.massdriver_env, {
+        DRIFT_CONFIG       = "${local.config_dir}/drift.yaml"
+        STATE_DIR          = local.state_dir
+        MASSDRIVER_APP_URL = var.massdriver.app_url
+        SLACK_WEBHOOK_URL  = lookup(local.secrets, "DRIFT_SLACK_WEBHOOK_URL", "")
+        DRIFT_RUN_TOKEN    = lookup(local.secrets, "DRIFT_RUN_TOKEN", "")
+      })
+      event_types = ["deployment.completed", "deployment.failed", "deployment.aborted"]
+      attributes  = var.drift.attributes
+      condition   = ".data.metadata.deployment_action == \"PLAN\""
+    }
+
     freeze-guard = {
       enabled    = var.freeze_guard.enabled
       image      = local.image

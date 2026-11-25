@@ -8,7 +8,7 @@ the bundle creates:
 - a Service and an Ingress for the host `<name>.<domain>`
 - a Massdriver event destination that sends events to `https://<name>.<domain>/hooks/massdriver`, with the event
   types, attributes, and condition from the automation's README
-- for statuspage, a PersistentVolumeClaim for `STATE_DIR`
+- for drift and statuspage, a PersistentVolumeClaim for `STATE_DIR`
 
 The signing secret of each event destination goes into the automation's Secret as `MASSDRIVER_SIGNING_SECRET`.
 The bundle produces no resources for other bundles.
@@ -36,6 +36,7 @@ Set **Ingress > Domain**, such as `automations.acme.com`. Each automation is ser
 | autodeploy-downstream | `autodeploy-downstream.<domain>` | `/hooks/massdriver` |
 | bundle-scanner | `bundle-scanner.<domain>` | `/hooks/massdriver` |
 | decommission-cleanup | `decommission-cleanup.<domain>` | `/hooks/massdriver` |
+| drift | `drift.<domain>` | `/hooks/massdriver`, and `/drift/run` to start checks from outside the cluster |
 | freeze-guard | `freeze-guard.<domain>` | `/hooks/massdriver` |
 | github-deployments | `github-deployments.<domain>` | `/hooks/massdriver` |
 | proposal-chatops | `proposal-chatops.<domain>` | `/hooks/massdriver`, `/slack/interactions` |
@@ -65,6 +66,7 @@ turn on:
 | autodeploy-downstream | `instance:deploy` on the downstream instances, and `project:view` on their projects. |
 | bundle-scanner | `repo:view` and `repo:pull` on the bundle repos. With a result attribute key, also `repo:update`. |
 | decommission-cleanup | None. |
+| drift | `project:view` and `instance:plan` on the matched instances. Mode `resolve` also needs `instance:deploy`, and `instance:propose` with `resolve_with: deployed`. Mode `propose` needs `instance:propose`. |
 | freeze-guard | `instance:deploy` and `instance:decommission` on the instances that the windows cover. |
 | github-deployments | None. |
 | proposal-chatops | `instance:deploy` on the instances. |
@@ -85,6 +87,7 @@ Each secret is set on the instance. Set only the secrets of the automations that
 | `AUDIT_ARCHIVER_DD_API_KEY` | audit-archiver | `DD_API_KEY` |
 | `BUNDLE_SCANNER_SLACK_WEBHOOK_URL` | bundle-scanner | `SLACK_WEBHOOK_URL` |
 | `DECOMMISSION_CLEANUP_HOOK_ENV` | decommission-cleanup | Each key of the JSON object |
+| `DRIFT_SLACK_WEBHOOK_URL`, `DRIFT_RUN_TOKEN` | drift | `SLACK_WEBHOOK_URL`, `DRIFT_RUN_TOKEN` |
 | `FREEZE_GUARD_SLACK_WEBHOOK_URL` | freeze-guard | `SLACK_WEBHOOK_URL` |
 | `GITHUB_DEPLOYMENTS_TOKEN` | github-deployments | `GITHUB_TOKEN` |
 | `PROPOSAL_CHATOPS_SLACK_BOT_TOKEN`, `PROPOSAL_CHATOPS_SLACK_SIGNING_SECRET` | proposal-chatops | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` |

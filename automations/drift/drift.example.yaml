@@ -1,0 +1,40 @@
+checks:
+  - name: prod-nightly
+    # Standard cron: minute, hour, day of month, month, day of week. Also @daily, @hourly, @every 6h.
+    schedule: "0 6 * * *"
+    timezone: America/Chicago
+    # Effective attributes of the instances to plan. A list matches any of its values.
+    match:
+      md-environment: prod
+      team: [payments, billing]
+    # detect: alert only. resolve: re-apply now. propose: create a proposal that a person approves.
+    mode: propose
+    # deployed: the params, bundle version, and dependencies of the last completed PROVISION.
+    # saved: the instance's saved params, with its current bundle version.
+    resolve_with: deployed
+    # Plans running at once. The rest wait in a queue.
+    max_concurrent: 5
+    # Replaces SLACK_WEBHOOK_URL for this check.
+    slack_webhook_url: https://hooks.slack.com/services/T000/B000/XXXX
+    # Also post instances without drift.
+    notify_clean: false
+    # Post one line of totals when the run finishes.
+    summary: true
+
+  - name: sandbox-weekly
+    schedule: "0 9 * * MON"
+    match:
+      md-project: sandbox
+    mode: resolve
+    resolve_with: saved
+    max_concurrent: 2
+    # Regular expressions (Go RE2) that read the plan logs. These are the defaults.
+    patterns:
+      clean: 'No changes\.'
+      drift: 'Plan: \d+ to \w+(?:, \d+ to \w+)*'
+      resource: '(?m)^\s*# \S+.* (?:will be|must be) .*$'
+
+  # No schedule: runs only from POST /drift/run?check=on-demand.
+  - name: on-demand
+    match:
+      drift-check: "true"

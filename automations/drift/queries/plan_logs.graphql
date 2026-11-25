@@ -1,0 +1,6 @@
+query PlanLogs($org: ID!, $id: UUID!) {
+  deployment(organizationId: $org, id: $id) {
+    id
+    logs { message }
+  }
+}
