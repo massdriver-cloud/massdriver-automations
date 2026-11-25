@@ -1,0 +1,7 @@
+mutation RollbackDeployment($org: ID!, $id: UUID!) {
+  rollbackDeployment(organizationId: $org, id: $id) {
+    successful
+    messages { field message }
+    result { id }
+  }
+}

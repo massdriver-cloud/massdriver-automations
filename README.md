@@ -21,6 +21,7 @@ docker run -p 8080:8080 \
 | [autodeploy-downstream](automations/autodeploy-downstream) | `deployment.completed` | Deploys opted-in dependents when an instance deploys. |
 | [bundle-scanner](automations/bundle-scanner) | `repo.published` | Scans each new bundle version with Trivy and Checkov. Uses the `-scanner` image tag. |
 | [decommission-cleanup](automations/decommission-cleanup) | `deployment.completed`, `environment.deleted` | Runs HTTP and command hooks when infrastructure is decommissioned. |
+| [drift](automations/drift) | `deployment.completed`, `deployment.failed`, `deployment.aborted` | Plans instances on a schedule, alerts Slack about drift, and can re-apply the deployed configuration. |
 | [freeze-guard](automations/freeze-guard) | `deployment.created`, `deployment.enqueued` | Aborts deployments inside a change freeze window. |
 | [github-deployments](automations/github-deployments) | `deployment.*` | Shows Massdriver deployments as GitHub Deployments. |
 | [proposal-chatops](automations/proposal-chatops) | `deployment.proposed`, `deployment.approved`, `deployment.rejected` | Approve or reject proposed deployments from Slack. |

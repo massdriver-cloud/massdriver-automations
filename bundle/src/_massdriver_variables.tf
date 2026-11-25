@@ -48,6 +48,14 @@ variable "decommission_cleanup" {
     hooks      = string
   })
 }
+variable "drift" {
+  type = object({
+    attributes      = map(string)
+    config          = string
+    enabled         = bool
+    storage_size_gi = number
+  })
+}
 variable "freeze_guard" {
   type = object({
     attributes     = map(string)

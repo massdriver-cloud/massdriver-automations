@@ -19,6 +19,7 @@ params:
     - autodeploy_downstream
     - bundle_scanner
     - decommission_cleanup
+    - drift
     - freeze_guard
     - github_deployments
     - proposal_chatops
@@ -70,7 +71,7 @@ params:
         app_url:
           type: string
           title: App URL
-          description: The URL of the Massdriver UI. github-deployments links each status to it.
+          description: The URL of the Massdriver UI. github-deployments and drift link to it.
           default: https://app.massdriver.cloud
           format: uri
     ingress:
@@ -272,6 +273,35 @@ params:
             hooks: []
         attributes: *attributes
 
+    drift:
+      type: object
+      title: drift
+      description: >-
+        Plans the instances that match each check on a schedule, and alerts Slack about drift. Set the
+        `DRIFT_SLACK_WEBHOOK_URL` secret for alerts, and the `DRIFT_RUN_TOKEN` secret to turn on
+        `POST https://drift.<domain>/drift/run?check=<name>`.
+      required: [enabled, config, storage_size_gi, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        config:
+          type: string
+          title: Checks
+          description: The `drift.yaml` of drift.
+          default: |
+            checks: []
+        storage_size_gi:
+          type: integer
+          title: State storage (GiB)
+          description: The volume for the plans in progress and the queues.
+          default: 1
+          minimum: 1
+          maximum: 10
+          $md.immutable: true
+        attributes: *attributes
+
     freeze_guard:
       type: object
       title: freeze-guard
@@ -456,6 +486,12 @@ app:
       description: >-
         A JSON object of environment variables for hooks, such as `{"DNS_TOKEN": "..."}`.
       json: true
+    DRIFT_SLACK_WEBHOOK_URL:
+      title: drift Slack webhook URL
+    DRIFT_RUN_TOKEN:
+      title: drift run token
+      description: >-
+        Callers of `POST /drift/run` send it as `Authorization: Bearer <token>`.
     FREEZE_GUARD_SLACK_WEBHOOK_URL:
       title: freeze-guard Slack webhook URL
     GITHUB_DEPLOYMENTS_TOKEN:
@@ -480,6 +516,7 @@ ui:
     - autodeploy_downstream
     - bundle_scanner
     - decommission_cleanup
+    - drift
     - freeze_guard
     - github_deployments
     - proposal_chatops
@@ -522,6 +559,12 @@ ui:
       ui:widget: textarea
       ui:options:
         rows: 12
+  drift:
+    ui:order: [enabled, config, storage_size_gi, attributes]
+    config:
+      ui:widget: textarea
+      ui:options:
+        rows: 16
   freeze_guard:
     ui:order: [enabled, windows, override_token, attributes]
     windows:
