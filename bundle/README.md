@@ -65,7 +65,7 @@ turn on:
 | Automation | Permissions |
 |---|---|
 | audit-archiver | None. |
-| autodeploy-downstream | `instance:deploy` on the downstream instances, and `project:view` on their projects. |
+| autodeploy-downstream | `instance:deploy` on the downstream instances, `instance:propose` on those of `propose` rules, and `project:view` on their projects. |
 | bundle-scanner | `repo:view` and `repo:pull` on the bundle repos. With a result attribute key, also `repo:update`. |
 | drift | `project:view` and `instance:plan` on the matched instances. Mode `resolve` also needs `instance:deploy`, and `instance:propose` with `resolve_with: deployed`. Mode `propose` needs `instance:propose`. |
 | freeze-guard | `organization:manageGroups`, to create and delete group policies. Any member of the organization can list groups and their policies. |

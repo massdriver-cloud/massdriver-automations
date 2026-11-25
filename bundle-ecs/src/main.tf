@@ -26,6 +26,8 @@ locals {
   sandbox_config    = try(yamldecode(var.sandbox_on_join.config), {})
   router_config     = try(yamldecode(var.router.config), {})
 
+  autodeploy_rules = trimspace(var.autodeploy_downstream.config) != ""
+
   router_routes      = try(coalesce(local.router_config.routes), [])
   router_event_types = distinct(flatten([for r in local.router_routes : try(coalesce(r.events), [])]))
   # Commands need a shell, jq, curl, or python3, which only the -scripts image has.
@@ -95,11 +97,13 @@ locals {
       enabled = var.autodeploy_downstream.enabled
       image   = local.image
       host    = "autodeploy-downstream.${local.domain}"
-      files   = {}
+      files   = local.autodeploy_rules ? { "autodeploy.yaml" = var.autodeploy_downstream.config } : {}
       state   = false
+      # The automation refuses to start with both a rules file and the attribute variables.
       env = merge(local.massdriver_env, {
-        AUTO_DEPLOY_ATTR_KEY   = var.autodeploy_downstream.attribute_key
-        AUTO_DEPLOY_ATTR_VALUE = var.autodeploy_downstream.attribute_value
+        AUTODEPLOY_CONFIG      = local.autodeploy_rules ? "${local.config_dir}/autodeploy.yaml" : null
+        AUTO_DEPLOY_ATTR_KEY   = local.autodeploy_rules ? null : var.autodeploy_downstream.attribute_key
+        AUTO_DEPLOY_ATTR_VALUE = local.autodeploy_rules ? null : var.autodeploy_downstream.attribute_value
       })
       secrets     = local.massdriver_secrets
       event_types = ["deployment.completed"]

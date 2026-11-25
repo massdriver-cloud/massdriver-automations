@@ -21,6 +21,7 @@ variable "autodeploy_downstream" {
     attribute_key   = string
     attribute_value = string
     attributes      = map(string)
+    config          = string
     enabled         = bool
   })
 }

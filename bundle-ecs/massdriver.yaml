@@ -162,7 +162,7 @@ params:
       type: object
       title: autodeploy-downstream
       description: Deploys opted-in dependents when an instance deploys.
-      required: [enabled, attribute_key, attribute_value, attributes]
+      required: [enabled, attribute_key, attribute_value, config, attributes]
       properties:
         enabled:
           type: boolean
@@ -171,11 +171,20 @@ params:
         attribute_key:
           type: string
           title: Opt-in attribute key
+          description: Used when Rules is empty.
           default: autodeploy
         attribute_value:
           type: string
           title: Opt-in attribute value
+          description: Used when Rules is empty.
           default: "true"
+        config:
+          type: string
+          title: Rules
+          description: >-
+            The `AUTODEPLOY_CONFIG` rules file of autodeploy-downstream. Empty deploys the instances that have the
+            opt-in attribute key and value.
+          default: ""
         attributes: &attributes
           type: object
           title: Event attributes
@@ -540,7 +549,11 @@ ui:
       - datadog_site
       - datadog_tags
   autodeploy_downstream:
-    ui:order: [enabled, attribute_key, attribute_value, attributes]
+    ui:order: [enabled, config, attribute_key, attribute_value, attributes]
+    config:
+      ui:widget: textarea
+      ui:options:
+        rows: 12
   bundle_scanner:
     ui:order: [enabled, scanners, fail_severity, result_attribute_key, timeout, attributes]
   drift:
