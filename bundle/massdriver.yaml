@@ -53,22 +53,8 @@ params:
       type: object
       title: Massdriver
       required:
-        - organization_id
-        - url
         - app_url
       properties:
-        organization_id:
-          type: string
-          title: Organization ID
-          description: >-
-            Your organization's identifier. The service account of the `MASSDRIVER_API_KEY` secret must belong to it.
-          pattern: ^[a-z0-9-]+$
-        url:
-          type: string
-          title: API URL
-          description: The URL of your Massdriver API.
-          default: https://api.massdriver.cloud
-          format: uri
         app_url:
           type: string
           title: App URL
@@ -477,19 +463,16 @@ params:
 
 dependencies:
   kubernetes_cluster:
-    resource_type: kubernetes-cluster
+    resource_type: massdriver-kubernetes-cluster
+    required: true
+  service_account:
+    resource_type: massdriver-service-account
     required: true
 
 resources: {}
 
 app:
   secrets:
-    MASSDRIVER_API_KEY:
-      title: Massdriver service account token
-      description: >-
-        An `md_` token of a service account. It creates the event destinations and is given to the automations
-        that call the Massdriver API.
-      required: true
     AUDIT_ARCHIVER_AWS_ACCESS_KEY_ID:
       title: audit-archiver AWS access key ID
     AUDIT_ARCHIVER_AWS_SECRET_ACCESS_KEY:
@@ -552,7 +535,7 @@ ui:
   image:
     ui:order: [repository, tag]
   massdriver:
-    ui:order: [organization_id, url, app_url]
+    ui:order: [app_url]
   ingress:
     ui:order: [domain, class_name, cluster_issuer, tls_secret_name]
   audit_archiver:

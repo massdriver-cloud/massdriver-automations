@@ -2,7 +2,7 @@ locals {
   # Bundle secrets are not OpenTofu variables. The provisioner writes them to this file.
   secrets = try(jsondecode(file("/massdriver/secrets.json")), {})
 
-  namespace   = coalesce(var.kubernetes_cluster.namespace, "default")
+  namespace   = coalesce(try(var.kubernetes_cluster.namespace, null), "default")
   name_prefix = var.md_metadata.name_prefix
   config_dir  = "/etc/massdriver-automations"
   state_dir   = "/var/lib/statuspage"
@@ -10,9 +10,9 @@ locals {
   image = "${var.image.repository}:${var.image.tag}"
 
   massdriver_env = {
-    MASSDRIVER_ORGANIZATION_ID = var.massdriver.organization_id
-    MASSDRIVER_URL             = var.massdriver.url
-    MASSDRIVER_API_KEY         = lookup(local.secrets, "MASSDRIVER_API_KEY", null)
+    MASSDRIVER_ORGANIZATION_ID = var.service_account.organization_id
+    MASSDRIVER_URL             = var.service_account.url
+    MASSDRIVER_API_KEY         = var.service_account.api_key
   }
 
   # The secret may arrive as a JSON string or as an object.
