@@ -8,7 +8,7 @@ the bundle creates:
 - a Service and an Ingress for the host `<name>.<domain>`
 - a Massdriver event destination that sends events to `https://<name>.<domain>/hooks/massdriver`, with the event
   types, attributes, and condition from the automation's README
-- for drift and statuspage, a PersistentVolumeClaim for `STATE_DIR`
+- for drift, freeze-guard, and statuspage, a PersistentVolumeClaim for `STATE_DIR`
 - for router, a ConfigMap with its **Scripts**, mounted as executables in `/scripts`
 
 The signing secret of each event destination goes into the automation's Secret as `MASSDRIVER_SIGNING_SECRET`.
@@ -37,7 +37,7 @@ Set **Ingress > Domain**, such as `automations.acme.com`. Each automation is ser
 | autodeploy-downstream | `autodeploy-downstream.<domain>` | `/hooks/massdriver` |
 | bundle-scanner | `bundle-scanner.<domain>` | `/hooks/massdriver` |
 | drift | `drift.<domain>` | `/hooks/massdriver`, and `/drift/run` to start checks from outside the cluster |
-| freeze-guard | `freeze-guard.<domain>` | `/hooks/massdriver` |
+| freeze-guard | `freeze-guard.<domain>` | `/hooks/massdriver`, and `/freeze/lift` to lift a freeze from outside the cluster |
 | github-deployments | `github-deployments.<domain>` | `/hooks/massdriver` |
 | proposal-chatops | `proposal-chatops.<domain>` | `/hooks/massdriver`, `/slack/interactions` |
 | release-notes | `release-notes.<domain>` | `/hooks/massdriver` |
@@ -67,7 +67,7 @@ turn on:
 | autodeploy-downstream | `instance:deploy` on the downstream instances, and `project:view` on their projects. |
 | bundle-scanner | `repo:view` and `repo:pull` on the bundle repos. With a result attribute key, also `repo:update`. |
 | drift | `project:view` and `instance:plan` on the matched instances. Mode `resolve` also needs `instance:deploy`, and `instance:propose` with `resolve_with: deployed`. Mode `propose` needs `instance:propose`. |
-| freeze-guard | `instance:deploy` and `instance:decommission` on the instances that the windows cover. |
+| freeze-guard | `organization:manageGroups`, to create and delete group policies. Any member of the organization can list groups and their policies. |
 | github-deployments | None. |
 | proposal-chatops | `instance:deploy` on the instances. |
 | release-notes | `repo:view` on the bundle repos, and `project:view` on the projects whose instances are listed. |
@@ -88,7 +88,7 @@ Each secret is set on the instance. Set only the secrets of the automations that
 | `AUDIT_ARCHIVER_DD_API_KEY` | audit-archiver | `DD_API_KEY` |
 | `BUNDLE_SCANNER_SLACK_WEBHOOK_URL` | bundle-scanner | `SLACK_WEBHOOK_URL` |
 | `DRIFT_SLACK_WEBHOOK_URL`, `DRIFT_RUN_TOKEN` | drift | `SLACK_WEBHOOK_URL`, `DRIFT_RUN_TOKEN` |
-| `FREEZE_GUARD_SLACK_WEBHOOK_URL` | freeze-guard | `SLACK_WEBHOOK_URL` |
+| `FREEZE_GUARD_SLACK_WEBHOOK_URL`, `FREEZE_GUARD_ADMIN_TOKEN` | freeze-guard | `SLACK_WEBHOOK_URL`, `FREEZE_ADMIN_TOKEN` |
 | `GITHUB_DEPLOYMENTS_TOKEN` | github-deployments | `GITHUB_TOKEN` |
 | `PROPOSAL_CHATOPS_SLACK_BOT_TOKEN`, `PROPOSAL_CHATOPS_SLACK_SIGNING_SECRET` | proposal-chatops | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` |
 | `RELEASE_NOTES_SLACK_WEBHOOK_URL`, `RELEASE_NOTES_TEAMS_WEBHOOK_URL` | release-notes | `SLACK_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL` |
@@ -109,8 +109,8 @@ The router destination sends the event types of every route in its configuration
 condition. Each route filters with its own `match` and `when`.
 
 **Event attributes** on an automation adds an attribute filter to its destination, such as
-`md-environment` = `prod`. audit-archiver, github-deployments, router, and sandbox-on-join have none, because their
-events can have no attributes. release-notes always filters on `md-repo-artifact-type` = `bundle`.
+`md-environment` = `prod`. audit-archiver, freeze-guard, github-deployments, router, and sandbox-on-join have none,
+because their events can have no attributes. release-notes always filters on `md-repo-artifact-type` = `bundle`.
 
 ## Limits
 

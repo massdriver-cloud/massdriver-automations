@@ -138,15 +138,16 @@ locals {
       image      = local.image
       host       = "freeze-guard.${var.ingress.domain}"
       files      = { "windows.yaml" = var.freeze_guard.windows }
-      state_size = 0
+      state_size = var.freeze_guard.storage_size_gi
       env = merge(local.massdriver_env, {
-        FREEZE_WINDOWS_FILE   = "${local.config_dir}/windows.yaml"
-        FREEZE_OVERRIDE_TOKEN = var.freeze_guard.override_token
-        SLACK_WEBHOOK_URL     = lookup(local.secrets, "FREEZE_GUARD_SLACK_WEBHOOK_URL", "")
+        FREEZE_WINDOWS_FILE = "${local.config_dir}/windows.yaml"
+        STATE_DIR           = local.state_dir
+        FREEZE_ADMIN_TOKEN  = lookup(local.secrets, "FREEZE_GUARD_ADMIN_TOKEN", "")
+        SLACK_WEBHOOK_URL   = lookup(local.secrets, "FREEZE_GUARD_SLACK_WEBHOOK_URL", "")
       })
-      event_types = ["deployment.created", "deployment.enqueued"]
-      attributes  = var.freeze_guard.attributes
-      condition   = ".data.metadata.deployment_action != \"PLAN\" and (.data.entity.status == \"PENDING\" or .data.entity.status == \"APPROVED\")"
+      event_types = ["group.created", "group.updated", "group.deleted"]
+      attributes  = {}
+      condition   = ""
     }
 
     github-deployments = {

@@ -44,10 +44,9 @@ variable "drift" {
 }
 variable "freeze_guard" {
   type = object({
-    attributes     = map(string)
-    enabled        = bool
-    override_token = string
-    windows        = string
+    enabled         = bool
+    storage_size_gi = number
+    windows         = string
   })
 }
 variable "github_deployments" {

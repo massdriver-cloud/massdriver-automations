@@ -263,8 +263,11 @@ params:
     freeze_guard:
       type: object
       title: freeze-guard
-      description: Aborts deployments that start inside a change freeze window.
-      required: [enabled, windows, override_token, attributes]
+      description: >-
+        Adds deny policies for deployment actions to every custom group, except the exempt groups, during change
+        freeze windows. Set the `FREEZE_GUARD_ADMIN_TOKEN` secret to turn on
+        `POST https://freeze-guard.<domain>/freeze/lift?window=<name>`.
+      required: [enabled, windows, storage_size_gi]
       properties:
         enabled:
           type: boolean
@@ -276,13 +279,16 @@ params:
           description: The windows file of freeze-guard.
           default: |
             timezone: UTC
+            exempt_groups: []
             windows: []
-        override_token:
-          type: string
-          title: Override token
-          description: A deployment whose message contains this text runs during a freeze.
-          default: "[freeze-override]"
-        attributes: *attributes
+        storage_size_gi:
+          type: integer
+          title: State storage (GiB)
+          description: The volume for the ids of the policies that freeze-guard created, and the lifts.
+          default: 1
+          minimum: 1
+          maximum: 10
+          $md.immutable: true
 
     github_deployments:
       type: object
@@ -502,6 +508,10 @@ app:
         Callers of `POST /drift/run` send it as `Authorization: Bearer <token>`.
     FREEZE_GUARD_SLACK_WEBHOOK_URL:
       title: freeze-guard Slack webhook URL
+    FREEZE_GUARD_ADMIN_TOKEN:
+      title: freeze-guard admin token
+      description: >-
+        Callers of `POST /freeze/lift` send it as `Authorization: Bearer <token>`.
     GITHUB_DEPLOYMENTS_TOKEN:
       title: github-deployments GitHub token
       description: Needs `Deployments` write and `Metadata` read, or the `repo_deployment` scope.
@@ -569,7 +579,7 @@ ui:
       ui:options:
         rows: 16
   freeze_guard:
-    ui:order: [enabled, windows, override_token, attributes]
+    ui:order: [enabled, windows, storage_size_gi]
     windows:
       ui:widget: textarea
       ui:options:

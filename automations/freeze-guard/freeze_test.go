@@ -1,10 +1,15 @@
 package freezeguard
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -18,45 +23,147 @@ var secret = []byte("0123456789abcdef0123456789abcdef")
 
 const windowsYAML = `
 timezone: America/New_York
+exempt_groups: [SRE]
 windows:
   - name: weekend
     match:
       md-environment: prod
+    exempt_groups: [Release Managers]
     weekly:
       - from: Fri 17:00
         to: Mon 08:00
   - name: thanksgiving
     match:
-      md-environment: prod
+      md-project: [api, web]
+    actions: [instance:deploy]
     from: 2026-11-26
     to: 2026-11-27
 `
 
+var (
+	// Friday 18:00 in New York.
+	inWeekend = time.Date(2026, 11, 27, 23, 0, 0, 0, time.UTC)
+	// Wednesday 10:00 in New York.
+	weekday = time.Date(2026, 11, 25, 15, 0, 0, 0, time.UTC)
+)
+
+type fakePolicy struct {
+	ID         string          `json:"id"`
+	Actions    []string        `json:"actions"`
+	Conditions json.RawMessage `json:"conditions"`
+}
+
+type fakeGroup struct {
+	ID       string
+	Name     string
+	Role     string
+	Policies []fakePolicy
+}
+
+type created struct {
+	Group string
+	Input map[string]any
+}
+
 type fakeAPI struct {
 	mu      sync.Mutex
-	aborted []map[string]any
-	refuse  bool
+	groups  []*fakeGroup
+	nextID  int
+	created []created
+	deleted []string
+}
+
+func (f *fakeAPI) addGroup(id, name, role string, policies ...fakePolicy) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.groups = append(f.groups, &fakeGroup{ID: id, Name: name, Role: role, Policies: policies})
+}
+
+func (f *fakeAPI) policyIDs(groupID string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ids := []string{}
+	for _, g := range f.groups {
+		if g.ID == groupID {
+			for _, p := range g.Policies {
+				ids = append(ids, p.ID)
+			}
+		}
+	}
+	return ids
 }
 
 func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("authorization") != "Bearer md_test" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 	var req struct {
 		Query     string         `json:"query"`
 		Variables map[string]any `json:"variables"`
 	}
 	b, _ := io.ReadAll(r.Body)
 	_ = json.Unmarshal(b, &req)
-	if !strings.Contains(req.Query, "mutation AbortDeployment") {
-		http.Error(w, "unexpected query", http.StatusBadRequest)
+	if req.Variables["org"] != "acme" {
+		http.Error(w, "wrong org", http.StatusBadRequest)
 		return
 	}
 	f.mu.Lock()
-	f.aborted = append(f.aborted, req.Variables)
-	f.mu.Unlock()
-	payload := map[string]any{"successful": true, "messages": []any{}, "result": map[string]any{"status": "ABORTED"}}
-	if f.refuse {
-		payload = map[string]any{"successful": false, "messages": []any{map[string]any{"field": "status", "message": "is invalid"}}}
+	defer f.mu.Unlock()
+
+	var data any
+	switch {
+	case strings.Contains(req.Query, "query FreezeGuardGroups"):
+		items := []any{}
+		for _, g := range f.groups {
+			items = append(items, map[string]any{
+				"id": g.ID, "name": g.Name, "role": g.Role,
+				"policies": map[string]any{"cursor": map[string]any{"next": nil}, "items": g.Policies},
+			})
+		}
+		data = map[string]any{"groups": map[string]any{"cursor": map[string]any{"next": nil}, "items": items}}
+	case strings.Contains(req.Query, "mutation FreezeGuardCreatePolicy"):
+		input := req.Variables["input"].(map[string]any)
+		f.created = append(f.created, created{Group: req.Variables["group"].(string), Input: input})
+		f.nextID++
+		id := fmt.Sprintf("policy-%d", f.nextID)
+		conditions := json.RawMessage(`"*"`)
+		if c := input["conditions"].(string); c != "*" {
+			conditions = json.RawMessage(c)
+		}
+		actions := []string{}
+		for _, a := range input["actions"].([]any) {
+			actions = append(actions, a.(string))
+		}
+		for _, g := range f.groups {
+			if g.ID == req.Variables["group"] {
+				g.Policies = append(g.Policies, fakePolicy{ID: id, Actions: actions, Conditions: conditions})
+			}
+		}
+		data = map[string]any{"createGroupPolicy": map[string]any{"successful": true, "messages": []any{}, "result": map[string]any{"id": id}}}
+	case strings.Contains(req.Query, "mutation FreezeGuardDeletePolicy"):
+		id := req.Variables["id"].(string)
+		f.deleted = append(f.deleted, id)
+		found := false
+		for _, g := range f.groups {
+			for i, p := range g.Policies {
+				if p.ID == id {
+					g.Policies = append(g.Policies[:i], g.Policies[i+1:]...)
+					found = true
+					break
+				}
+			}
+		}
+		payload := map[string]any{"successful": true, "messages": []any{}, "result": map[string]any{"id": id}}
+		if !found {
+			payload = map[string]any{"successful": false, "messages": []any{map[string]any{"field": "id", "message": "Policy not found"}}}
+		}
+		data = map[string]any{"deletePolicy": payload}
+	default:
+		http.Error(w, "unexpected query", http.StatusBadRequest)
+		return
 	}
-	_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"abortDeployment": payload}})
+	_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 }
 
 type fakeWebhook struct {
@@ -73,145 +180,365 @@ func (f *fakeWebhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
-type deploymentOpts struct {
-	eventID, eventType, at, environment, status, action, message string
-}
-
-func event(o deploymentOpts) []byte {
-	if o.eventType == "" {
-		o.eventType = "deployment.enqueued"
-	}
-	if o.status == "" {
-		o.status = "PENDING"
-	}
-	if o.action == "" {
-		o.action = "PROVISION"
-	}
-	b, _ := json.Marshal(map[string]any{
-		"id":   o.eventID,
-		"type": o.eventType,
-		"time": o.at,
-		"data": map[string]any{
-			"entity": map[string]any{
-				"id": "b9dc3d18-19fc-429c-8d36-6753615fe17c", "status": o.status, "action": o.action,
-				"version": "1.2.3", "message": o.message,
-			},
-			"attributes": map[string]any{"md-environment": o.environment, "md-instance": "api-" + o.environment + "-database"},
-			"metadata":   map[string]any{"deployment_action": o.action},
-		},
-	})
-	return b
-}
-
 type harness struct {
-	handler http.Handler
-	api     *fakeAPI
-	webhook *fakeWebhook
+	api      *fakeAPI
+	webhook  *fakeWebhook
+	apiURL   string
+	hookURL  string
+	stateDir string
+	now      time.Time
 }
 
 func setup(t *testing.T) *harness {
+	t.Helper()
+	api, hook := &fakeAPI{}, &fakeWebhook{}
+	api.addGroup("group-admins", "Administrators", "ORGANIZATION_ADMIN")
+	api.addGroup("group-contractors", "Contractors", "CUSTOM",
+		fakePolicy{ID: "foreign-1", Actions: []string{"instance:deploy"}, Conditions: json.RawMessage(`{"md-environment":["prod"]}`)})
+	api.addGroup("group-developers", "Developers", "CUSTOM")
+	api.addGroup("group-release", "Release Managers", "CUSTOM")
+	api.addGroup("group-sre", "SRE", "CUSTOM")
+	apiSrv, hookSrv := httptest.NewServer(api), httptest.NewServer(hook)
+	t.Cleanup(apiSrv.Close)
+	t.Cleanup(hookSrv.Close)
+	return &harness{api: api, webhook: hook, apiURL: apiSrv.URL, hookURL: hookSrv.URL, stateDir: t.TempDir()}
+}
+
+func (h *harness) guard(t *testing.T) *Guard {
 	t.Helper()
 	windows, err := ParseWindows([]byte(windowsYAML))
 	if err != nil {
 		t.Fatal(err)
 	}
-	api, hook := &fakeAPI{}, &fakeWebhook{}
-	apiSrv, hookSrv := httptest.NewServer(api), httptest.NewServer(hook)
-	t.Cleanup(apiSrv.Close)
-	t.Cleanup(hookSrv.Close)
-	g := New(&massdriver.Client{Endpoint: apiSrv.URL, OrganizationID: "acme", APIKey: "md_test"}, windows, "[freeze-override]", hookSrv.URL)
-	return &harness{handler: automation.Handler(Definition.Name, g, secret), api: api, webhook: hook}
+	g, err := New(&massdriver.Client{Endpoint: h.apiURL, OrganizationID: "acme", APIKey: "md_test"}, windows,
+		Options{StateDir: h.stateDir, AdminToken: "admin-token", SlackWebhookURL: h.hookURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.now = func() time.Time { return h.now }
+	return g
 }
 
-func (h *harness) send(t *testing.T, o deploymentOpts) int {
+func reconcile(t *testing.T, g *Guard) {
 	t.Helper()
-	body := event(o)
-	req := httptest.NewRequest(http.MethodPost, automation.HookPath, strings.NewReader(string(body)))
-	automation.SignRequest(req, secret, o.eventID, body, time.Now())
-	rec := httptest.NewRecorder()
-	h.handler.ServeHTTP(rec, req)
-	return rec.Code
+	if err := g.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }
 
-func TestAbortsInsideWindow(t *testing.T) {
+func weekendInput() map[string]any {
+	return map[string]any{
+		"effect":     "DENY",
+		"actions":    []any{"environment:decommission", "environment:deploy", "instance:decommission", "instance:deploy"},
+		"conditions": `{"md-environment":["prod"]}`,
+	}
+}
+
+func TestWindowStartCreatesDenyPolicyPerNonExemptGroup(t *testing.T) {
 	h := setup(t)
-	// Friday 18:00 in New York.
-	code := h.send(t, deploymentOpts{eventID: "evt-1", at: "2026-11-27T23:00:00Z", environment: "prod", message: "Bump the instance size"})
-	if code != http.StatusNoContent {
-		t.Fatalf("status = %d", code)
-	}
+	h.now = inWeekend
+	reconcile(t, h.guard(t))
 
-	if len(h.api.aborted) != 1 {
-		t.Fatalf("aborted = %v", h.api.aborted)
+	want := []created{
+		{Group: "group-contractors", Input: weekendInput()},
+		{Group: "group-developers", Input: weekendInput()},
 	}
-	if v := h.api.aborted[0]; v["org"] != "acme" || v["id"] != "b9dc3d18-19fc-429c-8d36-6753615fe17c" {
-		t.Errorf("variables = %v", v)
+	if !reflect.DeepEqual(h.api.created, want) {
+		t.Fatalf("created = %#v", h.api.created)
 	}
-	want := `Aborted PROVISION deployment b9dc3d18-19fc-429c-8d36-6753615fe17c of api-prod-database (version 1.2.3) ` +
-		`inside freeze window "weekend". Put [freeze-override] in the deployment message to deploy during a freeze.`
-	if len(h.webhook.texts) != 1 || h.webhook.texts[0] != want {
-		t.Errorf("slack = %q", h.webhook.texts)
+	if len(h.api.deleted) != 0 {
+		t.Fatalf("deleted = %v", h.api.deleted)
+	}
+	for group, ids := range map[string][]string{
+		"group-admins":      {},
+		"group-contractors": {"foreign-1", "policy-1"},
+		"group-developers":  {"policy-2"},
+		"group-release":     {},
+		"group-sre":         {},
+	} {
+		if got := h.api.policyIDs(group); !reflect.DeepEqual(got, ids) {
+			t.Errorf("%s policies = %v, want %v", group, got, ids)
+		}
+	}
+	wantText := "Freeze window \"weekend\" started. Denied environment:decommission, environment:deploy, " +
+		"instance:decommission, instance:deploy where md-environment is prod.\n" +
+		"Frozen groups: Contractors, Developers.\nExempt groups: Release Managers, SRE."
+	if !reflect.DeepEqual(h.webhook.texts, []string{wantText}) {
+		t.Fatalf("slack = %q", h.webhook.texts)
 	}
 }
 
-func TestWindows(t *testing.T) {
+func TestReconcileInsideWindowIsIdempotent(t *testing.T) {
+	h := setup(t)
+	h.now = inWeekend
+	g := h.guard(t)
+	reconcile(t, g)
+	reconcile(t, g)
+	if len(h.api.created) != 2 || len(h.webhook.texts) != 1 {
+		t.Fatalf("created = %v, slack = %q", h.api.created, h.webhook.texts)
+	}
+}
+
+func TestWindowEndDeletesOnlyItsPolicies(t *testing.T) {
+	h := setup(t)
+	h.now = inWeekend
+	g := h.guard(t)
+	reconcile(t, g)
+
+	h.now = time.Date(2026, 11, 30, 13, 0, 0, 0, time.UTC) // Monday 08:00 in New York.
+	reconcile(t, g)
+
+	if !reflect.DeepEqual(h.api.deleted, []string{"policy-1", "policy-2"}) {
+		t.Fatalf("deleted = %v", h.api.deleted)
+	}
+	if got := h.api.policyIDs("group-contractors"); !reflect.DeepEqual(got, []string{"foreign-1"}) {
+		t.Fatalf("contractors policies = %v", got)
+	}
+	if got := h.webhook.texts[1]; got != `Freeze window "weekend" ended. Removed its deny policies.` {
+		t.Fatalf("slack = %q", got)
+	}
+}
+
+func TestNewGroupDuringWindowIsFrozenOnNextReconcile(t *testing.T) {
+	h := setup(t)
+	h.now = inWeekend
+	g := h.guard(t)
+	reconcile(t, g)
+
+	h.api.addGroup("group-data", "Data", "CUSTOM")
+	handler := automation.Handler(Definition.Name, g, secret)
+	body := []byte(`{"id":"evt-1","type":"group.created","data":{"entity":{"id":"group-data","name":"Data"}}}`)
+	req := httptest.NewRequest(http.MethodPost, automation.HookPath, strings.NewReader(string(body)))
+	automation.SignRequest(req, secret, "evt-1", body, time.Now())
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	select {
+	case <-g.wake:
+	default:
+		t.Fatal("group.created did not wake the reconcile loop")
+	}
+
+	reconcile(t, g)
+	if len(h.api.created) != 3 || !reflect.DeepEqual(h.api.created[2], created{Group: "group-data", Input: weekendInput()}) {
+		t.Fatalf("created = %#v", h.api.created)
+	}
+}
+
+func TestDeletedPolicyIsCreatedAgain(t *testing.T) {
+	h := setup(t)
+	h.now = inWeekend
+	g := h.guard(t)
+	reconcile(t, g)
+
+	h.api.mu.Lock()
+	h.api.groups[2].Policies = nil // someone deleted Developers' deny policy by hand
+	h.api.mu.Unlock()
+	reconcile(t, g)
+	if got := h.api.policyIDs("group-developers"); !reflect.DeepEqual(got, []string{"policy-3"}) {
+		t.Fatalf("developers policies = %v", got)
+	}
+}
+
+func TestRestartWithState(t *testing.T) {
+	h := setup(t)
+	h.now = inWeekend
+	reconcile(t, h.guard(t))
+
+	b, err := os.ReadFile(filepath.Join(h.stateDir, "freeze-guard.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"policies":{"weekend":{"group-contractors":"policy-1","group-developers":"policy-2"}},"active":{"weekend":true},"lifts":{}}`
+	if string(b) != want {
+		t.Fatalf("state = %s", b)
+	}
+
+	restarted := h.guard(t)
+	reconcile(t, restarted)
+	if len(h.api.created) != 2 || len(h.webhook.texts) != 1 {
+		t.Fatalf("created = %v, slack = %q", h.api.created, h.webhook.texts)
+	}
+
+	h.now = weekday.AddDate(0, 0, 7)
+	reconcile(t, h.guard(t))
+	if len(h.api.deleted) != 2 {
+		t.Fatalf("deleted = %v", h.api.deleted)
+	}
+}
+
+func TestRestartWithoutStateAdoptsExactMatches(t *testing.T) {
+	h := setup(t)
+	h.api.addGroup("group-data", "Data", "CUSTOM",
+		fakePolicy{ID: "lost-1", Actions: []string{"instance:deploy", "instance:decommission", "environment:deploy", "environment:decommission"},
+			Conditions: json.RawMessage(`{"md-environment":["prod"]}`)},
+		fakePolicy{ID: "near-1", Actions: []string{"instance:deploy", "instance:decommission", "environment:deploy", "environment:decommission"},
+			Conditions: json.RawMessage(`{"md-environment":["prod","staging"]}`)},
+		fakePolicy{ID: "lost-2", Actions: []string{"instance:deploy"}, Conditions: json.RawMessage(`{"md-project":["web","api"]}`)},
+	)
+	h.now = weekday
+	reconcile(t, h.guard(t))
+
+	if !reflect.DeepEqual(h.api.deleted, []string{"lost-1", "lost-2"}) {
+		t.Fatalf("deleted = %v", h.api.deleted)
+	}
+	if got := h.api.policyIDs("group-data"); !reflect.DeepEqual(got, []string{"near-1"}) {
+		t.Fatalf("data policies = %v", got)
+	}
+	if got := h.api.policyIDs("group-contractors"); !reflect.DeepEqual(got, []string{"foreign-1"}) {
+		t.Fatalf("contractors policies = %v", got)
+	}
+}
+
+func TestRestartWithoutStateInsideWindowKeepsExactMatch(t *testing.T) {
+	h := setup(t)
+	h.now = inWeekend
+	reconcile(t, h.guard(t))
+	if err := os.Remove(filepath.Join(h.stateDir, "freeze-guard.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	reconcile(t, h.guard(t))
+	if len(h.api.created) != 2 || len(h.api.deleted) != 0 {
+		t.Fatalf("created = %v, deleted = %v", h.api.created, h.api.deleted)
+	}
+}
+
+func lift(t *testing.T, g *Guard, token, window string) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := http.NewServeMux()
+	g.Routes(mux)
+	req := httptest.NewRequest(http.MethodPost, "/freeze/lift?window="+window, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestEmergencyLift(t *testing.T) {
+	h := setup(t)
+	h.now = inWeekend
+	g := h.guard(t)
+	reconcile(t, g)
+
+	if rec := lift(t, g, "wrong", "weekend"); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong token status = %d", rec.Code)
+	}
+	if rec := lift(t, g, "admin-token", "holiday"); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown window status = %d", rec.Code)
+	}
+	if rec := lift(t, g, "admin-token", "thanksgiving"); rec.Code != http.StatusConflict {
+		t.Fatalf("inactive window status = %d", rec.Code)
+	}
+
+	rec := lift(t, g, "admin-token", "weekend")
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != `{"until":"2026-12-04T22:00:00Z","window":"weekend"}` {
+		t.Fatalf("lift = %d %s", rec.Code, rec.Body)
+	}
+	if len(h.api.deleted) != 2 || len(h.api.policyIDs("group-developers")) != 0 {
+		t.Fatalf("deleted = %v", h.api.deleted)
+	}
+	if got := h.webhook.texts[1]; got != `Freeze window "weekend" lifted until 2026-12-04 17:00 EST. Removed its deny policies.` {
+		t.Fatalf("slack = %q", got)
+	}
+
+	// The lift survives a restart and holds for the rest of this weekend.
+	h.now = time.Date(2026, 11, 29, 17, 0, 0, 0, time.UTC)
+	reconcile(t, h.guard(t))
+	if len(h.api.created) != 2 {
+		t.Fatalf("created during lift = %v", h.api.created)
+	}
+
+	// The next weekend freezes again.
+	h.now = time.Date(2026, 12, 4, 22, 0, 0, 0, time.UTC)
+	reconcile(t, h.guard(t))
+	if len(h.api.created) != 4 {
+		t.Fatalf("created after lift = %v", h.api.created)
+	}
+}
+
+func TestLiftRouteNeedsToken(t *testing.T) {
+	h := setup(t)
+	g := h.guard(t)
+	g.opts.AdminToken = ""
+	if rec := lift(t, g, "", "weekend"); rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+func TestFixedWindowWithOwnActions(t *testing.T) {
+	h := setup(t)
+	h.now = time.Date(2026, 11, 26, 15, 0, 0, 0, time.UTC)
+	reconcile(t, h.guard(t))
+	input := map[string]any{"effect": "DENY", "actions": []any{"instance:deploy"}, "conditions": `{"md-project":["api","web"]}`}
+	want := []created{{Group: "group-contractors", Input: input}, {Group: "group-developers", Input: input}, {Group: "group-release", Input: input}}
+	if !reflect.DeepEqual(h.api.created, want) {
+		t.Fatalf("created = %#v", h.api.created)
+	}
+	wantText := "Freeze window \"thanksgiving\" started. Denied instance:deploy where md-project is one of api, web.\n" +
+		"Frozen groups: Contractors, Developers, Release Managers.\nExempt groups: SRE."
+	if !reflect.DeepEqual(h.webhook.texts, []string{wantText}) {
+		t.Fatalf("slack = %q", h.webhook.texts)
+	}
+}
+
+func TestWildcardConditions(t *testing.T) {
+	ws, err := ParseWindows([]byte("windows: [{name: all, from: 2026-11-26, to: 2026-11-27}, {name: any-project, match: {md-project: '*'}, from: 2026-11-26, to: 2026-11-27}]"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ws[0].conditionsInput(); got != "*" {
+		t.Errorf("no match = %q", got)
+	}
+	if got := ws[1].conditionsInput(); got != `{"md-project":"*"}` {
+		t.Errorf("per-key wildcard = %q", got)
+	}
+	if !matches(policy{Actions: DefaultActions, Conditions: json.RawMessage(`"*"`)}, ws[0]) {
+		t.Error("wildcard policy does not match a window with no match")
+	}
+}
+
+func TestContainsAndNextStart(t *testing.T) {
+	ws, err := ParseWindows([]byte(windowsYAML))
+	if err != nil {
+		t.Fatal(err)
+	}
+	weekend := ws[0]
 	cases := []struct {
-		name  string
-		opts  deploymentOpts
-		abort bool
+		at   time.Time
+		want bool
 	}{
-		{"weekend wraps into Sunday", deploymentOpts{at: "2026-11-29T17:00:00Z", environment: "prod"}, true},
-		{"weekend ends Monday 08:00", deploymentOpts{at: "2026-11-30T13:00:00Z", environment: "prod"}, false},
-		{"fixed range", deploymentOpts{at: "2026-11-26T15:00:00Z", environment: "prod"}, true},
-		{"weekday outside windows", deploymentOpts{at: "2026-11-25T15:00:00Z", environment: "prod"}, false},
-		{"other environment", deploymentOpts{at: "2026-11-27T23:00:00Z", environment: "staging"}, false},
-		{"override token", deploymentOpts{at: "2026-11-27T23:00:00Z", environment: "prod", message: "Hotfix [freeze-override]"}, false},
-		{"plan", deploymentOpts{at: "2026-11-27T23:00:00Z", environment: "prod", action: "PLAN"}, false},
-		{"decommission", deploymentOpts{at: "2026-11-27T23:00:00Z", environment: "prod", action: "DECOMMISSION"}, true},
-		{"approved", deploymentOpts{at: "2026-11-27T23:00:00Z", environment: "prod", status: "APPROVED"}, true},
-		{"proposal", deploymentOpts{eventType: "deployment.created", at: "2026-11-27T23:00:00Z", environment: "prod", status: "PROPOSED"}, false},
-		{"queued behind another deployment", deploymentOpts{eventType: "deployment.created", at: "2026-11-27T23:00:00Z", environment: "prod"}, true},
+		{inWeekend, true},
+		{time.Date(2026, 11, 29, 17, 0, 0, 0, time.UTC), true},
+		{time.Date(2026, 11, 30, 13, 0, 0, 0, time.UTC), false},
+		{weekday, false},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h := setup(t)
-			tc.opts.eventID = "evt-1"
-			h.send(t, tc.opts)
-			if got := len(h.api.aborted) == 1; got != tc.abort {
-				t.Fatalf("aborted = %v, want abort %v", h.api.aborted, tc.abort)
-			}
-		})
+		if got := weekend.Contains(tc.at); got != tc.want {
+			t.Errorf("Contains(%s) = %v", tc.at, got)
+		}
 	}
-}
-
-func TestAbortsOnce(t *testing.T) {
-	h := setup(t)
-	h.send(t, deploymentOpts{eventID: "evt-1", eventType: "deployment.created", at: "2026-11-27T23:00:00Z", environment: "prod"})
-	h.send(t, deploymentOpts{eventID: "evt-2", eventType: "deployment.enqueued", at: "2026-11-27T23:00:01Z", environment: "prod"})
-	if len(h.api.aborted) != 1 || len(h.webhook.texts) != 1 {
-		t.Fatalf("aborted = %v, slack = %v", h.api.aborted, h.webhook.texts)
+	if got := weekend.NextStart(weekday); !got.Equal(time.Date(2026, 11, 27, 22, 0, 0, 0, time.UTC)) {
+		t.Errorf("NextStart(weekday) = %s", got)
 	}
-}
-
-func TestRefusedAbortIsNotRetried(t *testing.T) {
-	h := setup(t)
-	h.api.refuse = true
-	if code := h.send(t, deploymentOpts{eventID: "evt-1", at: "2026-11-27T23:00:00Z", environment: "prod"}); code != http.StatusNoContent {
-		t.Fatalf("status = %d", code)
-	}
-	if len(h.webhook.texts) != 0 {
-		t.Fatalf("slack = %v", h.webhook.texts)
+	if got := ws[1].NextStart(weekday); !got.Equal(time.Date(2026, 11, 27, 5, 0, 0, 0, time.UTC)) {
+		t.Errorf("fixed NextStart = %s", got)
 	}
 }
 
 func TestParseWindowsErrors(t *testing.T) {
 	cases := map[string]string{
-		"both kinds":   "windows: [{name: x, from: 2026-11-26, to: 2026-11-27, weekly: [{from: Fri 17:00, to: Mon 08:00}]}]",
-		"neither kind": "windows: [{name: x}]",
-		"bad timezone": "windows: [{name: x, timezone: Mars/Base, from: 2026-11-26, to: 2026-11-27}]",
-		"bad weekday":  "windows: [{name: x, weekly: [{from: Funday 17:00, to: Mon 08:00}]}]",
-		"backwards":    "windows: [{name: x, from: 2026-11-27, to: 2026-11-26}]",
-		"unknown key":  "windows: [{name: x, form: 2026-11-26, to: 2026-11-27}]",
+		"no name":        "windows: [{from: 2026-11-26, to: 2026-11-27}]",
+		"duplicate name": "windows: [{name: x, from: 2026-11-26, to: 2026-11-27}, {name: x, from: 2026-11-28, to: 2026-11-29}]",
+		"bad action":     "windows: [{name: x, actions: [deploy], from: 2026-11-26, to: 2026-11-27}]",
+		"both kinds":     "windows: [{name: x, from: 2026-11-26, to: 2026-11-27, weekly: [{from: Fri 17:00, to: Mon 08:00}]}]",
+		"neither kind":   "windows: [{name: x}]",
+		"bad timezone":   "windows: [{name: x, timezone: Mars/Base, from: 2026-11-26, to: 2026-11-27}]",
+		"bad weekday":    "windows: [{name: x, weekly: [{from: Funday 17:00, to: Mon 08:00}]}]",
+		"backwards":      "windows: [{name: x, from: 2026-11-27, to: 2026-11-26}]",
+		"unknown key":    "windows: [{name: x, form: 2026-11-26, to: 2026-11-27}]",
 	}
 	for name, src := range cases {
 		if _, err := ParseWindows([]byte(src)); err == nil {
@@ -220,12 +547,29 @@ func TestParseWindowsErrors(t *testing.T) {
 	}
 }
 
-func TestParseWindowsJSON(t *testing.T) {
-	ws, err := ParseWindows([]byte(`{"windows": [{"name": "x", "match": {"md-environment": "prod"}, "from": "2026-11-26T00:00:00Z", "to": "2026-11-27T00:00:00Z"}]}`))
+func TestRemovedWindowPoliciesAreDeleted(t *testing.T) {
+	h := setup(t)
+	h.now = inWeekend
+	reconcile(t, h.guard(t))
+
+	windows, err := ParseWindows([]byte("windows: [{name: holiday, from: 2026-12-24, to: 2026-12-26}]"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ws[0].Contains(time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)) {
-		t.Fatal("JSON window does not contain its own range")
+	g, err := New(&massdriver.Client{Endpoint: h.apiURL, OrganizationID: "acme", APIKey: "md_test"}, windows, Options{StateDir: h.stateDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.now = func() time.Time { return h.now }
+	reconcile(t, g)
+	if !reflect.DeepEqual(h.api.deleted, []string{"policy-1", "policy-2"}) {
+		t.Fatalf("deleted = %v", h.api.deleted)
+	}
+	b, err := os.ReadFile(filepath.Join(h.stateDir, "freeze-guard.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != `{"policies":{},"active":{},"lifts":{}}` {
+		t.Fatalf("state = %s", b)
 	}
 }

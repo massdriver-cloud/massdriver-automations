@@ -1,7 +1,0 @@
-mutation AbortDeployment($org: ID!, $id: UUID!) {
-  abortDeployment(organizationId: $org, id: $id) {
-    successful
-    messages { field message }
-    result { id status }
-  }
-}

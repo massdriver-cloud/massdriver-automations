@@ -1,0 +1,7 @@
+mutation FreezeGuardDeletePolicy($org: ID!, $id: UUID!) {
+  deletePolicy(organizationId: $org, id: $id) {
+    successful
+    messages { field message }
+    result { id }
+  }
+}

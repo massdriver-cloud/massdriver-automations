@@ -1,9 +1,10 @@
-// Package freezeguard aborts deployments that start inside a change freeze window.
+// Package freezeguard enforces change freeze windows with deny policies on groups.
 package freezeguard
 
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -12,24 +13,36 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
 )
 
-//go:embed queries/abort_deployment.graphql
-var abortDeploymentMutation string
+const automationName = "freeze-guard"
+
+var (
+	//go:embed queries/groups.graphql
+	groupsQuery string
+	//go:embed queries/group_policies.graphql
+	groupPoliciesQuery string
+	//go:embed queries/create_group_policy.graphql
+	createGroupPolicyMutation string
+	//go:embed queries/delete_policy.graphql
+	deletePolicyMutation string
+)
+
+var jsonString = massdriver.JSONString
 
 // Definition registers the automation.
 var Definition = automation.Definition{
-	Name:        "freeze-guard",
-	Description: "Aborts deployments that start inside a change freeze window.",
-	Events:      []string{"deployment.created", "deployment.enqueued"},
+	Name:        automationName,
+	Description: "Adds deny policies for deployment actions to groups during change freeze windows.",
+	Events:      []string{"group.created", "group.updated", "group.deleted"},
 	New: func() (automation.Automation, error) {
 		api, err := massdriver.FromEnv()
 		if err != nil {
@@ -47,270 +60,522 @@ var Definition = automation.Definition{
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", v["FREEZE_WINDOWS_FILE"], err)
 		}
-		return New(api, windows, automation.Env("FREEZE_OVERRIDE_TOKEN", "[freeze-override]"),
-			automation.Env("SLACK_WEBHOOK_URL", "")), nil
+		g, err := New(api, windows, Options{
+			StateDir:        os.Getenv("STATE_DIR"),
+			AdminToken:      os.Getenv("FREEZE_ADMIN_TOKEN"),
+			SlackWebhookURL: os.Getenv("SLACK_WEBHOOK_URL"),
+		})
+		if err != nil {
+			return nil, err
+		}
+		go g.Run(context.Background(), time.Minute)
+		return g, nil
 	},
 }
 
-// --- windows ---------------------------------------------------------------
-
-// Window is one freeze. It is either weekly (recurs every week) or a fixed range between two times.
-type Window struct {
-	Name  string
-	Match map[string]string
-	// Weekly ranges are minutes since Sunday 00:00 in loc. A range whose end is before its start wraps past Saturday.
-	weekly   [][2]int
-	from, to time.Time
-	loc      *time.Location
+// Options are the settings that come from the environment.
+type Options struct {
+	StateDir        string
+	AdminToken      string
+	SlackWebhookURL string
 }
 
-type fileWindow struct {
-	Name     string            `yaml:"name"`
-	Match    map[string]string `yaml:"match"`
-	Timezone string            `yaml:"timezone"`
-	Weekly   []struct {
-		From string `yaml:"from"`
-		To   string `yaml:"to"`
-	} `yaml:"weekly"`
-	From string `yaml:"from"`
-	To   string `yaml:"to"`
+// Guard keeps one deny policy on each non-exempt group for each active window.
+type Guard struct {
+	api     *massdriver.Client
+	windows []Window
+	opts    Options
+	now     func() time.Time
+	wake    chan struct{}
+
+	mu sync.Mutex
+	st state
+	// adopt is set when no state file existed at start. The first reconcile then takes over policies that exactly
+	// match a window, so a lost state file cannot leave a freeze in place.
+	adopt bool
 }
 
-// ParseWindows reads the windows file. YAML and JSON both parse.
-func ParseWindows(b []byte) ([]Window, error) {
-	var file struct {
-		Timezone string       `yaml:"timezone"`
-		Windows  []fileWindow `yaml:"windows"`
-	}
-	dec := yaml.NewDecoder(bytes.NewReader(b))
-	dec.KnownFields(true)
-	if err := dec.Decode(&file); err != nil {
-		return nil, err
-	}
-
-	var out []Window
-	for i, fw := range file.Windows {
-		name := fw.Name
-		if name == "" {
-			name = fmt.Sprintf("windows[%d]", i)
-		}
-		tz := fw.Timezone
-		if tz == "" {
-			tz = file.Timezone
-		}
-		if tz == "" {
-			tz = "UTC"
-		}
-		loc, err := time.LoadLocation(tz)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", name, err)
-		}
-		w := Window{Name: name, Match: fw.Match, loc: loc}
-
-		fixed := fw.From != "" || fw.To != ""
-		if fixed == (len(fw.Weekly) > 0) {
-			return nil, fmt.Errorf("%s: set either weekly or from and to", name)
-		}
-		if fixed {
-			if w.from, err = parseTime(fw.From, loc); err != nil {
-				return nil, fmt.Errorf("%s: from: %w", name, err)
-			}
-			if w.to, err = parseTime(fw.To, loc); err != nil {
-				return nil, fmt.Errorf("%s: to: %w", name, err)
-			}
-			if !w.to.After(w.from) {
-				return nil, fmt.Errorf("%s: to must be after from", name)
-			}
-		}
-		for _, r := range fw.Weekly {
-			from, err := parseWeekTime(r.From)
-			if err != nil {
-				return nil, fmt.Errorf("%s: weekly from: %w", name, err)
-			}
-			to, err := parseWeekTime(r.To)
-			if err != nil {
-				return nil, fmt.Errorf("%s: weekly to: %w", name, err)
-			}
-			if from == to {
-				return nil, fmt.Errorf("%s: weekly from and to are the same", name)
-			}
-			w.weekly = append(w.weekly, [2]int{from, to})
-		}
-		out = append(out, w)
-	}
-	return out, nil
-}
-
-func parseTime(s string, loc *time.Location) (time.Time, error) {
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t, nil
-	}
-	for _, layout := range []string{"2006-01-02 15:04", "2006-01-02T15:04", "2006-01-02"} {
-		if t, err := time.ParseInLocation(layout, s, loc); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("%q is not RFC 3339, YYYY-MM-DD HH:MM, or YYYY-MM-DD", s)
-}
-
-var weekdays = map[string]int{"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
-
-// parseWeekTime reads "Fri 17:00" as minutes since Sunday 00:00.
-func parseWeekTime(s string) (int, error) {
-	day, clock, ok := strings.Cut(strings.TrimSpace(s), " ")
-	d, known := weekdays[strings.ToLower(day)[:min(3, len(day))]]
-	if !ok || !known {
-		return 0, fmt.Errorf("%q is not like \"Fri 17:00\"", s)
-	}
-	t, err := time.Parse("15:04", strings.TrimSpace(clock))
+// New returns the automation with its state loaded from opts.StateDir.
+func New(api *massdriver.Client, windows []Window, opts Options) (*Guard, error) {
+	st, found, err := loadState(opts.StateDir)
 	if err != nil {
-		return 0, fmt.Errorf("%q is not like \"Fri 17:00\"", s)
+		return nil, fmt.Errorf("state: %w", err)
 	}
-	return d*24*60 + t.Hour()*60 + t.Minute(), nil
+	return &Guard{api: api, windows: windows, opts: opts, now: time.Now, wake: make(chan struct{}, 1), st: st, adopt: !found}, nil
 }
 
-// Contains reports whether t is inside the window.
-func (w Window) Contains(t time.Time) bool {
-	if len(w.weekly) == 0 {
-		return !t.Before(w.from) && t.Before(w.to)
-	}
-	l := t.In(w.loc)
-	m := int(l.Weekday())*24*60 + l.Hour()*60 + l.Minute()
-	for _, r := range w.weekly {
-		if r[0] < r[1] && m >= r[0] && m < r[1] {
-			return true
+// Run reconciles at start, every interval, and after each group event, until ctx ends.
+func (g *Guard) Run(ctx context.Context, interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		rctx, cancel := context.WithTimeout(ctx, interval)
+		if err := g.Reconcile(rctx); err != nil {
+			slog.Error("reconcile", "automation", automationName, "error", err)
 		}
-		if r[0] > r[1] && (m >= r[0] || m < r[1]) {
-			return true
+		cancel()
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		case <-g.wake:
 		}
 	}
-	return false
 }
 
-// Matches reports whether the event's entity has every attribute of the window's match.
-func (w Window) Matches(ev automation.Event) bool {
-	for k, v := range w.Match {
-		if ev.Attribute(k) != v {
+// Handle wakes the reconcile loop when a group appears, changes its name, or goes away.
+func (g *Guard) Handle(_ context.Context, ev automation.Event) error {
+	switch ev.Type {
+	case "group.created", "group.updated", "group.deleted":
+		select {
+		case g.wake <- struct{}{}:
+		default:
+		}
+	}
+	return nil
+}
+
+// Routes serves POST /freeze/lift?window=<name> when an admin token is set.
+func (g *Guard) Routes(mux *http.ServeMux) {
+	if g.opts.AdminToken == "" {
+		return
+	}
+	mux.HandleFunc("POST /freeze/lift", func(w http.ResponseWriter, r *http.Request) {
+		want := []byte("Bearer " + g.opts.AdminToken)
+		if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), want) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		name := r.URL.Query().Get("window")
+		until, err := g.Lift(name)
+		switch {
+		case errors.Is(err, errUnknownWindow):
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		case errors.Is(err, errNotActive):
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		case err != nil:
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		body := map[string]string{"window": name, "until": until.UTC().Format(time.RFC3339)}
+		status := http.StatusOK
+		if err := g.Reconcile(r.Context()); err != nil {
+			// The lift is saved. The loop removes the remaining policies on its next run.
+			body["error"] = err.Error()
+			status = http.StatusAccepted
+		}
+		w.Header().Set("content-type", "application/json")
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(body)
+	})
+}
+
+var (
+	errUnknownWindow = errors.New("unknown window")
+	errNotActive     = errors.New("window is not active")
+)
+
+// Lift ends the named window until its next start and saves the lift.
+func (g *Guard) Lift(name string) (time.Time, error) {
+	w, ok := g.window(name)
+	if !ok {
+		return time.Time{}, errUnknownWindow
+	}
+	now := g.now()
+	if !w.Contains(now) {
+		return time.Time{}, errNotActive
+	}
+	until := w.NextStart(now)
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.st.Lifts[name] = until
+	slog.Info("lift", "automation", automationName, "window", name, "until", until)
+	return until, saveState(g.opts.StateDir, g.st)
+}
+
+func (g *Guard) window(name string) (Window, bool) {
+	for _, w := range g.windows {
+		if w.Name == name {
+			return w, true
+		}
+	}
+	return Window{}, false
+}
+
+// --- reconcile -------------------------------------------------------------
+
+type policy struct {
+	ID         string          `json:"id"`
+	Actions    []string        `json:"actions"`
+	Conditions json.RawMessage `json:"conditions"`
+}
+
+type policiesPage struct {
+	Cursor struct {
+		Next string `json:"next"`
+	} `json:"cursor"`
+	Items []policy `json:"items"`
+}
+
+type group struct {
+	ID       string        `json:"id"`
+	Name     string        `json:"name"`
+	Role     string        `json:"role"`
+	Policies *policiesPage `json:"policies"`
+}
+
+// Reconcile creates the deny policies that the active windows need and deletes the ones that it created and no
+// window needs. It changes no other policy.
+func (g *Guard) Reconcile(ctx context.Context) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	groups, err := g.listGroups(ctx)
+	if err != nil {
+		return err
+	}
+	now := g.now()
+	for name, until := range g.st.Lifts {
+		if !now.Before(until) {
+			delete(g.st.Lifts, name)
+		}
+	}
+
+	byID := map[string]group{}
+	exists := map[string]bool{}
+	for _, gr := range groups {
+		byID[gr.ID] = gr
+		for _, p := range gr.Policies.Items {
+			exists[p.ID] = true
+		}
+	}
+
+	if g.adopt {
+		g.adoptMatching(groups)
+		g.adopt = false
+	}
+
+	// A policy that someone deleted, or that went with its group, is gone. Forget it, so an active window
+	// creates it again.
+	for wname, m := range g.st.Policies {
+		for gid, pid := range m {
+			if !exists[pid] {
+				delete(m, gid)
+			}
+		}
+		if len(m) == 0 {
+			delete(g.st.Policies, wname)
+		}
+	}
+
+	var errs []error
+	// A window removed from the windows file still owns the policies it created. No window needs them.
+	for wname, m := range g.st.Policies {
+		if _, ok := g.window(wname); ok {
+			continue
+		}
+		for _, gid := range sortedKeys(m) {
+			if err := g.deletePolicy(ctx, m[gid]); err != nil {
+				errs = append(errs, fmt.Errorf("%s: delete policy %s of group %s: %w", wname, m[gid], gid, err))
+				continue
+			}
+			delete(m, gid)
+		}
+		if len(m) == 0 {
+			delete(g.st.Policies, wname)
+		}
+	}
+	for wname := range g.st.Active {
+		if _, ok := g.window(wname); !ok {
+			delete(g.st.Active, wname)
+		}
+	}
+	for wname := range g.st.Lifts {
+		if _, ok := g.window(wname); !ok {
+			delete(g.st.Lifts, wname)
+		}
+	}
+
+	for _, w := range g.windows {
+		active := g.active(w, now)
+		frozen := map[string]bool{}
+		if active {
+			for _, gr := range groups {
+				if gr.Role == "CUSTOM" && !w.Exempt(gr.Name) {
+					frozen[gr.ID] = true
+				}
+			}
+		}
+
+		for _, gid := range sortedKeys(g.st.Policies[w.Name]) {
+			pid := g.st.Policies[w.Name][gid]
+			if frozen[gid] {
+				continue
+			}
+			if err := g.deletePolicy(ctx, pid); err != nil {
+				errs = append(errs, fmt.Errorf("%s: delete policy %s of group %s: %w", w.Name, pid, gid, err))
+				continue
+			}
+			delete(g.st.Policies[w.Name], gid)
+			errs = appendErr(errs, saveState(g.opts.StateDir, g.st))
+		}
+
+		for _, gr := range groups {
+			if !frozen[gr.ID] || g.st.Policies[w.Name][gr.ID] != "" {
+				continue
+			}
+			pid, err := g.createPolicy(ctx, gr.ID, w)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: create policy on group %s: %w", w.Name, gr.Name, err))
+				continue
+			}
+			if g.st.Policies[w.Name] == nil {
+				g.st.Policies[w.Name] = map[string]string{}
+			}
+			g.st.Policies[w.Name][gr.ID] = pid
+			errs = appendErr(errs, saveState(g.opts.StateDir, g.st))
+		}
+
+		if active != g.st.Active[w.Name] {
+			g.announce(ctx, w, active, now, byID)
+			if active {
+				g.st.Active[w.Name] = true
+			} else {
+				delete(g.st.Active, w.Name)
+			}
+		}
+	}
+	errs = appendErr(errs, saveState(g.opts.StateDir, g.st))
+	return errors.Join(errs...)
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func appendErr(errs []error, err error) []error {
+	if err != nil {
+		return append(errs, err)
+	}
+	return errs
+}
+
+func (g *Guard) active(w Window, now time.Time) bool {
+	if until, lifted := g.st.Lifts[w.Name]; lifted && now.Before(until) {
+		return false
+	}
+	return w.Contains(now)
+}
+
+// adoptMatching takes over the deny policies whose actions and conditions exactly match a window.
+func (g *Guard) adoptMatching(groups []group) {
+	owned := map[string]bool{}
+	for _, m := range g.st.Policies {
+		for _, pid := range m {
+			owned[pid] = true
+		}
+	}
+	for _, gr := range groups {
+		for _, p := range gr.Policies.Items {
+			if owned[p.ID] {
+				continue
+			}
+			for _, w := range g.windows {
+				if g.st.Policies[w.Name][gr.ID] != "" || !matches(p, w) {
+					continue
+				}
+				if g.st.Policies[w.Name] == nil {
+					g.st.Policies[w.Name] = map[string]string{}
+				}
+				g.st.Policies[w.Name][gr.ID] = p.ID
+				owned[p.ID] = true
+				slog.Info("adopted policy", "automation", automationName, "window", w.Name, "group", gr.Name, "policy_id", p.ID)
+				break
+			}
+		}
+	}
+}
+
+// matches reports whether a deny policy has exactly the window's actions and conditions.
+func matches(p policy, w Window) bool {
+	if !slices.Equal(sortedUnique(p.Actions), w.Actions) || len(p.Actions) != len(w.Actions) {
+		return false
+	}
+	var raw any
+	if err := json.Unmarshal(p.Conditions, &raw); err != nil {
+		return false
+	}
+	if s, ok := raw.(string); ok {
+		return s == "*" && len(w.Conditions) == 0
+	}
+	obj, ok := raw.(map[string]any)
+	if !ok || len(obj) != len(w.Conditions) {
+		return false
+	}
+	for k, v := range obj {
+		want, ok := w.Conditions[k]
+		if !ok {
+			return false
+		}
+		var got []string
+		switch v := v.(type) {
+		case string:
+			got = []string{v}
+		case []any:
+			for _, e := range v {
+				s, ok := e.(string)
+				if !ok {
+					return false
+				}
+				got = append(got, s)
+			}
+		default:
+			return false
+		}
+		if !slices.Equal(sortedUnique(got), want) || len(got) != len(want) {
 			return false
 		}
 	}
 	return true
 }
 
-// --- automation ------------------------------------------------------------
-
-// Guard holds the windows and the deployments it aborted.
-type Guard struct {
-	api           *massdriver.Client
-	windows       []Window
-	overrideToken string
-	slackWebhook  string
-	now           func() time.Time
-
-	mu      sync.Mutex
-	aborted map[string]time.Time
-}
-
-// New returns the automation.
-func New(api *massdriver.Client, windows []Window, overrideToken, slackWebhook string) *Guard {
-	return &Guard{
-		api: api, windows: windows, overrideToken: overrideToken, slackWebhook: slackWebhook,
-		now: time.Now, aborted: map[string]time.Time{},
-	}
-}
-
-type deployment struct {
-	ID      string `json:"id"`
-	Status  string `json:"status"`
-	Action  string `json:"action"`
-	Version string `json:"version"`
-	Message string `json:"message"`
-}
-
-// Handle aborts the deployment when the event occurred inside a matching window.
-func (g *Guard) Handle(ctx context.Context, ev automation.Event) error {
-	if ev.Type != "deployment.created" && ev.Type != "deployment.enqueued" {
-		return nil
-	}
-	var dep deployment
-	if err := ev.DecodeEntity(&dep); err != nil {
-		return err
-	}
-	// A plan changes no infrastructure. A proposal cannot be aborted; its approval sends deployment.enqueued.
-	if dep.Action == "PLAN" || (dep.Status != "PENDING" && dep.Status != "APPROVED") {
-		return nil
-	}
-	log := slog.With("automation", Definition.Name, "event_id", ev.ID, "deployment_id", dep.ID, "instance", ev.Attribute("md-instance"))
-
-	// Delivery can lag. The freeze applies to when the deployment started, not when the event arrived.
-	at := ev.Time
-	if at.IsZero() {
-		at = g.now()
-	}
-	var window *Window
-	for i := range g.windows {
-		if g.windows[i].Matches(ev) && g.windows[i].Contains(at) {
-			window = &g.windows[i]
-			break
+func (g *Guard) listGroups(ctx context.Context) ([]group, error) {
+	var out []group
+	next := ""
+	for {
+		cursor := map[string]any{"limit": 20}
+		if next != "" {
+			cursor["next"] = next
+		}
+		var resp struct {
+			Groups struct {
+				Cursor struct {
+					Next string `json:"next"`
+				} `json:"cursor"`
+				Items []group `json:"items"`
+			} `json:"groups"`
+		}
+		if err := g.api.Do(ctx, groupsQuery, map[string]any{"org": g.api.OrganizationID, "cursor": cursor}, &resp); err != nil {
+			return nil, err
+		}
+		for _, gr := range resp.Groups.Items {
+			if gr.Policies == nil {
+				gr.Policies = &policiesPage{}
+			}
+			for gr.Policies.Cursor.Next != "" {
+				page, err := g.groupPolicies(ctx, gr.ID, gr.Policies.Cursor.Next)
+				if err != nil {
+					return nil, err
+				}
+				gr.Policies.Items = append(gr.Policies.Items, page.Items...)
+				gr.Policies.Cursor = page.Cursor
+			}
+			out = append(out, gr)
+		}
+		next = resp.Groups.Cursor.Next
+		if next == "" {
+			return out, nil
 		}
 	}
-	if window == nil {
-		return nil
-	}
-	if g.overrideToken != "" && strings.Contains(dep.Message, g.overrideToken) {
-		log.Info("override", "window", window.Name)
-		return nil
-	}
-	if g.wasAborted(dep.ID) {
-		return nil
-	}
+}
 
-	var out struct {
-		AbortDeployment massdriver.Payload[struct {
-			Status string `json:"status"`
-		}] `json:"abortDeployment"`
+func (g *Guard) groupPolicies(ctx context.Context, groupID, next string) (policiesPage, error) {
+	var resp struct {
+		Group *struct {
+			Policies *policiesPage `json:"policies"`
+		} `json:"group"`
 	}
-	err := g.api.Do(ctx, abortDeploymentMutation, map[string]any{"org": g.api.OrganizationID, "id": dep.ID}, &out)
-	if err != nil {
+	vars := map[string]any{"org": g.api.OrganizationID, "id": groupID, "cursor": map[string]any{"limit": 100, "next": next}}
+	if err := g.api.Do(ctx, groupPoliciesQuery, vars, &resp); err != nil {
+		return policiesPage{}, err
+	}
+	if resp.Group == nil || resp.Group.Policies == nil {
+		return policiesPage{}, nil
+	}
+	return *resp.Group.Policies, nil
+}
+
+func (g *Guard) createPolicy(ctx context.Context, groupID string, w Window) (string, error) {
+	var resp struct {
+		CreateGroupPolicy massdriver.Payload[struct {
+			ID string `json:"id"`
+		}] `json:"createGroupPolicy"`
+	}
+	vars := map[string]any{
+		"org":   g.api.OrganizationID,
+		"group": groupID,
+		"input": map[string]any{"effect": "DENY", "actions": w.Actions, "conditions": w.conditionsInput()},
+	}
+	if err := g.api.Do(ctx, createGroupPolicyMutation, vars, &resp); err != nil {
+		return "", err
+	}
+	if err := resp.CreateGroupPolicy.Err(); err != nil {
+		return "", err
+	}
+	slog.Info("created policy", "automation", automationName, "window", w.Name, "group_id", groupID,
+		"policy_id", resp.CreateGroupPolicy.Result.ID)
+	return resp.CreateGroupPolicy.Result.ID, nil
+}
+
+func (g *Guard) deletePolicy(ctx context.Context, id string) error {
+	var resp struct {
+		DeletePolicy massdriver.Payload[struct {
+			ID string `json:"id"`
+		}] `json:"deletePolicy"`
+	}
+	if err := g.api.Do(ctx, deletePolicyMutation, map[string]any{"org": g.api.OrganizationID, "id": id}, &resp); err != nil {
 		return err
 	}
-	g.markAborted(dep.ID)
-	// A refusal means the deployment already reached a status that abort does not accept. A retry cannot change that.
-	if err := out.AbortDeployment.Err(); err != nil {
-		log.Warn("abort refused", "window", window.Name, "error", err)
-		return nil
-	}
-
-	reason := fmt.Sprintf("Aborted %s deployment %s of %s (version %s) inside freeze window %q. "+
-		"Put %s in the deployment message to deploy during a freeze.",
-		dep.Action, dep.ID, ev.Attribute("md-instance"), dep.Version, window.Name, g.overrideToken)
-	log.Info("aborted", "window", window.Name, "reason", reason)
-
-	if g.slackWebhook != "" {
-		if err := g.notify(ctx, reason); err != nil {
-			log.Error("slack webhook", "error", err)
+	if err := resp.DeletePolicy.Err(); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+			return nil
 		}
+		return err
 	}
+	slog.Info("deleted policy", "automation", automationName, "policy_id", id)
 	return nil
 }
 
-func (g *Guard) wasAborted(id string) bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	_, ok := g.aborted[id]
-	return ok
+// --- slack -----------------------------------------------------------------
+
+func (g *Guard) announce(ctx context.Context, w Window, active bool, now time.Time, groups map[string]group) {
+	var text string
+	switch {
+	case active:
+		var frozen []string
+		for gid := range g.st.Policies[w.Name] {
+			frozen = append(frozen, groups[gid].Name)
+		}
+		sort.Strings(frozen)
+		text = fmt.Sprintf("Freeze window %q started. Denied %s %s.\nFrozen groups: %s.\nExempt groups: %s.",
+			w.Name, strings.Join(w.Actions, ", "), w.describeConditions(), list(frozen), list(w.ExemptGroups))
+	case !g.st.Lifts[w.Name].IsZero():
+		text = fmt.Sprintf("Freeze window %q lifted until %s. Removed its deny policies.",
+			w.Name, g.st.Lifts[w.Name].In(w.loc).Format("2006-01-02 15:04 MST"))
+	default:
+		text = fmt.Sprintf("Freeze window %q ended. Removed its deny policies.", w.Name)
+	}
+	slog.Info("window", "automation", automationName, "window", w.Name, "active", active, "at", now)
+	if g.opts.SlackWebhookURL == "" {
+		return
+	}
+	if err := g.notify(ctx, text); err != nil {
+		slog.Error("slack webhook", "automation", automationName, "error", err)
+	}
 }
 
-func (g *Guard) markAborted(id string) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	now := time.Now()
-	for k, t := range g.aborted {
-		if now.Sub(t) > 24*time.Hour {
-			delete(g.aborted, k)
-		}
+func list(names []string) string {
+	if len(names) == 0 {
+		return "none"
 	}
-	g.aborted[id] = now
+	return strings.Join(names, ", ")
 }
 
 func (g *Guard) notify(ctx context.Context, text string) error {
@@ -318,7 +583,7 @@ func (g *Guard) notify(ctx context.Context, text string) error {
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.slackWebhook, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.opts.SlackWebhookURL, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

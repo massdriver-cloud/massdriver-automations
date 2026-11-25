@@ -1,0 +1,7 @@
+mutation FreezeGuardCreatePolicy($org: ID!, $group: UUID!, $input: CreateGroupPolicyInput!) {
+  createGroupPolicy(organizationId: $org, groupId: $group, input: $input) {
+    successful
+    messages { field message }
+    result { id }
+  }
+}

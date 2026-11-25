@@ -1,0 +1,8 @@
+query FreezeGuardGroupPolicies($org: ID!, $id: UUID!, $cursor: Cursor) {
+  group(organizationId: $org, id: $id) {
+    policies(filter: { effect: { eq: DENY } }, cursor: $cursor) {
+      cursor { next }
+      items { id actions conditions }
+    }
+  }
+}
