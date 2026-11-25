@@ -1,0 +1,6 @@
+query EnvironmentAttributes($org: ID!, $id: ID!) {
+  environment(organizationId: $org, id: $id) {
+    attributes
+    effectiveAttributes
+  }
+}

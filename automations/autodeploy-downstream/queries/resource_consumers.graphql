@@ -1,0 +1,20 @@
+query ResourceConsumers($org: ID!, $id: ID!, $refs: Cursor, $defaults: Cursor) {
+  resource(organizationId: $org, id: $id) {
+    remoteReferences(cursor: $refs) {
+      cursor { next }
+      items { instance { ...Candidate } }
+    }
+    environmentDefaults(cursor: $defaults) {
+      cursor { next }
+      items { environment { id } }
+    }
+  }
+}
+
+fragment Candidate on Instance {
+  id
+  status
+  params
+  effectiveAttributes
+  dependencies { resource { id } }
+}

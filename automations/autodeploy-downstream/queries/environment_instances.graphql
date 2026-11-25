@@ -1,0 +1,13 @@
+query EnvironmentInstances($org: ID!, $id: ID!) {
+  environment(organizationId: $org, id: $id) {
+    instances { ...Candidate }
+  }
+}
+
+fragment Candidate on Instance {
+  id
+  status
+  params
+  effectiveAttributes
+  dependencies { resource { id } }
+}

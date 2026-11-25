@@ -1,0 +1,5 @@
+query EnvironmentIds($org: ID!, $ids: [ID!]!) {
+  environments(organizationId: $org, filter: { id: { in: $ids } }, cursor: { limit: 100 }) {
+    items { id }
+  }
+}

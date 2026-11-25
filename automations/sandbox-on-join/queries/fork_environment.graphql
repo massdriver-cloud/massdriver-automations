@@ -1,0 +1,7 @@
+mutation ForkEnvironment($org: ID!, $parentId: ID!, $input: ForkEnvironmentInput!) {
+  forkEnvironment(organizationId: $org, parentId: $parentId, input: $input) {
+    successful
+    messages { field message }
+    result { id }
+  }
+}

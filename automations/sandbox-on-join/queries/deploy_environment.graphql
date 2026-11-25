@@ -1,0 +1,6 @@
+mutation DeployEnvironment($org: ID!, $id: ID!) {
+  deployEnvironment(organizationId: $org, id: $id) {
+    successful
+    messages { field message }
+  }
+}

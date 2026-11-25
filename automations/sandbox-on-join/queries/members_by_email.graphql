@@ -1,0 +1,8 @@
+query MembersByEmail($org: ID!, $search: String!, $cursor: Cursor) {
+  organization(organizationId: $org) {
+    members(filter: { search: $search }, cursor: $cursor) {
+      cursor { next }
+      items { id email }
+    }
+  }
+}

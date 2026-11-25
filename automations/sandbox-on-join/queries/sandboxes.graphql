@@ -1,0 +1,14 @@
+query Sandboxes($org: ID!, $owner: String!, $cursor: Cursor) {
+  environments(
+    organizationId: $org
+    filter: { attributes: [{ key: "owner", eq: $owner }, { key: "sandbox", eq: "true" }] }
+    cursor: $cursor
+  ) {
+    cursor { next }
+    items {
+      id
+      parent { id }
+      instances { status }
+    }
+  }
+}

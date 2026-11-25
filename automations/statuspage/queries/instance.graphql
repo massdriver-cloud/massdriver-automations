@@ -1,0 +1,18 @@
+query StatusPageInstance($organizationId: ID!, $id: ID!) {
+  instance(organizationId: $organizationId, id: $id) {
+    id
+    name
+    status
+    effectiveAttributes
+    environment {
+      id
+    }
+    latestDeployment {
+      id
+      status
+      action
+      createdAt
+      lastTransitionedAt
+    }
+  }
+}

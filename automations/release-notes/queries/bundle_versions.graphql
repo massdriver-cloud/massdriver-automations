@@ -1,0 +1,11 @@
+query BundleVersions($org: ID!, $repo: ID!) {
+  ociRepo(organizationId: $org, id: $repo) {
+    tags(sort: { field: CREATED_AT, order: DESC }, cursor: { limit: 10 }) {
+      items {
+        tag
+        createdAt
+        changelog
+      }
+    }
+  }
+}

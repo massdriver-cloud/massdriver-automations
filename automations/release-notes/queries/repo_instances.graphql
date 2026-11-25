@@ -1,0 +1,21 @@
+query RepoInstances($org: ID!, $repo: OciRepoName!, $cursor: Cursor) {
+  instances(organizationId: $org, filter: { ociRepoName: { eq: $repo } }, cursor: $cursor) {
+    cursor {
+      next
+    }
+    items {
+      id
+      status
+      version
+      resolvedVersion
+      deployedVersion
+      availableUpgrade
+      environment {
+        id
+        project {
+          id
+        }
+      }
+    }
+  }
+}

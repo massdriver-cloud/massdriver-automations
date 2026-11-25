@@ -1,0 +1,6 @@
+mutation DecommissionEnvironment($org: ID!, $id: ID!) {
+  decommissionEnvironment(organizationId: $org, id: $id) {
+    successful
+    messages { field message }
+  }
+}

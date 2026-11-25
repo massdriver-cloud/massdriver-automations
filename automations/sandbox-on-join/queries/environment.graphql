@@ -1,0 +1,12 @@
+query Environment($org: ID!, $id: ID!) {
+  environment(organizationId: $org, id: $id) {
+    id
+    attributes
+    parent { id }
+    instances { status }
+    deletable {
+      result
+      constraints { type id message }
+    }
+  }
+}

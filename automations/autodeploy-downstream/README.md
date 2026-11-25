@@ -13,7 +13,7 @@ produces. All three sources count:
 - an environment default, in any environment
 - a remote reference, in any project
 
-The receiver skips an instance that is not `PROVISIONED`, so it never creates infrastructure for the first time.
+The automation skips an instance that is not `PROVISIONED`, so it never creates infrastructure for the first time.
 
 A downstream deploy that completes sends its own `deployment.completed` event, so changes cascade through
 the graph one level at a time.
@@ -34,29 +34,33 @@ The service account needs `instance:deploy` on the downstream instances, and vie
 
 ## Event destination
 
+Requires [mass](https://docs.massdriver.cloud/reference/cli/overview) 2.6.0 or later.
+
 ```bash
 mass event destination create \
   --name autodeploy-downstream \
-  --url https://autodeploy.example.com/ \
+  --url https://autodeploy.example.com/hooks/massdriver \
   --event-type deployment.completed \
   --condition '.data.metadata.deployment_action == "PROVISION"'
 ```
 
-Copy the signing secret from the destination into `MASSDRIVER_SIGNING_SECRET`.
+The condition drops `PLAN` and `DECOMMISSION` deployments, so Massdriver marks them `SKIPPED` and does not send
+them. To act on one environment only, add `--attribute md-environment=prod`.
+
+Copy the signing secret from the destination's **Overview** tab into `MASSDRIVER_SIGNING_SECRET`.
 
 ## Run
 
 ```bash
-docker build -t autodeploy-downstream .
 docker run -p 8080:8080 \
   -e MASSDRIVER_ORGANIZATION_ID=acme \
   -e MASSDRIVER_API_KEY=md_... \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
-  autodeploy-downstream
+  massdrivercloud/massdriver-automations:latest run autodeploy-downstream
 ```
 
 ## Limits
 
 - Duplicate events are dropped by id for one hour, in memory. Run one replica.
-- The receiver responds `202` before it deploys. A failed deploy is logged, and Massdriver does not retry it.
+- The automation responds before it deploys. A failed deploy is logged, and Massdriver does not retry it.
 - Each downstream deploys with its saved params and its current version constraint.
