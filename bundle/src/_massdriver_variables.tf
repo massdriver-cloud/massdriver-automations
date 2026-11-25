@@ -75,23 +75,34 @@ variable "ingress" {
 }
 variable "kubernetes_cluster" {
   type = object({
-    authentication = object({
-      cluster = object({
-        certificate-authority-data = string
-        server                     = string
-      })
-      user = object({
-        token = string
-      })
+    cluster = object({
+      certificate-authority-data = optional(string)
+      insecure-skip-tls-verify   = optional(bool)
+      proxy-url                  = optional(string)
+      server                     = string
+      tls-server-name            = optional(string)
     })
     namespace = optional(string)
+    user = object({
+      client-certificate-data = optional(string)
+      client-key-data         = optional(string)
+      exec = optional(object({
+        apiVersion = string
+        args       = optional(list(string))
+        command    = string
+        env = optional(list(object({
+          name  = string
+          value = string
+        })))
+        interactiveMode = optional(string)
+      }))
+      token = optional(string)
+    })
   })
 }
 variable "massdriver" {
   type = object({
-    app_url         = string
-    organization_id = string
-    url             = string
+    app_url = string
   })
 }
 variable "md_metadata" {
@@ -149,6 +160,13 @@ variable "sandbox_on_join" {
   type = object({
     config  = string
     enabled = bool
+  })
+}
+variable "service_account" {
+  type = object({
+    api_key         = string
+    organization_id = string
+    url             = string
   })
 }
 variable "statuspage" {

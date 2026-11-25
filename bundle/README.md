@@ -20,12 +20,13 @@ The bundle produces no resources for other bundles.
   `massdriver_event_destination`
   ([terraform-provider-massdriver#56](https://github.com/massdriver-cloud/terraform-provider-massdriver/pull/56)).
   The bundle does not deploy until 2.7.0 is published.
-- A `kubernetes-cluster` dependency. The bundle deploys into the namespace of that resource, or `default` when it
-  has none. It does not create the namespace.
+- A [`massdriver-kubernetes-cluster`](https://github.com/massdriver-cloud/massdriver-resource-types/tree/main/massdriver-kubernetes-cluster) dependency. The bundle deploys
+  into the namespace of that resource, or `default` when it has none. It does not create the namespace.
 - An ingress controller, and a wildcard DNS record for `*.<domain>` that points at it.
 - TLS on every host. Massdriver and Slack send requests to `https://` URLs. Set a cert-manager ClusterIssuer, set a
   TLS secret that holds a certificate for `*.<domain>`, or end TLS in front of the ingress controller.
-- A service account token in the `MASSDRIVER_API_KEY` secret.
+- A [`massdriver-service-account`](https://github.com/massdriver-cloud/massdriver-resource-types/tree/main/massdriver-service-account) dependency.
+- Both resource types installed in your organization. See [massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types).
 
 ## Ingress host
 
@@ -54,9 +55,9 @@ For proposal-chatops, set the Slack app's interactivity request URL to
 
 ## Service account
 
-The bundle creates event destinations with the service account token, because a deployment cannot create them. The
-automations that call the Massdriver API get the same token as `MASSDRIVER_API_KEY`. Set
-**Massdriver > Organization ID** to the organization of the service account.
+The bundle creates event destinations with the `massdriver-service-account` dependency, because a deployment cannot
+create them. The automations that call the Massdriver API get its URL, organization, and token as `MASSDRIVER_URL`,
+`MASSDRIVER_ORGANIZATION_ID`, and `MASSDRIVER_API_KEY`.
 
 The service account needs `organization:manageEventDestinations`, plus the permissions of each automation that you
 turn on:
@@ -82,7 +83,6 @@ Each secret is set on the instance. Set only the secrets of the automations that
 
 | Secret | Automation | Variable |
 |---|---|---|
-| `MASSDRIVER_API_KEY` | all that call the API | `MASSDRIVER_API_KEY` |
 | `AUDIT_ARCHIVER_AWS_ACCESS_KEY_ID`, `AUDIT_ARCHIVER_AWS_SECRET_ACCESS_KEY` | audit-archiver | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `AUDIT_ARCHIVER_SPLUNK_HEC_TOKEN` | audit-archiver | `SPLUNK_HEC_TOKEN` |
 | `AUDIT_ARCHIVER_DD_API_KEY` | audit-archiver | `DD_API_KEY` |
