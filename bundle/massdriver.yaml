@@ -14,7 +14,6 @@ params:
     - image
     - massdriver
     - ingress
-    - attribute_enforcer
     - audit_archiver
     - autodeploy_downstream
     - bundle_scanner
@@ -24,6 +23,7 @@ params:
     - github_deployments
     - proposal_chatops
     - release_notes
+    - rollback_on_failure
     - sandbox_on_join
     - statuspage
   properties:
@@ -71,7 +71,7 @@ params:
         app_url:
           type: string
           title: App URL
-          description: The URL of the Massdriver UI. github-deployments and drift link to it.
+          description: The URL of the Massdriver UI. github-deployments, drift, and rollback-on-failure link to it.
           default: https://app.massdriver.cloud
           format: uri
     ingress:
@@ -106,37 +106,6 @@ params:
           description: >-
             A Secret in the namespace that holds a certificate for `*.<domain>`. Ignored when a ClusterIssuer is
             set.
-
-    attribute_enforcer:
-      type: object
-      title: attribute-enforcer
-      description: Sets default attributes on new projects, environments, and components, and reports missing ones.
-      required: [enabled, config, attributes]
-      properties:
-        enabled:
-          type: boolean
-          title: Enabled
-          default: false
-        config:
-          type: string
-          title: Configuration
-          description: >-
-            The `config.yaml` of attribute-enforcer. The event destination condition is built from it, so only
-            entities that break a rule are sent. `notify` needs the `ATTRIBUTE_ENFORCER_SLACK_WEBHOOK_URL` secret.
-          default: |
-            actions: [notify]
-            project: []
-            environment: []
-            component: []
-        attributes: &attributes
-          type: object
-          title: Event attributes
-          description: >-
-            Attribute values that an event's entity must have, such as `md-environment` = `prod`. Empty sends
-            events of any attributes.
-          default: {}
-          additionalProperties:
-            type: string
 
     audit_archiver:
       type: object
@@ -214,7 +183,15 @@ params:
           type: string
           title: Opt-in attribute value
           default: "true"
-        attributes: *attributes
+        attributes: &attributes
+          type: object
+          title: Event attributes
+          description: >-
+            Attribute values that an event's entity must have, such as `md-environment` = `prod`. Empty sends
+            events of any attributes.
+          default: {}
+          additionalProperties:
+            type: string
 
     bundle_scanner:
       type: object
@@ -403,6 +380,32 @@ params:
           title: Include development versions
           default: false
 
+    rollback_on_failure:
+      type: object
+      title: rollback-on-failure
+      description: >-
+        Rolls an opted-in instance back to its last completed deployment when a deployment fails. Notices go to the
+        `ROLLBACK_ON_FAILURE_SLACK_WEBHOOK_URL` secret, or to the logs only.
+      required: [enabled, attribute_key, attribute_value, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        attribute_key:
+          type: string
+          title: Opt-in attribute key
+          description: A component custom attribute that allows the value below.
+          default: autorollback
+          pattern: ^[A-Za-z_][A-Za-z0-9_]{0,63}$
+          message:
+            pattern: Must start with a letter or an underscore, and hold only letters, digits, and underscores.
+        attribute_value:
+          type: string
+          title: Opt-in attribute value
+          default: "true"
+        attributes: *attributes
+
     sandbox_on_join:
       type: object
       title: sandbox-on-join
@@ -469,8 +472,6 @@ app:
         An `md_` token of a service account. It creates the event destinations and is given to the automations
         that call the Massdriver API.
       required: true
-    ATTRIBUTE_ENFORCER_SLACK_WEBHOOK_URL:
-      title: attribute-enforcer Slack webhook URL
     AUDIT_ARCHIVER_AWS_ACCESS_KEY_ID:
       title: audit-archiver AWS access key ID
     AUDIT_ARCHIVER_AWS_SECRET_ACCESS_KEY:
@@ -505,13 +506,14 @@ app:
       title: release-notes Slack webhook URL
     RELEASE_NOTES_TEAMS_WEBHOOK_URL:
       title: release-notes Teams webhook URL
+    ROLLBACK_ON_FAILURE_SLACK_WEBHOOK_URL:
+      title: rollback-on-failure Slack webhook URL
 
 ui:
   ui:order:
     - image
     - massdriver
     - ingress
-    - attribute_enforcer
     - audit_archiver
     - autodeploy_downstream
     - bundle_scanner
@@ -521,6 +523,7 @@ ui:
     - github_deployments
     - proposal_chatops
     - release_notes
+    - rollback_on_failure
     - sandbox_on_join
     - statuspage
     - "*"
@@ -530,12 +533,6 @@ ui:
     ui:order: [organization_id, url, app_url]
   ingress:
     ui:order: [domain, class_name, cluster_issuer, tls_secret_name]
-  attribute_enforcer:
-    ui:order: [enabled, config, attributes]
-    config:
-      ui:widget: textarea
-      ui:options:
-        rows: 12
   audit_archiver:
     ui:order:
       - enabled
@@ -577,6 +574,8 @@ ui:
     ui:order: [enabled, channel, channel_attribute_key, allowed_users, attributes]
   release_notes:
     ui:order: [enabled, include_development]
+  rollback_on_failure:
+    ui:order: [enabled, attribute_key, attribute_value, attributes]
   sandbox_on_join:
     ui:order: [enabled, config]
     config:
