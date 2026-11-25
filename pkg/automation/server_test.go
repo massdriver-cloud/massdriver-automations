@@ -352,3 +352,66 @@ func TestRedactURLKeepsOnlySchemeAndHost(t *testing.T) {
 		t.Fatal("non-URL error changed")
 	}
 }
+
+func logSample(t *testing.T, format string) string {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	l, err := NewLogger(buf, format, "debug")
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Debug("deploy skipped", "instance", "api-prod-worker", "reason", "not_opted_in")
+	l.LogAttrs(context.Background(), slog.LevelInfo, "request", slog.String("path", HookPath), statusAttr(503))
+	l.Error("deployment create failed", "err", errors.New("instance is locked"))
+	return buf.String()
+}
+
+func TestAutoFormatWritesJSONWhenNotATerminal(t *testing.T) {
+	out := logSample(t, "auto")
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("line is not JSON: %q", line)
+		}
+	}
+}
+
+func TestJSONFormatKeepsPlainValues(t *testing.T) {
+	out := logSample(t, "json")
+	if strings.Contains(out, "\x1b[") {
+		t.Fatalf("JSON has ANSI escapes: %q", out)
+	}
+	if !strings.Contains(out, `"msg":"request","path":"/hooks/massdriver","status":503}`) {
+		t.Errorf("request line = %q", out)
+	}
+	if !strings.Contains(out, `"level":"ERROR","msg":"deployment create failed","err":"instance is locked"}`) {
+		t.Errorf("error line = %q", out)
+	}
+}
+
+func TestTextFormatIsColored(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	out := logSample(t, "text")
+	for _, want := range []string{
+		"\x1b[90mDBG\x1b[0m deploy skipped",
+		"\x1b[92mINF\x1b[0m request",
+		"\x1b[2;91mstatus=\x1b[22m503\x1b[0m",
+		"\x1b[91mERR\x1b[0m deployment create failed",
+		"\x1b[2;91merr=\x1b[22m\"instance is locked\"\x1b[0m",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in %q", want, out)
+		}
+	}
+}
+
+func TestTextFormatHonorsNoColor(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	out := logSample(t, "text")
+	if strings.Contains(out, "\x1b[") {
+		t.Fatalf("NO_COLOR output has ANSI escapes: %q", out)
+	}
+	if !strings.Contains(out, "INF request path=/hooks/massdriver status=503") {
+		t.Errorf("request line = %q", out)
+	}
+}

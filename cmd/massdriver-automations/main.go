@@ -46,7 +46,7 @@ func main() {
 }
 
 func run(name string) int {
-	log, err := automation.NewLogger(os.Stderr, automation.Env("LOG_FORMAT", "json"), automation.Env("LOG_LEVEL", "info"))
+	log, err := automation.NewLogger(os.Stderr, automation.Env("LOG_FORMAT", "auto"), automation.Env("LOG_LEVEL", "info"))
 	if err != nil {
 		slog.New(slog.NewJSONHandler(os.Stderr, nil)).Error("invalid log config",
 			"automation", name, "version", version, "err", err)

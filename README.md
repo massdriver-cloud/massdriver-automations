@@ -50,7 +50,7 @@ Two Massdriver bundles run any set of the automations, with one event destinatio
 | `MASSDRIVER_API_KEY` | | An `md_` access token of a service account. Required by automations that call the API. |
 | `MASSDRIVER_URL` | `https://api.massdriver.cloud` | The URL of your Massdriver installation. |
 | `PORT` | `8080` | |
-| `LOG_FORMAT` | `json` | `json` or `text`. |
+| `LOG_FORMAT` | `auto` | `auto`, `json`, or `text`. `auto` writes colored text when stderr is a terminal and JSON otherwise, such as in a container or a pipe. `text` always writes colored text. Set `NO_COLOR` to any value to turn off the colors (see [no-color.org](https://no-color.org)). |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
 
 Every automation receives events on `POST /hooks/massdriver` and answers health checks on `GET /healthz`.
@@ -63,6 +63,12 @@ write theirs at `debug`.
 
 ```json
 {"time":"2026-11-25T22:05:42.539271Z","level":"INFO","msg":"request","automation":"router","version":"v1.4.0","method":"POST","path":"/hooks/massdriver","status":204,"duration_ms":10.42,"bytes":0,"event_id":"evt-local-1","event_type":"deployment.completed"}
+```
+
+The same record as text. In color, the level and the `status` value are green, and the time and the keys are dim:
+
+```text
+22:05:42.539 INF request automation=router version=v1.4.0 method=POST path=/hooks/massdriver status=204 duration_ms=10.42 bytes=0 event_id=evt-local-1 event_type=deployment.completed
 ```
 
 ## Run locally

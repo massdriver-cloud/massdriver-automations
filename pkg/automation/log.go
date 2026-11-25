@@ -7,11 +7,16 @@ import (
 	"io"
 	"log/slog"
 	"net/url"
+	"os"
 	"strings"
+
+	"github.com/lmittmann/tint"
+	"golang.org/x/term"
 )
 
-// NewLogger returns a logger that writes to w. format is "json" or "text"; level is "debug", "info", "warn", or
-// "error". Both are case-insensitive.
+// NewLogger returns a logger that writes to w. format is "auto", "json", or "text"; level is "debug", "info", "warn",
+// or "error". Both are case-insensitive. "auto" writes colored text when w is a terminal and JSON otherwise. "text"
+// writes colored text unless NO_COLOR is set (https://no-color.org).
 func NewLogger(w io.Writer, format, level string) (*slog.Logger, error) {
 	var lvl slog.Level
 	switch strings.ToLower(level) {
@@ -27,15 +32,68 @@ func NewLogger(w io.Writer, format, level string) (*slog.Logger, error) {
 		return nil, fmt.Errorf("LOG_LEVEL %q: want debug, info, warn, or error", level)
 	}
 
-	opts := &slog.HandlerOptions{Level: lvl}
 	switch strings.ToLower(format) {
+	case "auto":
+		if isTerminal(w) {
+			return newTextLogger(w, lvl), nil
+		}
+		return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lvl})), nil
 	case "json":
-		return slog.New(slog.NewJSONHandler(w, opts)), nil
+		return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lvl})), nil
 	case "text":
-		return slog.New(slog.NewTextHandler(w, opts)), nil
+		return newTextLogger(w, lvl), nil
 	default:
-		return nil, fmt.Errorf("LOG_FORMAT %q: want json or text", format)
+		return nil, fmt.Errorf("LOG_FORMAT %q: want auto, json, or text", format)
 	}
+}
+
+func isTerminal(w io.Writer) bool {
+	f, ok := w.(interface{ Fd() uintptr })
+	return ok && term.IsTerminal(int(f.Fd()))
+}
+
+// ANSI 256-color codes, as tint.Attr takes them.
+const (
+	colorGray   uint8 = 8
+	colorRed    uint8 = 9
+	colorGreen  uint8 = 10
+	colorYellow uint8 = 11
+)
+
+func newTextLogger(w io.Writer, lvl slog.Level) *slog.Logger {
+	return slog.New(tint.NewHandler(w, &tint.Options{
+		Level:      lvl,
+		TimeFormat: "15:04:05.000",
+		NoColor:    os.Getenv("NO_COLOR") != "",
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Value.Kind() != slog.KindAny {
+				return a
+			}
+			switch v := a.Value.Any().(type) {
+			case slog.Level:
+				if len(groups) == 0 && a.Key == slog.LevelKey && v < slog.LevelInfo {
+					return tint.Attr(colorGray, a)
+				}
+			case error:
+				return tint.Attr(colorRed, a)
+			}
+			return a
+		},
+	}))
+}
+
+// statusAttr is the HTTP status of a response, colored by class in text logs. JSON logs get the plain number.
+func statusAttr(code int) slog.Attr {
+	a := slog.Int("status", code)
+	switch {
+	case code >= 500:
+		return tint.Attr(colorRed, a)
+	case code >= 400:
+		return tint.Attr(colorYellow, a)
+	case code >= 200 && code < 300:
+		return tint.Attr(colorGreen, a)
+	}
+	return a
 }
 
 type loggerKey struct{}

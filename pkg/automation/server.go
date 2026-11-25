@@ -100,7 +100,7 @@ func withAccessLog(next http.Handler, base *slog.Logger) http.Handler {
 		attrs := []slog.Attr{
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
-			slog.Int("status", rec.statusCode()),
+			statusAttr(rec.statusCode()),
 			slog.Float64("duration_ms", float64(time.Since(start).Microseconds())/1000),
 			slog.Int64("bytes", rec.bytes),
 		}
