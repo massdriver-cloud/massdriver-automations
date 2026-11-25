@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"strconv"
 	"strings"
@@ -127,7 +126,7 @@ type membership struct {
 }
 
 // Handle starts the work for a membership change or for a completed decommission in a sandbox.
-func (s *Sandboxes) Handle(_ context.Context, ev automation.Event) error {
+func (s *Sandboxes) Handle(ctx context.Context, ev automation.Event) error {
 	var work func(context.Context)
 
 	switch ev.Type {
@@ -141,9 +140,9 @@ func (s *Sandboxes) Handle(_ context.Context, ev automation.Event) error {
 			return nil
 		}
 		if ev.Type == "group_membership.added" {
-			work = func(ctx context.Context) { s.createSandboxes(ctx, ev.ID, m) }
+			work = func(ctx context.Context) { s.createSandboxes(ctx, m) }
 		} else {
-			work = func(ctx context.Context) { s.removeSandboxes(ctx, ev.ID, m) }
+			work = func(ctx context.Context) { s.removeSandboxes(ctx, m) }
 		}
 	case "deployment.completed":
 		project, environment := ev.Attribute("md-project"), ev.Attribute("md-environment")
@@ -151,14 +150,15 @@ func (s *Sandboxes) Handle(_ context.Context, ev automation.Event) error {
 			project == "" || environment == "" {
 			return nil
 		}
-		work = func(ctx context.Context) { s.deleteIfTornDown(ctx, ev.ID, project+"-"+environment) }
+		work = func(ctx context.Context) { s.deleteIfTornDown(ctx, project+"-"+environment) }
 	default:
 		return nil
 	}
 
 	// A fork followed by a deploy can take longer than the 10 seconds Massdriver waits for a response.
+	bg := context.WithoutCancel(ctx)
 	s.run(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		ctx, cancel := context.WithTimeout(bg, 2*time.Minute)
 		defer cancel()
 		work(ctx)
 	})
@@ -186,75 +186,75 @@ func (s *Sandboxes) templatesForGroups(groups map[string]bool) map[string]bool {
 	return out
 }
 
-func (s *Sandboxes) createSandboxes(ctx context.Context, eventID string, m membership) {
-	log := slog.With("automation", Definition.Name, "event_id", eventID, "email", m.AccountEmail, "group", m.GroupName)
+func (s *Sandboxes) createSandboxes(ctx context.Context, m membership) {
+	log := automation.Logger(ctx).With("account_id", m.AccountID, "group", m.GroupName)
 
 	// Events arrive in any order. A late "added" after a "removed" must not fork.
 	groups, err := s.accountGroups(ctx, m.AccountID)
 	if err != nil {
-		log.Error("list groups", "error", err)
+		log.Error("group lookup failed", "err", err)
 		return
 	}
 	if !groups[m.GroupName] {
-		log.Info("skip: no longer in group")
+		log.Debug("sandbox create skipped", "reason", "not_in_group")
 		return
 	}
 
 	existing, err := s.sandboxes(ctx, m.AccountEmail)
 	if err != nil {
-		log.Error("list sandboxes", "error", err)
+		log.Error("sandbox lookup failed", "err", err)
 		return
 	}
 
 	for _, rule := range s.rulesForGroup(m.GroupName) {
 		l := log.With("template", rule.template())
 		if hasSandboxFrom(existing, rule.template()) {
-			l.Info("skip: sandbox exists")
+			l.Debug("sandbox create skipped", "reason", "sandbox_exists")
 			continue
 		}
 
 		id, err := s.freeIdentifier(ctx, rule.Project, baseIdentifier(m.AccountEmail))
 		if err != nil {
-			l.Error("choose identifier", "error", err)
+			l.Error("identifier lookup failed", "err", err)
 			continue
 		}
 		envID, err := s.fork(ctx, rule, id, m)
 		if err != nil {
-			l.Error("fork", "error", err)
+			l.Error("environment fork failed", "err", err)
 			continue
 		}
 		existing = append(existing, sandbox{ID: envID, Parent: &ref{ID: rule.template()}})
-		l.Info("forked", "environment", envID)
+		l.Info("environment forked", "environment", envID)
 
 		if rule.Deploy {
 			if err := s.mutate(ctx, deployEnvironmentMutation, "deployEnvironment", envID); err != nil {
-				l.Error("deploy", "environment", envID, "error", err)
+				l.Error("environment deploy failed", "environment", envID, "err", err)
 				continue
 			}
-			l.Info("deploying", "environment", envID)
+			l.Info("environment deploy started", "environment", envID)
 		}
 	}
 }
 
-func (s *Sandboxes) removeSandboxes(ctx context.Context, eventID string, m membership) {
-	log := slog.With("automation", Definition.Name, "event_id", eventID, "email", m.AccountEmail, "group", m.GroupName)
+func (s *Sandboxes) removeSandboxes(ctx context.Context, m membership) {
+	log := automation.Logger(ctx).With("account_id", m.AccountID, "group", m.GroupName)
 
 	groups, err := s.accountGroups(ctx, m.AccountID)
 	if err != nil {
-		log.Error("list groups", "error", err)
+		log.Error("group lookup failed", "err", err)
 		return
 	}
 	kept := s.templatesForGroups(groups)
 
 	existing, err := s.sandboxes(ctx, m.AccountEmail)
 	if err != nil {
-		log.Error("list sandboxes", "error", err)
+		log.Error("sandbox lookup failed", "err", err)
 		return
 	}
 
 	for _, rule := range s.rulesForGroup(m.GroupName) {
 		if kept[rule.template()] {
-			log.Info("skip: another group keeps the sandbox", "template", rule.template())
+			log.Debug("sandbox remove skipped", "reason", "kept_by_other_group", "template", rule.template())
 			continue
 		}
 		for _, sb := range existing {
@@ -265,25 +265,25 @@ func (s *Sandboxes) removeSandboxes(ctx context.Context, eventID string, m membe
 			switch {
 			case sb.active():
 				if err := s.mutate(ctx, decommissionEnvironmentMutation, "decommissionEnvironment", sb.ID); err != nil {
-					l.Error("decommission", "error", err)
+					l.Error("environment decommission failed", "err", err)
 					continue
 				}
-				l.Info("decommissioning")
+				l.Info("environment decommission started")
 			case rule.DeleteAfterDecommission:
 				// Nothing is deployed, so no deployment.completed event will arrive to start the delete.
 				if err := s.mutate(ctx, deleteEnvironmentMutation, "deleteEnvironment", sb.ID); err != nil {
-					l.Error("delete", "error", err)
+					l.Error("environment delete failed", "err", err)
 					continue
 				}
-				l.Info("deleted")
+				l.Info("environment deleted")
 			}
 		}
 	}
 }
 
 // Each instance's decommission sends its own deployment.completed event. The last one finds nothing active.
-func (s *Sandboxes) deleteIfTornDown(ctx context.Context, eventID, envID string) {
-	log := slog.With("automation", Definition.Name, "event_id", eventID, "environment", envID)
+func (s *Sandboxes) deleteIfTornDown(ctx context.Context, envID string) {
+	log := automation.Logger(ctx).With("environment", envID)
 
 	var out struct {
 		Environment struct {
@@ -303,7 +303,7 @@ func (s *Sandboxes) deleteIfTornDown(ctx context.Context, eventID, envID string)
 		} `json:"environment"`
 	}
 	if err := s.api.Do(ctx, environmentQuery, map[string]any{"org": s.api.OrganizationID, "id": envID}, &out); err != nil {
-		log.Error("get environment", "error", err)
+		log.Error("environment lookup failed", "err", err)
 		return
 	}
 	e := out.Environment
@@ -331,30 +331,30 @@ func (s *Sandboxes) deleteIfTornDown(ctx context.Context, eventID, envID string)
 	groups := map[string]bool{}
 	accountID, err := s.accountIDByEmail(ctx, owner)
 	if err != nil {
-		log.Error("find owner", "error", err)
+		log.Error("owner lookup failed", "err", err)
 		return
 	}
 	if accountID != "" {
 		if groups, err = s.accountGroups(ctx, accountID); err != nil {
-			log.Error("list groups", "error", err)
+			log.Error("group lookup failed", "err", err)
 			return
 		}
 	}
 	if s.templatesForGroups(groups)[e.Parent.ID] {
-		log.Info("skip: owner still in group", "owner", owner)
+		log.Debug("sandbox delete skipped", "reason", "owner_in_group", "account_id", accountID)
 		return
 	}
 
 	if !e.Deletable.Result {
 		b, _ := json.Marshal(e.Deletable.Constraints)
-		log.Warn("skip: not deletable", "constraints", string(b))
+		log.Warn("sandbox delete skipped", "reason", "not_deletable", "constraints", string(b))
 		return
 	}
 	if err := s.mutate(ctx, deleteEnvironmentMutation, "deleteEnvironment", envID); err != nil {
-		log.Error("delete", "error", err)
+		log.Error("environment delete failed", "err", err)
 		return
 	}
-	log.Info("deleted", "owner", owner)
+	log.Info("environment deleted", "account_id", accountID)
 }
 
 type ref struct {

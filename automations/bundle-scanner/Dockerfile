@@ -4,7 +4,8 @@ WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /massdriver-automations ./cmd/massdriver-automations
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /massdriver-automations ./cmd/massdriver-automations
 
 FROM aquasec/trivy:0.76.1 AS trivy
 

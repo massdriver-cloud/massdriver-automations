@@ -132,7 +132,7 @@ func setup(t *testing.T, api *fakeAPI) (*Sandboxes, http.Handler) {
 	t.Cleanup(srv.Close)
 	s := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, rules)
 	s.run = func(f func()) { f() }
-	return s, automation.Handler(Definition.Name, s, secret)
+	return s, automation.Handler(s, secret)
 }
 
 func post(t *testing.T, h http.Handler, id string, ev map[string]any) int {

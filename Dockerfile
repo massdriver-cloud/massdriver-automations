@@ -3,7 +3,8 @@ WORKDIR /src
 COPY go.mod go.sum* ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /massdriver-automations ./cmd/massdriver-automations
+ARG VERSION=dev
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /massdriver-automations ./cmd/massdriver-automations
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /massdriver-automations /massdriver-automations

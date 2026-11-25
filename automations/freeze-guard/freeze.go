@@ -111,7 +111,7 @@ func (g *Guard) Run(ctx context.Context, interval time.Duration) {
 	for {
 		rctx, cancel := context.WithTimeout(ctx, interval)
 		if err := g.Reconcile(rctx); err != nil {
-			slog.Error("reconcile", "automation", automationName, "error", err)
+			slog.Error("reconcile failed", "err", err)
 		}
 		cancel()
 		select {
@@ -191,7 +191,7 @@ func (g *Guard) Lift(name string) (time.Time, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.st.Lifts[name] = until
-	slog.Info("lift", "automation", automationName, "window", name, "until", until)
+	slog.Info("lift requested", "window", name, "until", until.UTC().Format(time.RFC3339))
 	return until, saveState(g.opts.StateDir, g.st)
 }
 
@@ -339,7 +339,7 @@ func (g *Guard) Reconcile(ctx context.Context) error {
 		}
 
 		if active != g.st.Active[w.Name] {
-			g.announce(ctx, w, active, now, byID)
+			g.announce(ctx, w, active, byID)
 			if active {
 				g.st.Active[w.Name] = true
 			} else {
@@ -396,7 +396,7 @@ func (g *Guard) adoptMatching(groups []group) {
 				}
 				g.st.Policies[w.Name][gr.ID] = p.ID
 				owned[p.ID] = true
-				slog.Info("adopted policy", "automation", automationName, "window", w.Name, "group", gr.Name, "policy_id", p.ID)
+				slog.Info("policy adopted", "window", w.Name, "group", gr.Name, "group_id", gr.ID, "policy_id", p.ID)
 				break
 			}
 		}
@@ -519,7 +519,7 @@ func (g *Guard) createPolicy(ctx context.Context, groupID string, w Window) (str
 	if err := resp.CreateGroupPolicy.Err(); err != nil {
 		return "", err
 	}
-	slog.Info("created policy", "automation", automationName, "window", w.Name, "group_id", groupID,
+	automation.Logger(ctx).Info("policy created", "window", w.Name, "group_id", groupID,
 		"policy_id", resp.CreateGroupPolicy.Result.ID)
 	return resp.CreateGroupPolicy.Result.ID, nil
 }
@@ -539,16 +539,17 @@ func (g *Guard) deletePolicy(ctx context.Context, id string) error {
 		}
 		return err
 	}
-	slog.Info("deleted policy", "automation", automationName, "policy_id", id)
+	automation.Logger(ctx).Info("policy deleted", "policy_id", id)
 	return nil
 }
 
 // --- slack -----------------------------------------------------------------
 
-func (g *Guard) announce(ctx context.Context, w Window, active bool, now time.Time, groups map[string]group) {
-	var text string
+func (g *Guard) announce(ctx context.Context, w Window, active bool, groups map[string]group) {
+	var text, msg string
 	switch {
 	case active:
+		msg = "freeze started"
 		var frozen []string
 		for gid := range g.st.Policies[w.Name] {
 			frozen = append(frozen, groups[gid].Name)
@@ -557,17 +558,19 @@ func (g *Guard) announce(ctx context.Context, w Window, active bool, now time.Ti
 		text = fmt.Sprintf("Freeze window %q started. Denied %s %s.\nFrozen groups: %s.\nExempt groups: %s.",
 			w.Name, strings.Join(w.Actions, ", "), w.describeConditions(), list(frozen), list(w.ExemptGroups))
 	case !g.st.Lifts[w.Name].IsZero():
+		msg = "freeze lifted"
 		text = fmt.Sprintf("Freeze window %q lifted until %s. Removed its deny policies.",
 			w.Name, g.st.Lifts[w.Name].In(w.loc).Format("2006-01-02 15:04 MST"))
 	default:
+		msg = "freeze ended"
 		text = fmt.Sprintf("Freeze window %q ended. Removed its deny policies.", w.Name)
 	}
-	slog.Info("window", "automation", automationName, "window", w.Name, "active", active, "at", now)
+	automation.Logger(ctx).Info(msg, "window", w.Name)
 	if g.opts.SlackWebhookURL == "" {
 		return
 	}
 	if err := g.notify(ctx, text); err != nil {
-		slog.Error("slack webhook", "automation", automationName, "error", err)
+		automation.Logger(ctx).Error("slack post failed", "window", w.Name, "err", err)
 	}
 }
 
@@ -590,7 +593,7 @@ func (g *Guard) notify(ctx context.Context, text string) error {
 	req.Header.Set("content-type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return automation.RedactURL(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

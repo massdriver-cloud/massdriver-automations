@@ -306,7 +306,7 @@ func TestNewGroupDuringWindowIsFrozenOnNextReconcile(t *testing.T) {
 	reconcile(t, g)
 
 	h.api.addGroup("group-data", "Data", "CUSTOM")
-	handler := automation.Handler(Definition.Name, g, secret)
+	handler := automation.Handler(g, secret)
 	body := []byte(`{"id":"evt-1","type":"group.created","data":{"entity":{"id":"group-data","name":"Data"}}}`)
 	req := httptest.NewRequest(http.MethodPost, automation.HookPath, strings.NewReader(string(body)))
 	automation.SignRequest(req, secret, "evt-1", body, time.Now())

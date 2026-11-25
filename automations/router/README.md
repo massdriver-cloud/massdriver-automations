@@ -363,8 +363,8 @@ your own image `FROM massdrivercloud/massdriver-automations:<tag>-scripts`.
 
 ## Limits
 
-- The logs show the result of each step: the HTTP status and response, the command output, or the GraphQL `data`,
-  up to 4 KiB.
+- The logs show the result of a failed step: the HTTP status and response, the command output, or the GraphQL
+  `data`, up to 4 KiB. With `LOG_LEVEL=debug`, they show the result of every step.
 - The async queue holds 100 events, in memory. When it is full, the router responds `500`, and Massdriver sends the
   event again later. A restart loses the queue.
 - The router remembers the routes that ran for each event id for one hour, in memory. Run one replica.

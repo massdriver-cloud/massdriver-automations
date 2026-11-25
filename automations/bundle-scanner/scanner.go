@@ -101,9 +101,9 @@ type Scanner struct {
 }
 
 type job struct {
-	eventID string
-	repo    string
-	time    time.Time
+	log  *slog.Logger
+	repo string
+	time time.Time
 }
 
 // New returns the automation. Call Work to start scanning.
@@ -119,7 +119,7 @@ func New(api *massdriver.Client, cfg Config) *Scanner {
 }
 
 // Handle queues a scan of the bundle version that the event announces.
-func (s *Scanner) Handle(_ context.Context, ev automation.Event) error {
+func (s *Scanner) Handle(ctx context.Context, ev automation.Event) error {
 	if ev.Type != "repo.published" {
 		return nil
 	}
@@ -134,7 +134,7 @@ func (s *Scanner) Handle(_ context.Context, ev automation.Event) error {
 		return nil
 	}
 	select {
-	case s.queue <- job{eventID: ev.ID, repo: repo.Name, time: ev.Time}:
+	case s.queue <- job{log: automation.Logger(ctx), repo: repo.Name, time: ev.Time}:
 		return nil
 	default:
 		// A 500 makes Massdriver retry the event later, when the queue has room.
@@ -158,11 +158,11 @@ type report struct {
 func (s *Scanner) process(j job) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Timeout)
 	defer cancel()
-	log := slog.With("automation", automationName, "event_id", j.eventID, "repo", j.repo)
+	log := j.log.With("repo", j.repo)
 
 	version, attrs, err := s.resolveVersion(ctx, j)
 	if err != nil {
-		log.Error("resolve version", "error", err)
+		log.Error("version lookup failed", "err", err)
 		return
 	}
 	bundle := j.repo + "@" + version
@@ -173,21 +173,25 @@ func (s *Scanner) process(j job) {
 	s.scanned[bundle] = true
 	s.mu.Unlock()
 	if done {
-		log.Info("skip: already scanned")
+		log.Debug("scan skipped", "reason", "already_scanned")
 		return
 	}
 
 	r := report{bundle: bundle}
 	r.findings, r.err = s.scan(ctx, j.repo, version)
 	passed := r.err == nil && !s.fails(r.findings)
-	log.Info("scanned", "findings", len(r.findings), "passed", passed, "error", r.err)
+	if r.err != nil {
+		log.Error("scan failed", "err", r.err)
+	} else {
+		log.Info("bundle scanned", "findings", len(r.findings), "passed", passed)
+	}
 
 	if err := s.postSlack(ctx, s.slackText(r)); err != nil {
-		log.Error("post to slack", "error", err)
+		log.Error("slack post failed", "err", err)
 	}
 	if s.cfg.AttributeKey != "" && r.err == nil {
 		if err := s.setAttribute(ctx, j.repo, attrs, passed); err != nil {
-			log.Error("set repo attribute", "error", err)
+			log.Error("repo attribute update failed", "err", err)
 		}
 	}
 }
@@ -251,7 +255,7 @@ func (s *Scanner) fails(findings []finding) bool {
 
 func (s *Scanner) slackText(r report) string {
 	if r.err != nil {
-		return fmt.Sprintf(":warning: *%s* could not be scanned: %s", r.bundle, r.err)
+		return fmt.Sprintf("Error: IaC scan of *%s* did not finish: %s", r.bundle, r.err)
 	}
 
 	counts := map[string]int{}
@@ -260,9 +264,9 @@ func (s *Scanner) slackText(r report) string {
 	}
 	var b strings.Builder
 	if s.fails(r.findings) {
-		fmt.Fprintf(&b, ":x: *%s* failed the IaC scan", r.bundle)
+		fmt.Fprintf(&b, "Failed: IaC scan of *%s*", r.bundle)
 	} else {
-		fmt.Fprintf(&b, ":white_check_mark: *%s* passed the IaC scan", r.bundle)
+		fmt.Fprintf(&b, "Passed: IaC scan of *%s*", r.bundle)
 	}
 	fmt.Fprintf(&b, " (fails at %s or above): %d critical, %d high, %d medium, %d low, %d unrated.",
 		s.cfg.FailSeverity, counts["CRITICAL"], counts["HIGH"], counts["MEDIUM"], counts["LOW"], counts["UNKNOWN"])
@@ -294,7 +298,7 @@ func (s *Scanner) postSlack(ctx context.Context, text string) error {
 	req.Header.Set("content-type", "application/json")
 	resp, err := s.http.Do(req)
 	if err != nil {
-		return err
+		return automation.RedactURL(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {

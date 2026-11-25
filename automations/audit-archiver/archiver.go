@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -195,7 +194,7 @@ func (a *Archiver) Handle(ctx context.Context, ev automation.Event) error {
 	if err := errors.Join(errs...); err != nil {
 		return err
 	}
-	slog.Info("archived", "automation", Definition.Name, "event_id", ev.ID, "type", ev.Type)
+	automation.Logger(ctx).Info("event archived", "sinks", len(pending))
 	return nil
 }
 
@@ -346,7 +345,7 @@ func post(ctx context.Context, c *http.Client, url string, headers map[string]st
 	}
 	resp, err := c.Do(req)
 	if err != nil {
-		return err
+		return automation.RedactURL(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {

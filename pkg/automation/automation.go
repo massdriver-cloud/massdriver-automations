@@ -99,29 +99,33 @@ type Definition struct {
 	New    func() (Automation, error)
 }
 
-// Serve verifies and dedupes events for a, and serves them on addr until the server fails.
-func Serve(addr string, name string, a Automation) error {
-	secret, err := SigningSecretFromEnv()
-	if err != nil {
-		return err
-	}
-	return http.ListenAndServe(addr, Handler(name, a, secret))
+// Handler returns the HTTP handler for a. It is separate from Serve so tests can drive it.
+func Handler(a Automation, signingSecret []byte) http.Handler {
+	return newHandler(a, signingSecret, nil)
 }
 
-// Handler returns the HTTP handler for a. It is separate from Serve so tests can drive it.
-func Handler(name string, a Automation, signingSecret []byte) http.Handler {
-	log := slog.With("automation", name)
+// newHandler logs with base, or with slog.Default() at request time when base is nil.
+func newHandler(a Automation, signingSecret []byte, base *slog.Logger) http.Handler {
 	seen := newDedupe(time.Hour)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("POST "+HookPath, func(w http.ResponseWriter, r *http.Request) {
+		log := Logger(r.Context())
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 		if err != nil {
-			http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				log.Warn("request body too large", "limit_bytes", maxBodyBytes)
+				http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
+			log.Warn("request body read failed", "err", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		if !Verify(signingSecret, r.Header, body, time.Now()) {
+		if err := VerifySignature(signingSecret, r.Header, body, time.Now()); err != nil {
+			log.Warn("signature rejected", "reason", err.Error())
 			// Massdriver does not retry a 401.
 			http.Error(w, "bad signature", http.StatusUnauthorized)
 			return
@@ -129,18 +133,25 @@ func Handler(name string, a Automation, signingSecret []byte) http.Handler {
 
 		var ev Event
 		if err := json.Unmarshal(body, &ev); err != nil {
+			log.Warn("event decode failed", "err", err)
 			http.Error(w, "bad event", http.StatusBadRequest)
 			return
 		}
 		ev.Raw = body
 
+		log = log.With("event_id", ev.ID, "event_type", ev.Type)
+		if info, ok := r.Context().Value(requestInfoKey{}).(*requestInfo); ok {
+			info.eventID, info.eventType = ev.ID, ev.Type
+		}
+
 		// Massdriver delivers at least once. A repeat of a handled event must not repeat its side effects.
 		if seen.has(ev.ID) {
+			log.Debug("duplicate event")
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if err := a.Handle(r.Context(), ev); err != nil {
-			log.Error("handle", "event_id", ev.ID, "type", ev.Type, "error", err)
+		if err := a.Handle(WithLogger(r.Context(), log), ev); err != nil {
+			log.Error("event handler failed", "err", err)
 			http.Error(w, "handler failed", http.StatusInternalServerError)
 			return
 		}
@@ -151,7 +162,7 @@ func Handler(name string, a Automation, signingSecret []byte) http.Handler {
 	if router, ok := a.(Router); ok {
 		router.Routes(mux)
 	}
-	return mux
+	return withAccessLog(withRecovery(mux), base)
 }
 
 // Env returns the environment variable name, or fallback when it is unset or empty.

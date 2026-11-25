@@ -137,7 +137,7 @@ func setup(t *testing.T, api *fakeAPI) (http.Handler, *fakeSlack) {
 		SlackWebhookURL: slackSrv.URL,
 		AppURL:          "https://app.example.com/",
 	})
-	return automation.Handler("rollback-on-failure", r, secret), slack
+	return automation.Handler(r, secret), slack
 }
 
 func post(t *testing.T, h http.Handler, body []byte) int {
@@ -316,7 +316,7 @@ func TestReturnsErrorWhenTheAPIIsDown(t *testing.T) {
 	defer srv.Close()
 	r := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, Config{AttrKey: "autorollback", AttrValue: "true"})
 
-	if code := post(t, automation.Handler("rollback-on-failure", r, secret), failedEvent("evt-1", "PROVISION", nil, nil)); code != http.StatusInternalServerError {
+	if code := post(t, automation.Handler(r, secret), failedEvent("evt-1", "PROVISION", nil, nil)); code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", code)
 	}
 }

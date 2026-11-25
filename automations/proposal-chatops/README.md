@@ -78,7 +78,7 @@ Massdriver and Slack must both reach the service: `/hooks/massdriver` and `/slac
 
 - Massdriver records the service account, not the Slack user, as the approver. The V2 API has no field for a
   reviewer or a comment on `approveDeployment` or `rejectDeployment`. The Slack user is in the Slack message and
-  in the log line `decided`.
+  in the log line `deployment decided`.
 - The Slack message of each proposal is remembered in memory for 30 days. After a restart, the buttons on
   earlier messages still work, but an approval or rejection made in Massdriver does not update an earlier message.
   Run one replica.

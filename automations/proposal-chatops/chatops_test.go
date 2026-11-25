@@ -127,7 +127,7 @@ func setup(t *testing.T) *harness {
 		Channel: "#deploys", ChannelAttrKey: "slack-channel",
 	})
 	c.run = func(f func()) { f() }
-	return &harness{c: c, handler: automation.Handler(Definition.Name, c, secret), slack: sl, api: api}
+	return &harness{c: c, handler: automation.Handler(c, secret), slack: sl, api: api}
 }
 
 func (h *harness) send(body []byte) int {

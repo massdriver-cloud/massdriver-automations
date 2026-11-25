@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"regexp"
 	"sort"
@@ -80,7 +79,7 @@ func New(api *massdriver.Client, cfg Config) *ReleaseNotes {
 }
 
 // Handle starts the announcement of a published bundle version.
-func (n *ReleaseNotes) Handle(_ context.Context, ev automation.Event) error {
+func (n *ReleaseNotes) Handle(ctx context.Context, ev automation.Event) error {
 	if ev.Type != "repo.published" {
 		return nil
 	}
@@ -94,7 +93,8 @@ func (n *ReleaseNotes) Handle(_ context.Context, ev automation.Event) error {
 		return nil
 	}
 	// Listing every instance of a widely used bundle can take longer than the 10 seconds Massdriver waits.
-	n.run(func() { n.announce(ev, repo.Name) })
+	bg := context.WithoutCancel(ctx)
+	n.run(func() { n.announce(bg, ev, repo.Name) })
 	return nil
 }
 
@@ -130,29 +130,29 @@ type Note struct {
 	OnChannel []instance
 }
 
-func (n *ReleaseNotes) announce(ev automation.Event, repo string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+func (n *ReleaseNotes) announce(ctx context.Context, ev automation.Event, repo string) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	log := slog.With("automation", Definition.Name, "event_id", ev.ID, "repo", repo)
+	log := automation.Logger(ctx).With("repo", repo)
 
 	v, err := n.publishedVersion(ctx, repo, ev.Time)
 	if err != nil {
-		log.Error("find version", "error", err)
+		log.Error("version lookup failed", "err", err)
 		return
 	}
-	log = log.With("version", v.Tag)
+	log = log.With("bundle_version", v.Tag)
 	if isDevelopment(v.Tag) && !n.cfg.IncludeDevelopment {
-		log.Info("skip: development version")
+		log.Debug("announcement skipped", "reason", "development_version")
 		return
 	}
 	if !n.claim(repo + "@" + v.Tag) {
-		log.Info("skip: already announced")
+		log.Debug("announcement skipped", "reason", "already_announced")
 		return
 	}
 
 	insts, err := n.instances(ctx, repo)
 	if err != nil {
-		log.Error("list instances", "error", err)
+		log.Error("instance lookup failed", "err", err)
 		return
 	}
 
@@ -174,15 +174,15 @@ func (n *ReleaseNotes) announce(ev automation.Event, repo string) {
 
 	if n.cfg.SlackWebhookURL != "" {
 		if err := postJSON(ctx, n.cfg.SlackWebhookURL, SlackMessage(note)); err != nil {
-			log.Error("slack", "error", err)
+			log.Error("slack post failed", "err", err)
 		}
 	}
 	if n.cfg.TeamsWebhookURL != "" {
 		if err := postJSON(ctx, n.cfg.TeamsWebhookURL, TeamsMessage(note)); err != nil {
-			log.Error("teams", "error", err)
+			log.Error("teams post failed", "err", err)
 		}
 	}
-	log.Info("announced", "upgradable", len(note.Upgradable), "on_channel", len(note.OnChannel))
+	log.Info("release announced", "upgradable", len(note.Upgradable), "on_channel", len(note.OnChannel))
 }
 
 // The repo.published event carries the repo, not the version. The published version is the newest one that
@@ -416,7 +416,7 @@ func postJSON(ctx context.Context, url string, payload any) error {
 	req.Header.Set("content-type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return automation.RedactURL(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {

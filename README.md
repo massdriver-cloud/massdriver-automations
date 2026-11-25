@@ -41,8 +41,20 @@ the events it uses.
 | `MASSDRIVER_API_KEY` | | An `md_` access token of a service account. Required by automations that call the API. |
 | `MASSDRIVER_URL` | `https://api.massdriver.cloud` | The URL of your Massdriver installation. |
 | `PORT` | `8080` | |
+| `LOG_FORMAT` | `json` | `json` or `text`. |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
 
 Every automation receives events on `POST /hooks/massdriver` and answers health checks on `GET /healthz`.
+
+### Logs
+
+Each log record is one line on stderr. Every record has `time`, `level`, `msg`, `automation`, and `version`. Records
+about an event also have `event_id` and `event_type`. Each request writes one `request` record; health checks
+write theirs at `debug`.
+
+```json
+{"time":"2026-11-25T22:05:42.539271Z","level":"INFO","msg":"request","automation":"router","version":"v1.4.0","method":"POST","path":"/hooks/massdriver","status":204,"duration_ms":10.42,"bytes":0,"event_id":"evt-local-1","event_type":"deployment.completed"}
+```
 
 ## Run locally
 

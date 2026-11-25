@@ -241,7 +241,7 @@ func (e *env) start(t *testing.T) {
 	}
 	d.run = func(f func()) { f() }
 	e.d = d
-	e.h = automation.Handler("drift", d, secret)
+	e.h = automation.Handler(d, secret)
 }
 
 func (e *env) event(t *testing.T, id, typ, action, deploymentID string) int {

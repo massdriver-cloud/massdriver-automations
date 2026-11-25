@@ -102,7 +102,7 @@ func setup(t *testing.T, api *fakeAPI, includeDev bool) (http.Handler, *hook, *h
 		IncludeDevelopment: includeDev,
 	})
 	n.run = func(f func()) { f() }
-	return automation.Handler("release-notes", n, secret), slack, teams
+	return automation.Handler(n, secret), slack, teams
 }
 
 func post(t *testing.T, h http.Handler, id string, body []byte) int {

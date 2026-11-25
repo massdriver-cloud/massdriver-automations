@@ -174,7 +174,7 @@ func newHarness(t *testing.T, stateDir, outputDir string, quiet bool) *harness {
 	if err := sp.Bootstrap(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	h.srv = automation.Handler("statuspage", sp, secret)
+	h.srv = automation.Handler(sp, secret)
 	return h
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -197,7 +198,7 @@ func newHarness(t *testing.T, layers map[string]string, attrKey string) *harness
 		AttributeKey:    attrKey,
 		Timeout:         time.Minute,
 	})
-	return &harness{scanner: s, handler: automation.Handler(automationName, s, secret), md: md, slack: slack, seen: []string{trivySeen, checkovSeen}}
+	return &harness{scanner: s, handler: automation.Handler(s, secret), md: md, slack: slack, seen: []string{trivySeen, checkovSeen}}
 }
 
 // drain scans every queued job in the test goroutine.
@@ -229,7 +230,7 @@ func TestScansTheVersionThatThePublishAnnounced(t *testing.T) {
 		}
 	}
 
-	wantSlack := ":x: *aws-aurora@1.2.3* failed the IaC scan (fails at HIGH or above): 0 critical, 1 high, 0 medium, 1 low, 1 unrated.\n" +
+	wantSlack := "Failed: IaC scan of *aws-aurora@1.2.3* (fails at HIGH or above): 0 critical, 1 high, 0 medium, 1 low, 1 unrated.\n" +
 		"• HIGH `AWS-0086` src/main.tf:1 — S3 Access block should block public ACL (trivy)"
 	if len(h.slack.texts) != 1 || h.slack.texts[0] != wantSlack {
 		t.Fatalf("slack = %q\nwant  %q", h.slack.texts, wantSlack)
@@ -260,7 +261,7 @@ func TestPassesWhenNoFindingReachesTheThreshold(t *testing.T) {
 	post(t, h.handler, repoPublished("evt-1", "aws-aurora", bundleArtifactType, eventTime))
 	h.drain()
 
-	want := ":white_check_mark: *aws-aurora@1.2.3* passed the IaC scan (fails at CRITICAL or above): 0 critical, 1 high, 0 medium, 1 low, 1 unrated."
+	want := "Passed: IaC scan of *aws-aurora@1.2.3* (fails at CRITICAL or above): 0 critical, 1 high, 0 medium, 1 low, 1 unrated."
 	if len(h.slack.texts) != 1 || h.slack.texts[0] != want {
 		t.Fatalf("slack = %q", h.slack.texts)
 	}
@@ -290,7 +291,7 @@ func TestRefusesAFileNameOutsideTheBundle(t *testing.T) {
 	post(t, h.handler, repoPublished("evt-1", "aws-aurora", bundleArtifactType, eventTime))
 	h.drain()
 
-	if len(h.slack.texts) != 1 || !strings.HasPrefix(h.slack.texts[0], ":warning: *aws-aurora@1.2.3* could not be scanned: pull: layer sha256:") {
+	if len(h.slack.texts) != 1 || !strings.HasPrefix(h.slack.texts[0], "Error: IaC scan of *aws-aurora@1.2.3* did not finish: pull: layer sha256:") {
 		t.Fatalf("slack = %q", h.slack.texts)
 	}
 	if len(h.md.updates) != 0 {
@@ -318,7 +319,7 @@ func TestIgnoresOtherEvents(t *testing.T) {
 func TestFullQueueAsksMassdriverToRetry(t *testing.T) {
 	h := newHarness(t, nil, "")
 	for i := range queueSize {
-		h.scanner.queue <- job{repo: "r", eventID: "queued-" + strconv.Itoa(i)}
+		h.scanner.queue <- job{log: slog.Default(), repo: "r" + strconv.Itoa(i)}
 	}
 	if code := post(t, h.handler, repoPublished("evt-1", "aws-aurora", bundleArtifactType, eventTime)); code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", code)

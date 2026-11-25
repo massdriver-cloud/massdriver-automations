@@ -108,7 +108,7 @@ func TestArchivesTheRawEventToEverySink(t *testing.T) {
 	defer splunkSrv.Close()
 	defer ddSrv.Close()
 
-	h := automation.Handler("audit-archiver", New([]Sink{
+	h := automation.Handler(New([]Sink{
 		testS3Sink(s3srv.URL, S3Config{Bucket: "audit", Prefix: "events", LockMode: types.ObjectLockModeCompliance, LockDays: 365}),
 		&SplunkSink{cfg: SplunkConfig{URL: splunkSrv.URL + "/services/collector/event", Token: "hec-token", Index: "massdriver", Source: "massdriver", Sourcetype: "massdriver:cloudevent"}, http: http.DefaultClient},
 		&DatadogSink{cfg: DatadogConfig{URL: ddSrv.URL + "/api/v2/logs", APIKey: "dd-key", Service: "massdriver", Tags: "env:prod"}, http: http.DefaultClient},
@@ -184,7 +184,7 @@ func TestFailsUntilEverySinkWritesAndRetriesOnlyTheFailedSink(t *testing.T) {
 	defer s3srv.Close()
 	defer ddSrv.Close()
 
-	h := automation.Handler("audit-archiver", New([]Sink{
+	h := automation.Handler(New([]Sink{
 		testS3Sink(s3srv.URL, S3Config{Bucket: "audit", Prefix: "md/events"}),
 		&DatadogSink{cfg: DatadogConfig{URL: ddSrv.URL + "/api/v2/logs", APIKey: "dd-key", Service: "massdriver"}, http: http.DefaultClient},
 	}), secret)

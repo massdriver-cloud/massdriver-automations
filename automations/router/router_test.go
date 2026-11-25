@@ -129,7 +129,7 @@ func setup(t *testing.T, src string, md *massdriver.Client) (*Router, http.Handl
 		t.Fatal(err)
 	}
 	r := New(cfg, md)
-	return r, automation.Handler(automationName, r, secret)
+	return r, automation.Handler(r, secret)
 }
 
 func TestRoutesMatchByTypeGlobAttributesAndWhen(t *testing.T) {

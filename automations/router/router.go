@@ -61,6 +61,7 @@ type Router struct {
 }
 
 type job struct {
+	log    *slog.Logger
 	in     input
 	routes []*Route
 }
@@ -93,8 +94,7 @@ func (r *Router) Handle(ctx context.Context, ev automation.Event) error {
 		}
 		ok, err := rt.selects(ctx, in)
 		if err != nil {
-			slog.Error("route failed", "automation", automationName, "event_id", ev.ID, "type", ev.Type,
-				"route", rt.Name, "error", err)
+			automation.Logger(ctx).Error("route match failed", "route", rt.Name, "err", err)
 			errs = append(errs, fmt.Errorf("route %q: %w", rt.Name, err))
 			continue
 		}
@@ -126,7 +126,7 @@ func (r *Router) Handle(ctx context.Context, ev automation.Event) error {
 
 	if len(asyncRoutes) > 0 {
 		select {
-		case r.queue <- job{in: in, routes: asyncRoutes}:
+		case r.queue <- job{log: automation.Logger(ctx), in: in, routes: asyncRoutes}:
 			for _, rt := range asyncRoutes {
 				r.done.add(ev.ID, rt.Name)
 			}
@@ -145,8 +145,9 @@ func (r *Router) Work() {
 }
 
 func (r *Router) process(j job) {
+	ctx := automation.WithLogger(context.Background(), j.log)
 	for _, rt := range j.routes {
-		_ = r.runRoute(context.Background(), rt, j.in)
+		_ = r.runRoute(ctx, rt, j.in)
 	}
 }
 
@@ -175,7 +176,7 @@ func (rt *Route) selects(ctx context.Context, in input) (bool, error) {
 func (r *Router) runRoute(ctx context.Context, rt *Route, in input) error {
 	ctx, cancel := context.WithTimeout(ctx, rt.Timeout)
 	defer cancel()
-	log := slog.With("automation", automationName, "event_id", in.ev.ID, "type", in.ev.Type, "route", rt.Name)
+	log := automation.Logger(ctx).With("route", rt.Name, "async", rt.Async)
 	routeStart := time.Now()
 	for i, s := range rt.Do {
 		start := time.Now()
@@ -183,15 +184,16 @@ func (r *Router) runRoute(ctx context.Context, rt *Route, in input) error {
 		if err != nil && ctx.Err() != nil {
 			err = fmt.Errorf("route timed out after %s: %w", rt.Timeout, err)
 		}
-		attrs := []any{"step", i + 1, "action", s.kind(), "duration", time.Since(start), "output", out}
 		if err != nil {
-			log.Error("step failed", append(attrs, "error", err)...)
-			log.Error("route failed", "async", rt.Async, "duration", time.Since(routeStart))
+			// Output is the step's own response or command output, kept because it is what explains the failure.
+			log.Error("route failed", "step", i+1, "action", s.kind(), "duration_ms", millis(time.Since(routeStart)),
+				"output", out, "err", err)
 			return fmt.Errorf("step %d (%s): %w", i+1, s.kind(), err)
 		}
-		log.Info("step succeeded", attrs...)
+		log.Debug("step completed", "step", i+1, "action", s.kind(), "duration_ms", millis(time.Since(start)),
+			"output", out)
 	}
-	log.Info("route succeeded", "async", rt.Async, "duration", time.Since(routeStart))
+	log.Info("route completed", "steps", len(rt.Do), "duration_ms", millis(time.Since(routeStart)))
 	return nil
 }
 
@@ -235,13 +237,14 @@ func (r *Router) runHTTP(ctx context.Context, h *HTTPStep, in input) (string, er
 	}
 	resp, err := r.http.Do(req)
 	if err != nil {
-		return "", err
+		return "", automation.RedactURL(err)
 	}
 	defer resp.Body.Close()
 	out, _ := io.ReadAll(io.LimitReader(resp.Body, maxOutputBytes))
 	result := fmt.Sprintf("HTTP %d: %s", resp.StatusCode, bytes.TrimSpace(out))
 	if resp.StatusCode/100 != 2 {
-		return result, fmt.Errorf("%s %s: HTTP %d", h.Method, req.URL.Redacted(), resp.StatusCode)
+		// The path of a webhook URL is often its credential.
+		return result, fmt.Errorf("%s %s://%s: HTTP %d", h.Method, req.URL.Scheme, req.URL.Host, resp.StatusCode)
 	}
 	return result, nil
 }
@@ -361,3 +364,5 @@ func (d *doneSet) add(id, route string) {
 	}
 	d.seen[id+"\x00"+route] = now
 }
+
+func millis(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }

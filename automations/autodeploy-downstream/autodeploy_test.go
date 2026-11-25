@@ -118,7 +118,7 @@ func TestDeploysOptedInProvisionedDependents(t *testing.T) {
 	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, "autodeploy", "true")
 	a.run = func(f func()) { f() }
 
-	if code := post(t, automation.Handler("autodeploy-downstream", a, secret), completedEvent("evt-1", "PROVISION", "api-prod-db"), true); code != http.StatusNoContent {
+	if code := post(t, automation.Handler(a, secret), completedEvent("evt-1", "PROVISION", "api-prod-db"), true); code != http.StatusNoContent {
 		t.Fatalf("status = %d", code)
 	}
 
@@ -146,7 +146,7 @@ func TestIgnoresOtherActionsAndUnsignedRequests(t *testing.T) {
 
 	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, "autodeploy", "true")
 	a.run = func(f func()) { f() }
-	h := automation.Handler("autodeploy-downstream", a, secret)
+	h := automation.Handler(a, secret)
 
 	if code := post(t, h, completedEvent("evt-a", "PROVISION", "api-prod-db"), false); code != http.StatusUnauthorized {
 		t.Errorf("unsigned status = %d, want 401", code)
@@ -170,7 +170,7 @@ func TestRedeliveredEventDeploysOnce(t *testing.T) {
 	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, "autodeploy", "true")
 	calls := 0
 	a.run = func(f func()) { calls++; f() }
-	h := automation.Handler("autodeploy-downstream", a, secret)
+	h := automation.Handler(a, secret)
 
 	post(t, h, completedEvent("evt-1", "PROVISION", "api-prod-db"), true)
 	post(t, h, completedEvent("evt-1", "PROVISION", "api-prod-db"), true)

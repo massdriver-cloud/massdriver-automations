@@ -105,10 +105,10 @@ func (r *Rollback) Handle(ctx context.Context, ev automation.Event) error {
 	if err := ev.DecodeEntity(&failed); err != nil {
 		return err
 	}
-	log := slog.With("automation", Definition.Name, "event_id", ev.ID, "instance", instance, "failed_deployment", failed.ID)
+	log := automation.Logger(ctx).With("instance", instance, "deployment_id", failed.ID)
 
 	if failed.RollbackOfID != "" || strings.HasPrefix(failed.Message, rollbackMessagePrefix) {
-		log.Warn("skip: the failed deployment is a rollback")
+		log.Warn("rollback skipped", "reason", "failed_deployment_is_rollback")
 		r.notify(ctx, log, fmt.Sprintf("Rollback %s of %s failed. No further rollback. The instance needs attention.",
 			r.link(ev, failed.ID, failed.ID), r.link(ev, "", instance)))
 		return nil
@@ -125,19 +125,19 @@ func (r *Rollback) Handle(ctx context.Context, ev automation.Event) error {
 
 	if len(deps.InProgress.Items) > 0 {
 		busy := deps.InProgress.Items[0]
-		log.Info("skip: a deployment is in progress", "deployment", busy.ID, "status", busy.Status)
+		log.Debug("rollback skipped", "reason", "deployment_in_progress", "busy_deployment_id", busy.ID, "status", busy.Status)
 		return nil
 	}
 	if len(deps.LastCompleted.Items) == 0 {
-		log.Info("skip: no completed PROVISION to roll back to")
+		log.Debug("rollback skipped", "reason", "no_completed_provision")
 		return nil
 	}
 	target := deps.LastCompleted.Items[0]
 	if !failed.CreatedAt.IsZero() && target.CreatedAt.After(failed.CreatedAt) {
-		log.Info("skip: a later PROVISION completed", "deployment", target.ID)
+		log.Debug("rollback skipped", "reason", "later_provision_completed", "target_deployment_id", target.ID)
 		return nil
 	}
-	log = log.With("rollback_to", target.ID)
+	log = log.With("target_deployment_id", target.ID)
 
 	// A retry after a failed approval finds the proposal it already made, so it does not propose a second one.
 	proposalID := ""
@@ -154,7 +154,7 @@ func (r *Rollback) Handle(ctx context.Context, ev automation.Event) error {
 		}
 		proposalID = id
 	}
-	log = log.With("rollback_deployment", proposalID)
+	log = log.With("rollback_deployment_id", proposalID)
 
 	if _, err := r.mutate(ctx, approveDeploymentMutation, "approveDeployment", proposalID); err != nil {
 		var rejected *payloadError
@@ -162,14 +162,14 @@ func (r *Rollback) Handle(ctx context.Context, ev automation.Event) error {
 			return err
 		}
 		// Separation of duty stops the service account from approving its own proposal. A person approves it.
-		log.Warn("rollback proposed, approval refused", "error", err)
+		log.Warn("rollback approval refused", "err", err)
 		r.notify(ctx, log, fmt.Sprintf("Deployment %s of %s failed. Rollback %s to deployment %s (v%s) waits for approval: %s",
 			r.link(ev, failed.ID, failed.ID), r.link(ev, "", instance), r.link(ev, proposalID, proposalID),
 			r.link(ev, target.ID, target.ID), target.Version, err))
 		return nil
 	}
 
-	log.Info("rolled back")
+	log.Info("rollback started")
 	r.notify(ctx, log, fmt.Sprintf("Deployment %s of %s failed. Rollback %s restores deployment %s (v%s).",
 		r.link(ev, failed.ID, failed.ID), r.link(ev, "", instance), r.link(ev, proposalID, proposalID),
 		r.link(ev, target.ID, target.ID), target.Version))
@@ -219,7 +219,7 @@ func (r *Rollback) notify(ctx context.Context, log *slog.Logger, text string) {
 		return
 	}
 	if err := r.postSlack(ctx, text); err != nil {
-		log.Error("slack webhook", "error", err)
+		log.Error("slack post failed", "err", err)
 	}
 }
 
@@ -235,7 +235,7 @@ func (r *Rollback) postSlack(ctx context.Context, text string) error {
 	req.Header.Set("content-type", "application/json")
 	resp, err := r.http.Do(req)
 	if err != nil {
-		return err
+		return automation.RedactURL(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

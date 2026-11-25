@@ -150,7 +150,7 @@ func TestStartedThenCompletedCreatesOneDeploymentWithTwoStatuses(t *testing.T) {
 	gh := newFakeGitHub()
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
-	h := automation.Handler("github-deployments", New(testConfig(srv.URL)), secret)
+	h := automation.Handler(New(testConfig(srv.URL)), secret)
 
 	if code := post(t, h, "ev-1", deploymentEvent("ev-1", "deployment.started", "PROVISION", nil)); code != http.StatusNoContent {
 		t.Fatalf("started: got %d", code)
@@ -200,7 +200,7 @@ func TestRestartFindsExistingDeploymentByPayload(t *testing.T) {
 	}
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
-	h := automation.Handler("github-deployments", New(testConfig(srv.URL)), secret)
+	h := automation.Handler(New(testConfig(srv.URL)), secret)
 
 	post(t, h, "ev-3", deploymentEvent("ev-3", "deployment.failed", "PROVISION", nil))
 
@@ -226,7 +226,7 @@ func TestStartedAfterCompletedDoesNotReopen(t *testing.T) {
 	gh := newFakeGitHub()
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
-	h := automation.Handler("github-deployments", New(testConfig(srv.URL)), secret)
+	h := automation.Handler(New(testConfig(srv.URL)), secret)
 
 	post(t, h, "ev-4", deploymentEvent("ev-4", "deployment.completed", "PROVISION", nil))
 	post(t, h, "ev-5", deploymentEvent("ev-5", "deployment.started", "PROVISION", nil))
@@ -244,7 +244,7 @@ func TestRefAttributeProjectEnvironmentNameAndDecommission(t *testing.T) {
 	defer srv.Close()
 	cfg := testConfig(srv.URL)
 	cfg.EnvironmentName = "project-environment"
-	h := automation.Handler("github-deployments", New(cfg), secret)
+	h := automation.Handler(New(cfg), secret)
 
 	post(t, h, "ev-6", deploymentEvent("ev-6", "deployment.completed", "DECOMMISSION", map[string]any{"github_ref": "release"}))
 
@@ -271,7 +271,7 @@ func TestIgnoredEvents(t *testing.T) {
 	gh := newFakeGitHub()
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
-	h := automation.Handler("github-deployments", New(testConfig(srv.URL)), secret)
+	h := automation.Handler(New(testConfig(srv.URL)), secret)
 
 	cases := map[string][]byte{
 		"ev-7":  deploymentEvent("ev-7", "deployment.completed", "PLAN", nil),
@@ -294,7 +294,7 @@ func TestGitHubErrorAsksForRetry(t *testing.T) {
 	gh.fail = true
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
-	h := automation.Handler("github-deployments", New(testConfig(srv.URL)), secret)
+	h := automation.Handler(New(testConfig(srv.URL)), secret)
 
 	body := deploymentEvent("ev-11", "deployment.aborted", "PROVISION", nil)
 	if code := post(t, h, "ev-11", body); code != http.StatusInternalServerError {
@@ -315,7 +315,7 @@ func TestGitHubErrorAsksForRetry(t *testing.T) {
 }
 
 func TestBadSignature(t *testing.T) {
-	h := automation.Handler("github-deployments", New(testConfig("http://unused")), secret)
+	h := automation.Handler(New(testConfig("http://unused")), secret)
 	body := deploymentEvent("ev-12", "deployment.completed", "PROVISION", nil)
 	req := httptest.NewRequest(http.MethodPost, automation.HookPath, strings.NewReader(string(body)))
 	automation.SignRequest(req, secret, "ev-12", body, time.Now())

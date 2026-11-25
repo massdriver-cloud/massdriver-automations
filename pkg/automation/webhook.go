@@ -32,24 +32,45 @@ func DecodeSigningSecret(s string) ([]byte, error) {
 	return b, nil
 }
 
+// Reasons that VerifySignature rejects a request. Each error's text is the reason.
+var (
+	ErrMissingHeaders      = signatureError("missing_headers")
+	ErrBadTimestamp        = signatureError("bad_timestamp")
+	ErrTimestampOutOfRange = signatureError("timestamp_out_of_range")
+	ErrSignatureMismatch   = signatureError("signature_mismatch")
+)
+
+type signatureError string
+
+func (e signatureError) Error() string { return string(e) }
+
 // Verify checks a Standard Webhooks signature: base64 HMAC-SHA256 of "<id>.<timestamp>.<body>".
 func Verify(secret []byte, h http.Header, body []byte, now time.Time) bool {
+	return VerifySignature(secret, h, body, now) == nil
+}
+
+// VerifySignature is Verify that returns why it rejects the request: ErrMissingHeaders, ErrBadTimestamp,
+// ErrTimestampOutOfRange, or ErrSignatureMismatch.
+func VerifySignature(secret []byte, h http.Header, body []byte, now time.Time) error {
 	id, ts, sigs := h.Get("webhook-id"), h.Get("webhook-timestamp"), h.Get("webhook-signature")
+	if id == "" || ts == "" || sigs == "" {
+		return ErrMissingHeaders
+	}
 	sec, err := strconv.ParseInt(ts, 10, 64)
-	if id == "" || sigs == "" || err != nil {
-		return false
+	if err != nil {
+		return ErrBadTimestamp
 	}
 	if d := now.Sub(time.Unix(sec, 0)); d > SignatureTolerance || d < -SignatureTolerance {
-		return false
+		return ErrTimestampOutOfRange
 	}
 
 	expected := Sign(secret, id, ts, body)
 	for _, sig := range strings.Fields(sigs) {
 		if v, ok := strings.CutPrefix(sig, "v1,"); ok && hmac.Equal([]byte(v), []byte(expected)) {
-			return true
+			return nil
 		}
 	}
-	return false
+	return ErrSignatureMismatch
 }
 
 // Sign returns the base64 signature that Massdriver sends after "v1,".

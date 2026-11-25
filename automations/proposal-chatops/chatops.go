@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -216,7 +215,7 @@ func (c *Chatops) proposed(ctx context.Context, ev automation.Event, dep deploym
 	c.mu.Lock()
 	p.channel, p.ts, p.summary = ch, ts, summary
 	c.mu.Unlock()
-	slog.Info("posted", "automation", Definition.Name, "deployment_id", dep.ID, "channel", ch, "ts", ts)
+	automation.Logger(ctx).Info("proposal posted", "deployment_id", dep.ID, "channel", ch)
 	return nil
 }
 
@@ -316,18 +315,22 @@ type interaction struct {
 }
 
 func (c *Chatops) handleInteraction(w http.ResponseWriter, req *http.Request) {
+	log := automation.Logger(req.Context())
 	body, err := io.ReadAll(http.MaxBytesReader(w, req.Body, maxBodyBytes))
 	if err != nil {
+		log.Warn("request body read failed", "err", err)
 		http.Error(w, "body too large", http.StatusRequestEntityTooLarge)
 		return
 	}
 	if !verifySlack(c.cfg.SlackSigningSecret, req.Header, body, time.Now()) {
+		log.Warn("slack signature rejected")
 		http.Error(w, "bad signature", http.StatusUnauthorized)
 		return
 	}
 
 	form, err := parseForm(body)
 	if err != nil {
+		log.Warn("slack payload decode failed", "err", err)
 		http.Error(w, "bad payload", http.StatusBadRequest)
 		return
 	}
@@ -339,7 +342,8 @@ func (c *Chatops) handleInteraction(w http.ResponseWriter, req *http.Request) {
 
 	// Slack waits 3 seconds for a response, and the Massdriver call can take longer.
 	w.WriteHeader(http.StatusOK)
-	c.run(func() { c.decide(in) })
+	bg := context.WithoutCancel(req.Context())
+	c.run(func() { c.decide(bg, in) })
 }
 
 func parseForm(body []byte) (string, error) {
@@ -351,14 +355,14 @@ func parseForm(body []byte) (string, error) {
 	return req.PostForm.Get("payload"), nil
 }
 
-func (c *Chatops) decide(in interaction) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func (c *Chatops) decide(ctx context.Context, in interaction) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	action := in.Actions[0]
 	deploymentID, user := action.Value, in.User.ID
 	channel, ts := in.Container.ChannelID, in.Container.MessageTS
-	log := slog.With("automation", Definition.Name, "deployment_id", deploymentID, "slack_user", user, "action", action.ActionID)
+	log := automation.Logger(ctx).With("deployment_id", deploymentID, "slack_user", user, "action", action.ActionID)
 
 	var mutation, field, verb, noun string
 	switch action.ActionID {
@@ -371,7 +375,7 @@ func (c *Chatops) decide(in interaction) {
 	}
 
 	if c.allowed != nil && !c.allowed[user] {
-		log.Warn("slack user not allowed")
+		log.Warn("decision refused", "reason", "slack_user_not_allowed")
 		c.tell(ctx, channel, user, "You are not allowed to approve or reject deployments.")
 		return
 	}
@@ -396,7 +400,7 @@ func (c *Chatops) decide(in interaction) {
 		c.mu.Lock()
 		p.outcome = ""
 		c.mu.Unlock()
-		log.Error("decide", "error", err)
+		log.Error("decision failed", "err", err)
 		c.tell(ctx, channel, user, fmt.Sprintf("%s failed: %s", noun, err))
 		return
 	}
@@ -405,16 +409,16 @@ func (c *Chatops) decide(in interaction) {
 	c.mu.Lock()
 	p.outcome = outcome
 	c.mu.Unlock()
-	log.Info("decided", "outcome", verb)
+	log.Info("deployment decided", "outcome", strings.ToLower(verb))
 
 	if err := c.slack.update(ctx, channel, ts, summary, blocks(summary, outcome, "")); err != nil {
-		log.Error("slack update", "error", err)
+		log.Error("slack update failed", "err", err)
 	}
 }
 
 func (c *Chatops) tell(ctx context.Context, channel, user, text string) {
 	if err := c.slack.postEphemeral(ctx, channel, user, text); err != nil {
-		slog.Error("slack ephemeral", "automation", Definition.Name, "error", err)
+		automation.Logger(ctx).Error("slack post failed", "err", err)
 	}
 }
 

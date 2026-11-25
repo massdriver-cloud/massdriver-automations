@@ -6,7 +6,6 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
@@ -54,7 +53,7 @@ func New(api *massdriver.Client, attrKey, attrValue string) *Autodeploy {
 }
 
 // Handle starts the downstream deploys after a completed PROVISION.
-func (a *Autodeploy) Handle(_ context.Context, ev automation.Event) error {
+func (a *Autodeploy) Handle(ctx context.Context, ev automation.Event) error {
 	upstream := ev.Attribute("md-instance")
 	if ev.Type != "deployment.completed" || ev.Metadata("deployment_action") != "PROVISION" || upstream == "" {
 		return nil
@@ -66,7 +65,8 @@ func (a *Autodeploy) Handle(_ context.Context, ev automation.Event) error {
 		return err
 	}
 	// A cascade takes longer than the 10 seconds Massdriver waits for a response.
-	a.run(func() { a.deployDownstream(ev.ID, upstream, dep.ID) })
+	bg := context.WithoutCancel(ctx)
+	a.run(func() { a.deployDownstream(bg, upstream, dep.ID) })
 	return nil
 }
 
@@ -82,34 +82,34 @@ type instance struct {
 	} `json:"dependencies"`
 }
 
-func (a *Autodeploy) deployDownstream(eventID, upstream, deploymentID string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+func (a *Autodeploy) deployDownstream(ctx context.Context, upstream, deploymentID string) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	log := slog.With("automation", Definition.Name, "event_id", eventID, "upstream", upstream)
+	log := automation.Logger(ctx).With("upstream_instance", upstream, "upstream_deployment_id", deploymentID)
 
 	downstream, err := a.findDownstream(ctx, upstream)
 	if err != nil {
-		log.Error("find downstream", "error", err)
+		log.Error("downstream lookup failed", "err", err)
 		return
 	}
 
 	for _, inst := range downstream {
 		l := log.With("instance", inst.ID)
 		if fmt.Sprint(inst.EffectiveAttributes[a.attrKey]) != a.attrValue {
-			l.Info("skip: not opted in")
+			l.Debug("deploy skipped", "reason", "not_opted_in")
 			continue
 		}
 		if inst.Status != "PROVISIONED" {
-			l.Info("skip: not provisioned", "status", inst.Status)
+			l.Debug("deploy skipped", "reason", "not_provisioned", "status", inst.Status)
 			continue
 		}
 		msg := fmt.Sprintf("Auto-deploy: upstream %s completed deployment %s", upstream, deploymentID)
 		id, err := a.deploy(ctx, inst, msg)
 		if err != nil {
-			l.Error("deploy", "error", err)
+			l.Error("deployment create failed", "err", err)
 			continue
 		}
-		l.Info("deployed", "deployment_id", id)
+		l.Info("deployment created", "deployment_id", id)
 	}
 }
 

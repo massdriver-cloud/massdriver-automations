@@ -134,7 +134,7 @@ func (d *Drift) Schedule(c *cron.Cron) error {
 			continue
 		}
 		name := ch.Name
-		if _, err := c.AddFunc(ch.spec(), func() { d.runLogged(name) }); err != nil {
+		if _, err := c.AddFunc(ch.spec(), func() { d.runLogged(context.Background(), name) }); err != nil {
 			return fmt.Errorf("check %s: %w", name, err)
 		}
 	}
@@ -164,18 +164,19 @@ func (d *Drift) Routes(mux *http.ServeMux) {
 			http.Error(w, "unknown check", http.StatusNotFound)
 			return
 		}
-		d.run(func() { d.runLogged(name) })
+		bg := context.WithoutCancel(r.Context())
+		d.run(func() { d.runLogged(bg, name) })
 		w.Header().Set("content-type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		_ = json.NewEncoder(w).Encode(map[string]string{"check": name})
 	})
 }
 
-func (d *Drift) runLogged(name string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+func (d *Drift) runLogged(ctx context.Context, name string) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 	if err := d.RunCheck(ctx, name); err != nil {
-		slog.Error("run check", "automation", automationName, "check", name, "error", err)
+		automation.Logger(ctx).Error("check run failed", "check", name, "err", err)
 	}
 }
 
@@ -209,7 +210,7 @@ func (d *Drift) RunCheck(ctx context.Context, name string) error {
 	d.saveLocked()
 	d.mu.Unlock()
 
-	slog.Info("run check", "automation", automationName, "check", name, "matched", len(ids))
+	automation.Logger(ctx).Info("check started", "check", name, "matched", len(ids))
 	d.fill(ctx, ch)
 	return nil
 }
@@ -281,7 +282,7 @@ func (d *Drift) runLocked(check string) *run {
 func (d *Drift) fill(ctx context.Context, ch *Check) {
 	d.fillMu.Lock()
 	defer d.fillMu.Unlock()
-	log := slog.With("automation", automationName, "check", ch.Name)
+	log := automation.Logger(ctx).With("check", ch.Name)
 
 	for {
 		d.mu.Lock()
@@ -307,14 +308,14 @@ func (d *Drift) fill(ctx context.Context, ch *Check) {
 		switch {
 		case err != nil:
 			r.Failed++
-			log.Error("plan", "instance", id, "error", err)
+			log.Error("plan start failed", "instance", id, "err", err)
 		case p == nil:
 			r.Skipped++
-			log.Info("skip", "instance", id, "reason", reason)
+			log.Debug("plan skipped", "instance", id, "reason", reason)
 		default:
 			r.Planned++
 			d.st.Plans[planID] = p
-			log.Info("planned", "instance", id, "plan", planID, "source", p.Source)
+			log.Info("plan started", "instance", id, "deployment_id", planID, "source_deployment_id", p.Source)
 		}
 		d.saveLocked()
 		d.mu.Unlock()
@@ -450,7 +451,7 @@ func (d *Drift) Handle(ctx context.Context, ev automation.Event) error {
 		d.finishPlan(p, dep.ID, "")
 		return nil
 	}
-	log := slog.With("automation", automationName, "check", ch.Name, "instance", p.Instance, "plan", dep.ID)
+	log := automation.Logger(ctx).With("check", ch.Name, "instance", p.Instance, "deployment_id", dep.ID)
 
 	var outcome, text string
 	if ev.Type == "deployment.completed" {
@@ -460,8 +461,21 @@ func (d *Drift) Handle(ctx context.Context, ev automation.Event) error {
 		}
 		res := Analyze(logs, p.Steps, ch)
 		outcome = res.Status
+		switch res.Status {
+		case Drifted:
+			log.Info("plan drifted", "steps", len(res.Steps), "resources", len(res.Resources))
+		case Clean:
+			log.Debug("plan clean")
+		default:
+			log.Warn("plan result unknown", "steps", len(res.Steps), "expected_steps", res.Expected)
+		}
 		if res.Status == Drifted && ch.Mode != ModeDetect && len(p.Undeployed) == 0 && p.Outcome == "" {
 			id, note := d.resolve(ctx, ch, p, dep.ID)
+			if id != "" {
+				log.Info("resolution deployment created", "resolution_deployment_id", id, "mode", ch.Mode)
+			} else {
+				log.Error("drift resolution failed", "detail", note)
+			}
 			d.mu.Lock()
 			p.Resolution, p.Outcome = id, note
 			d.saveLocked()
@@ -470,10 +484,10 @@ func (d *Drift) Handle(ctx context.Context, ev automation.Event) error {
 		text = d.resultMessage(ch, p, dep.ID, res)
 	} else {
 		outcome = "failed"
+		log.Warn("plan failed", "status", strings.TrimPrefix(ev.Type, "deployment."))
 		text = fmt.Sprintf("Drift check failed for %s (check %s): the plan was %s. Nothing was resolved.\nPlan: %s",
 			p.Instance, ch.Name, strings.TrimPrefix(ev.Type, "deployment."), d.planLink(p, dep.ID))
 	}
-	log.Info("plan finished", "result", outcome)
 
 	if text != "" {
 		if err := d.notify(ctx, ch, text); err != nil {
@@ -481,7 +495,8 @@ func (d *Drift) Handle(ctx context.Context, ev automation.Event) error {
 		}
 	}
 	d.finishPlan(p, dep.ID, outcome)
-	d.run(func() { d.fill(context.Background(), ch) })
+	bg := context.WithoutCancel(ctx)
+	d.run(func() { d.fill(bg, ch) })
 	return nil
 }
 
@@ -516,7 +531,7 @@ func (d *Drift) finishRun(ctx context.Context, ch *Check) {
 	text := fmt.Sprintf("Drift check %s finished: %d planned, %d drifted, %d clean, %d unknown, %d failed, %d skipped.",
 		ch.Name, r.Planned, r.Drifted, r.Clean, r.Unknown, r.Failed, r.Skipped)
 	if err := d.notify(ctx, ch, text); err != nil {
-		slog.Error("slack", "automation", automationName, "check", ch.Name, "error", err)
+		automation.Logger(ctx).Error("slack post failed", "check", ch.Name, "err", err)
 	}
 }
 
@@ -544,8 +559,9 @@ func (d *Drift) Prune() {
 			text := fmt.Sprintf("Drift check for %s (check %s) has no result: the plan did not finish within %s.\nPlan: %s",
 				p.Instance, ch.Name, planTimeout, d.planLink(p, id))
 			if err := d.notify(ctx, ch, text); err != nil {
-				slog.Error("slack", "automation", automationName, "check", ch.Name, "error", err)
+				slog.Error("slack post failed", "check", ch.Name, "err", err)
 			}
+			slog.Warn("plan timed out", "check", ch.Name, "instance", p.Instance, "deployment_id", id)
 		}
 		d.finishPlan(p, id, "failed")
 	}
@@ -676,7 +692,7 @@ func (d *Drift) notify(ctx context.Context, ch *Check, text string) error {
 		hook = d.opts.SlackWebhookURL
 	}
 	if hook == "" {
-		slog.Info("alert", "automation", automationName, "check", ch.Name, "text", text)
+		automation.Logger(ctx).Info("alert logged", "check", ch.Name, "text", text)
 		return nil
 	}
 	body, err := json.Marshal(map[string]string{"text": text})
@@ -690,7 +706,7 @@ func (d *Drift) notify(ctx context.Context, ch *Check, text string) error {
 	req.Header.Set("content-type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return automation.RedactURL(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -702,6 +718,6 @@ func (d *Drift) notify(ctx context.Context, ch *Check, text string) error {
 
 func (d *Drift) saveLocked() {
 	if err := saveState(d.opts.StateDir, d.st); err != nil {
-		slog.Error("save state", "automation", automationName, "error", err)
+		slog.Error("state save failed", "err", err)
 	}
 }

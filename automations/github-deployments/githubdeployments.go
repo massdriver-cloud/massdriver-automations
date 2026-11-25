@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -121,7 +120,7 @@ func (g *GitHubDeployments) Handle(ctx context.Context, ev automation.Event) err
 	// Massdriver waits 10 seconds for a response.
 	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
-	log := slog.With("automation", Definition.Name, "event_id", ev.ID, "type", ev.Type, "deployment", dep.ID, "repo", repo)
+	log := automation.Logger(ctx).With("deployment_id", dep.ID, "repo", repo)
 
 	ghID, err := g.githubDeployment(ctx, ev, dep, repo, action)
 	if err != nil {
@@ -136,7 +135,7 @@ func (g *GitHubDeployments) Handle(ctx context.Context, ev automation.Event) err
 			return err
 		}
 		if terminal[latest] {
-			log.Info("skip: deployment already ended", "github_deployment", ghID, "state", latest)
+			log.Debug("status skipped", "reason", "deployment_ended", "github_deployment_id", ghID, "state", latest)
 			return nil
 		}
 	}
@@ -150,7 +149,7 @@ func (g *GitHubDeployments) Handle(ctx context.Context, ev automation.Event) err
 	if err := g.gh.do(ctx, http.MethodPost, fmt.Sprintf("/repos/%s/deployments/%d/statuses", repo, ghID), status, nil); err != nil {
 		return err
 	}
-	log.Info("status posted", "github_deployment", ghID, "state", state)
+	log.Info("status posted", "github_deployment_id", ghID, "state", state)
 	return nil
 }
 

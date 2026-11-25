@@ -234,16 +234,16 @@ func (s *StatusPage) alarms(ctx context.Context, instanceID string) ([]apiAlarm,
 }
 
 // Events do not carry an instance's name, and an instance the site has not seen needs its alarms too.
-func (s *StatusPage) refresh(id string) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+func (s *StatusPage) refresh(ctx context.Context, id string) {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	log := slog.With("automation", "statuspage", "instance", id)
+	log := automation.Logger(ctx).With("instance", id)
 
 	var out struct {
 		Instance *apiInstance `json:"instance"`
 	}
 	if err := s.api.Do(ctx, instanceQuery, map[string]any{"organizationId": s.api.OrganizationID, "id": id}, &out); err != nil {
-		log.Error("refresh instance", "error", err)
+		log.Error("instance refresh failed", "err", err)
 		return
 	}
 	if out.Instance == nil || out.Instance.Environment == nil || !s.envs[out.Instance.Environment.ID] {
@@ -255,7 +255,7 @@ func (s *StatusPage) refresh(id string) {
 	}
 	alarms, err := s.alarms(ctx, id)
 	if err != nil {
-		log.Error("refresh alarms", "error", err)
+		log.Error("alarm refresh failed", "err", err)
 		return
 	}
 	s.mu.Lock()
@@ -337,7 +337,7 @@ var instanceStatusAfter = map[[2]string]string{
 }
 
 // Handle applies one event to the state and renders the site again.
-func (s *StatusPage) Handle(_ context.Context, ev automation.Event) error {
+func (s *StatusPage) Handle(ctx context.Context, ev automation.Event) error {
 	known := false
 	for _, t := range events {
 		known = known || t == ev.Type
@@ -355,7 +355,8 @@ func (s *StatusPage) Handle(_ context.Context, ev automation.Event) error {
 	s.mu.Unlock()
 
 	if refresh != "" {
-		s.run(func() { s.refresh(refresh) })
+		bg := context.WithoutCancel(ctx)
+		s.run(func() { s.refresh(bg, refresh) })
 	}
 	s.render()
 	return nil
@@ -427,14 +428,14 @@ func (s *StatusPage) render() {
 		s.updatedAt = now
 		if s.stateDir != "" {
 			if err := saveHistory(s.stateDir, s.hist); err != nil {
-				slog.Error("save state", "automation", "statuspage", "error", err)
+				slog.Error("state save failed", "err", err)
 			}
 		}
 	}
 
 	files, err := s.build(pages, now)
 	if err != nil {
-		slog.Error("render", "automation", "statuspage", "error", err)
+		slog.Error("render failed", "err", err)
 		return
 	}
 	if s.outputDir != "" {
@@ -443,7 +444,7 @@ func (s *StatusPage) render() {
 				continue
 			}
 			if err := writeAtomic(filepath.Join(s.outputDir, filepath.FromSlash(path)), f.Body); err != nil {
-				slog.Error("write output", "automation", "statuspage", "path", path, "error", err)
+				slog.Error("output write failed", "file", path, "err", err)
 			}
 		}
 	}
