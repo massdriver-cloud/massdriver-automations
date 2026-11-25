@@ -1,0 +1,586 @@
+name: massdriver-automations-ecs
+description: >-
+  Runs Massdriver automations on Amazon ECS with Fargate. Each enabled automation gets an ECS service, a host on the
+  cluster's load balancer, and an event destination that sends it only the events it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundle-ecs
+version: 0.1.0
+
+steps:
+  - path: src
+    provisioner: opentofu:1.10
+
+params:
+  required:
+    - image
+    - massdriver
+    - ingress
+    - logs
+    - audit_archiver
+    - autodeploy_downstream
+    - bundle_scanner
+    - drift
+    - freeze_guard
+    - github_deployments
+    - proposal_chatops
+    - release_notes
+    - rollback_on_failure
+    - router
+    - sandbox_on_join
+    - statuspage
+  properties:
+    image:
+      type: object
+      title: Image
+      required:
+        - repository
+        - tag
+      properties:
+        repository:
+          type: string
+          title: Repository
+          description: >-
+            The automations image. bundle-scanner uses the same repository with `-scanner` after the tag, and router
+            with `-scripts` when it runs commands.
+          default: massdrivercloud/massdriver-automations
+        tag:
+          type: string
+          title: Tag
+          description: The image tag, such as `1.2.0`. Pin a version so that a redeploy runs the same code.
+          default: latest
+          pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
+          message:
+            pattern: Must be a valid image tag.
+    massdriver:
+      type: object
+      title: Massdriver
+      required:
+        - app_url
+      properties:
+        app_url:
+          type: string
+          title: App URL
+          description: The URL of the Massdriver UI. github-deployments, drift, and rollback-on-failure link to it.
+          default: https://app.massdriver.cloud
+          format: uri
+    ingress:
+      type: object
+      title: Ingress
+      required:
+        - dns_records
+      properties:
+        domain:
+          type: string
+          title: Domain
+          description: >-
+            Each automation is served at `<automation>.<domain>`, such as `freeze-guard.automations.acme.com`.
+            Empty uses the base domain of the cluster's hosted zone. The load balancer's HTTPS listener needs a
+            certificate for `*.<domain>`. Massdriver sends events to `https://<automation>.<domain>/hooks/massdriver`.
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          message:
+            pattern: Must be a lowercase DNS name with at least one dot, such as automations.acme.com.
+        dns_records:
+          type: boolean
+          title: Create DNS records
+          description: >-
+            Creates a CNAME record to the load balancer for each host in the cluster's hosted zone. Hosts outside
+            the zone get no record.
+          default: true
+    logs:
+      type: object
+      title: Logs
+      required:
+        - retention_days
+      properties:
+        retention_days:
+          type: integer
+          title: Retention (days)
+          description: Days that CloudWatch Logs keeps the logs of each automation.
+          default: 90
+          enum: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653]
+
+    audit_archiver:
+      type: object
+      title: audit-archiver
+      description: >-
+        Archives every event in S3, Splunk, or Datadog. Set at least one sink. The secrets hold the credentials.
+      required: [enabled, s3_prefix, s3_object_lock_days, datadog_site]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        s3_bucket:
+          type: string
+          title: S3 bucket
+          description: >-
+            Turns on the S3 sink. Credentials come from the `AUDIT_ARCHIVER_AWS_*` secrets. Without them, and
+            without an S3 endpoint, the task role writes to the bucket.
+        s3_region:
+          type: string
+          title: S3 region
+          description: The region of the bucket. Use `auto` for Cloudflare R2.
+        s3_prefix:
+          type: string
+          title: S3 key prefix
+          default: events
+        s3_endpoint:
+          type: string
+          title: S3 endpoint
+          description: The URL of an S3-compatible store, such as MinIO or Cloudflare R2.
+        s3_object_lock_mode:
+          type: string
+          title: S3 Object Lock mode
+          description: The retention mode of each object. The bucket must have Object Lock turned on.
+          enum: [GOVERNANCE, COMPLIANCE]
+        s3_object_lock_days:
+          type: integer
+          title: S3 Object Lock days
+          description: Days to retain each object. Used with an Object Lock mode.
+          default: 0
+          minimum: 0
+        splunk_hec_url:
+          type: string
+          title: Splunk HEC URL
+          description: >-
+            Turns on the Splunk sink, such as `https://splunk.example.com:8088`. Needs the
+            `AUDIT_ARCHIVER_SPLUNK_HEC_TOKEN` secret.
+        splunk_index:
+          type: string
+          title: Splunk index
+          description: Empty uses the default index of the token.
+        datadog_site:
+          type: string
+          title: Datadog site
+          description: Your Datadog site. The Datadog sink is on when the `AUDIT_ARCHIVER_DD_API_KEY` secret is set.
+          default: datadoghq.com
+        datadog_tags:
+          type: string
+          title: Datadog tags
+          description: Tags for each log, such as `env:prod,team:platform`.
+
+    autodeploy_downstream:
+      type: object
+      title: autodeploy-downstream
+      description: Deploys opted-in dependents when an instance deploys.
+      required: [enabled, attribute_key, attribute_value, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        attribute_key:
+          type: string
+          title: Opt-in attribute key
+          default: autodeploy
+        attribute_value:
+          type: string
+          title: Opt-in attribute value
+          default: "true"
+        attributes: &attributes
+          type: object
+          title: Event attributes
+          description: >-
+            Attribute values that an event's entity must have, such as `md-environment` = `prod`. Empty sends
+            events of any attributes.
+          default: {}
+          additionalProperties:
+            type: string
+
+    bundle_scanner:
+      type: object
+      title: bundle-scanner
+      description: >-
+        Scans each new bundle version with Trivy and Checkov. Results go to the
+        `BUNDLE_SCANNER_SLACK_WEBHOOK_URL` secret, or to the logs only.
+      required: [enabled, scanners, fail_severity, timeout, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        scanners:
+          type: string
+          title: Scanners
+          description: The scanners to run, separated by commas.
+          default: trivy,checkov
+        fail_severity:
+          type: string
+          title: Fail severity
+          description: A version fails when a finding has this severity or higher.
+          default: HIGH
+          enum: [UNKNOWN, LOW, MEDIUM, HIGH, CRITICAL]
+        result_attribute_key:
+          type: string
+          title: Result attribute key
+          description: >-
+            Records `<key>=passed` or `<key>=failed` on the bundle's repo. Must be a repo custom attribute. Empty
+            sets no attribute.
+        timeout:
+          type: string
+          title: Timeout
+          description: The longest time for one bundle version, such as `10m`.
+          default: 10m
+          pattern: ^[0-9]+(s|m|h)$
+        attributes: *attributes
+
+    drift:
+      type: object
+      title: drift
+      description: >-
+        Plans the instances that match each check on a schedule, and alerts Slack about drift. Set the
+        `DRIFT_SLACK_WEBHOOK_URL` secret for alerts, and the `DRIFT_RUN_TOKEN` secret to turn on
+        `POST https://drift.<domain>/drift/run?check=<name>`.
+      required: [enabled, config, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        config:
+          type: string
+          title: Checks
+          description: The `drift.yaml` of drift.
+          default: |
+            checks: []
+        attributes: *attributes
+
+    freeze_guard:
+      type: object
+      title: freeze-guard
+      description: >-
+        Adds deny policies for deployment actions to every custom group, except the exempt groups, during change
+        freeze windows. Set the `FREEZE_GUARD_ADMIN_TOKEN` secret to turn on
+        `POST https://freeze-guard.<domain>/freeze/lift?window=<name>`.
+      required: [enabled, windows]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        windows:
+          type: string
+          title: Freeze windows
+          description: The windows file of freeze-guard.
+          default: |
+            timezone: UTC
+            exempt_groups: []
+            windows: []
+
+    github_deployments:
+      type: object
+      title: github-deployments
+      description: Shows Massdriver deployments as GitHub Deployments. Needs the `GITHUB_DEPLOYMENTS_TOKEN` secret.
+      required: [enabled, api_url, repo_attribute_key, ref_attribute_key, environment_name]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        api_url:
+          type: string
+          title: GitHub API URL
+          description: For GitHub Enterprise Server, `https://<host>/api/v3`.
+          default: https://api.github.com
+        repo_attribute_key:
+          type: string
+          title: Repository attribute key
+          default: github_repo
+        ref_attribute_key:
+          type: string
+          title: Ref attribute key
+          default: github_ref
+        environment_name:
+          type: string
+          title: GitHub environment name
+          default: environment
+          oneOf:
+            - const: environment
+              title: Environment, such as prod
+            - const: project-environment
+              title: Project and environment, such as api-prod
+
+    proposal_chatops:
+      type: object
+      title: proposal-chatops
+      description: >-
+        Approve or reject proposed deployments from Slack. Needs the `PROPOSAL_CHATOPS_SLACK_BOT_TOKEN` and
+        `PROPOSAL_CHATOPS_SLACK_SIGNING_SECRET` secrets. Set the Slack app's interactivity URL to
+        `https://proposal-chatops.<domain>/slack/interactions`.
+      required: [enabled, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        channel:
+          type: string
+          title: Channel
+          description: The channel name or ID for proposals.
+        channel_attribute_key:
+          type: string
+          title: Channel attribute key
+          description: When an instance has this attribute, its value names the channel.
+        allowed_users:
+          type: string
+          title: Allowed Slack users
+          description: Slack user IDs that can click the buttons, separated by commas. Empty allows everybody.
+        attributes: *attributes
+
+    release_notes:
+      type: object
+      title: release-notes
+      description: >-
+        Posts new bundle versions to Slack or Teams. Set the `RELEASE_NOTES_SLACK_WEBHOOK_URL` secret, the
+        `RELEASE_NOTES_TEAMS_WEBHOOK_URL` secret, or both.
+      required: [enabled, include_development]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        include_development:
+          type: boolean
+          title: Include development versions
+          default: false
+
+    rollback_on_failure:
+      type: object
+      title: rollback-on-failure
+      description: >-
+        Rolls an opted-in instance back to its last completed deployment when a deployment fails. Notices go to the
+        `ROLLBACK_ON_FAILURE_SLACK_WEBHOOK_URL` secret, or to the logs only.
+      required: [enabled, attribute_key, attribute_value, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        attribute_key:
+          type: string
+          title: Opt-in attribute key
+          description: A component custom attribute that allows the value below.
+          default: autorollback
+          pattern: ^[A-Za-z_][A-Za-z0-9_]{0,63}$
+          message:
+            pattern: Must start with a letter or an underscore, and hold only letters, digits, and underscores.
+        attribute_value:
+          type: string
+          title: Opt-in attribute value
+          default: "true"
+        attributes: *attributes
+
+    router:
+      type: object
+      title: router
+      description: >-
+        Runs HTTP requests, commands, and Massdriver API calls for the events that match its routes. The event
+        destination sends the event types of every route. The `ROUTER_ENV` secret is a JSON object of extra
+        environment variables, for `env.NAME` in jq or `{{ env "NAME" }}` in Go templates.
+      required: [enabled, config, scripts]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        config:
+          type: string
+          title: Configuration
+          description: The `config.yaml` of router.
+          default: |
+            routes: []
+        scripts:
+          type: object
+          title: Scripts
+          description: >-
+            Files for `exec` steps, by file name, mounted as executables in `/scripts`. A configuration with an
+            `exec` step, or any script, runs the `-scripts` image, which has `sh`, `jq`, `curl`, and `python3`.
+          default: {}
+          propertyNames:
+            pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
+          additionalProperties:
+            type: string
+
+    sandbox_on_join:
+      type: object
+      title: sandbox-on-join
+      description: >-
+        Forks a sandbox environment for each new group member, and removes it when they leave. The event
+        destination condition is built from the groups in the rules.
+      required: [enabled, config]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        config:
+          type: string
+          title: Sandbox rules
+          description: The `sandboxes.yaml` of sandbox-on-join.
+          default: |
+            sandboxes: []
+
+    statuspage:
+      type: object
+      title: statuspage
+      description: >-
+        Serves a public status page. The event destination condition is built from the environments in the
+        configuration.
+      required: [enabled, config, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        host:
+          type: string
+          title: Host
+          description: The public host of the status site, such as `status.acme.com`. Empty uses `statuspage.<domain>`.
+        config:
+          type: string
+          title: Configuration
+          description: The `statuspage.yaml` of statuspage.
+          default: |
+            pages: []
+        attributes: *attributes
+
+dependencies:
+  aws_authentication:
+    resource_type: aws-iam-role
+    required: true
+  ecs_cluster:
+    resource_type: aws-ecs-cluster
+    required: true
+  service_account:
+    resource_type: massdriver-service-account
+    required: true
+
+resources: {}
+
+app:
+  secrets:
+    AUDIT_ARCHIVER_AWS_ACCESS_KEY_ID:
+      title: audit-archiver AWS access key ID
+    AUDIT_ARCHIVER_AWS_SECRET_ACCESS_KEY:
+      title: audit-archiver AWS secret access key
+    AUDIT_ARCHIVER_SPLUNK_HEC_TOKEN:
+      title: audit-archiver Splunk HEC token
+    AUDIT_ARCHIVER_DD_API_KEY:
+      title: audit-archiver Datadog API key
+    BUNDLE_SCANNER_SLACK_WEBHOOK_URL:
+      title: bundle-scanner Slack webhook URL
+    DRIFT_SLACK_WEBHOOK_URL:
+      title: drift Slack webhook URL
+    DRIFT_RUN_TOKEN:
+      title: drift run token
+      description: >-
+        Callers of `POST /drift/run` send it as `Authorization: Bearer <token>`.
+    FREEZE_GUARD_SLACK_WEBHOOK_URL:
+      title: freeze-guard Slack webhook URL
+    FREEZE_GUARD_ADMIN_TOKEN:
+      title: freeze-guard admin token
+      description: >-
+        Callers of `POST /freeze/lift` send it as `Authorization: Bearer <token>`.
+    GITHUB_DEPLOYMENTS_TOKEN:
+      title: github-deployments GitHub token
+      description: Needs `Deployments` write and `Metadata` read, or the `repo_deployment` scope.
+    PROPOSAL_CHATOPS_SLACK_BOT_TOKEN:
+      title: proposal-chatops Slack bot token
+    PROPOSAL_CHATOPS_SLACK_SIGNING_SECRET:
+      title: proposal-chatops Slack signing secret
+    RELEASE_NOTES_SLACK_WEBHOOK_URL:
+      title: release-notes Slack webhook URL
+    RELEASE_NOTES_TEAMS_WEBHOOK_URL:
+      title: release-notes Teams webhook URL
+    ROLLBACK_ON_FAILURE_SLACK_WEBHOOK_URL:
+      title: rollback-on-failure Slack webhook URL
+    ROUTER_ENV:
+      title: router environment
+      description: >-
+        A JSON object of environment variables for routes, such as `{"PAGERDUTY_ROUTING_KEY": "..."}`.
+      json: true
+
+ui:
+  ui:order:
+    - image
+    - massdriver
+    - ingress
+    - logs
+    - audit_archiver
+    - autodeploy_downstream
+    - bundle_scanner
+    - drift
+    - freeze_guard
+    - github_deployments
+    - proposal_chatops
+    - release_notes
+    - rollback_on_failure
+    - router
+    - sandbox_on_join
+    - statuspage
+    - "*"
+  image:
+    ui:order: [repository, tag]
+  massdriver:
+    ui:order: [app_url]
+  ingress:
+    ui:order: [domain, dns_records]
+  logs:
+    ui:order: [retention_days]
+  audit_archiver:
+    ui:order:
+      - enabled
+      - s3_bucket
+      - s3_region
+      - s3_prefix
+      - s3_endpoint
+      - s3_object_lock_mode
+      - s3_object_lock_days
+      - splunk_hec_url
+      - splunk_index
+      - datadog_site
+      - datadog_tags
+  autodeploy_downstream:
+    ui:order: [enabled, attribute_key, attribute_value, attributes]
+  bundle_scanner:
+    ui:order: [enabled, scanners, fail_severity, result_attribute_key, timeout, attributes]
+  drift:
+    ui:order: [enabled, config, attributes]
+    config:
+      ui:widget: textarea
+      ui:options:
+        rows: 16
+  freeze_guard:
+    ui:order: [enabled, windows]
+    windows:
+      ui:widget: textarea
+      ui:options:
+        rows: 12
+  github_deployments:
+    ui:order: [enabled, api_url, repo_attribute_key, ref_attribute_key, environment_name]
+  proposal_chatops:
+    ui:order: [enabled, channel, channel_attribute_key, allowed_users, attributes]
+  release_notes:
+    ui:order: [enabled, include_development]
+  rollback_on_failure:
+    ui:order: [enabled, attribute_key, attribute_value, attributes]
+  router:
+    ui:order: [enabled, config, scripts]
+    config:
+      ui:widget: textarea
+      ui:options:
+        rows: 16
+    scripts:
+      additionalProperties:
+        ui:widget: textarea
+  sandbox_on_join:
+    ui:order: [enabled, config]
+    config:
+      ui:widget: textarea
+      ui:options:
+        rows: 12
+  statuspage:
+    ui:order: [enabled, host, config, attributes]
+    config:
+      ui:widget: textarea
+      ui:options:
+        rows: 16

@@ -1,0 +1,6 @@
+skip-check:
+  # The values come from bundle secrets, the service account, and the event destination. A deployment writes them;
+  # Secrets Manager has no rotation function for them.
+  - CKV2_AWS_57
+  # TLS ends at the HTTPS listener of the shared load balancer. The automations serve HTTP on port 8080.
+  - CKV_AWS_378

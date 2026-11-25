@@ -32,6 +32,15 @@ docker run -p 8080:8080 \
 Each automation's README has its settings and the `mass event destination create` command that sends it only
 the events it uses.
 
+## Deploy
+
+Two Massdriver bundles run any set of the automations, with one event destination for each:
+
+| Bundle | Runs on |
+|---|---|
+| [massdriver-automations](bundle) | A Kubernetes cluster, with an ingress controller. |
+| [massdriver-automations-ecs](bundle-ecs) | Amazon ECS with Fargate, behind an Application Load Balancer. Its cluster type is an example in [examples/resource-types/aws-ecs-cluster](examples/resource-types/aws-ecs-cluster). |
+
 ## Common settings
 
 | Variable | Default | |
