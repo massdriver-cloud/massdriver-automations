@@ -1,0 +1,6 @@
+query MatchingInstances($org: ID!, $attributes: [AttributeFilter!], $cursor: Cursor) {
+  instances(organizationId: $org, filter: { status: { eq: PROVISIONED }, attributes: $attributes }, cursor: $cursor) {
+    cursor { next }
+    items { id }
+  }
+}

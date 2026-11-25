@@ -8,7 +8,7 @@ the bundle creates:
 - a Service and an Ingress for the host `<name>.<domain>`
 - a Massdriver event destination that sends events to `https://<name>.<domain>/hooks/massdriver`, with the event
   types, attributes, and condition from the automation's README
-- for statuspage, a PersistentVolumeClaim for `STATE_DIR`
+- for drift and statuspage, a PersistentVolumeClaim for `STATE_DIR`
 - for router, a ConfigMap with its **Scripts**, mounted as executables in `/scripts`
 
 The signing secret of each event destination goes into the automation's Secret as `MASSDRIVER_SIGNING_SECRET`.
@@ -33,14 +33,15 @@ Set **Ingress > Domain**, such as `automations.acme.com`. Each automation is ser
 
 | Automation | Host | Paths that must be public |
 |---|---|---|
-| attribute-enforcer | `attribute-enforcer.<domain>` | `/hooks/massdriver` |
 | audit-archiver | `audit-archiver.<domain>` | `/hooks/massdriver` |
 | autodeploy-downstream | `autodeploy-downstream.<domain>` | `/hooks/massdriver` |
 | bundle-scanner | `bundle-scanner.<domain>` | `/hooks/massdriver` |
+| drift | `drift.<domain>` | `/hooks/massdriver`, and `/drift/run` to start checks from outside the cluster |
 | freeze-guard | `freeze-guard.<domain>` | `/hooks/massdriver` |
 | github-deployments | `github-deployments.<domain>` | `/hooks/massdriver` |
 | proposal-chatops | `proposal-chatops.<domain>` | `/hooks/massdriver`, `/slack/interactions` |
 | release-notes | `release-notes.<domain>` | `/hooks/massdriver` |
+| rollback-on-failure | `rollback-on-failure.<domain>` | `/hooks/massdriver` |
 | router | `router.<domain>` | `/hooks/massdriver` |
 | sandbox-on-join | `sandbox-on-join.<domain>` | `/hooks/massdriver` |
 | statuspage | **statuspage > Host**, or `statuspage.<domain>` | every path |
@@ -62,14 +63,15 @@ turn on:
 
 | Automation | Permissions |
 |---|---|
-| attribute-enforcer | With `set_default`: `project:view`, `project:update`, `environment:update`, and `project:design`. Its policies must allow the default values. |
 | audit-archiver | None. |
 | autodeploy-downstream | `instance:deploy` on the downstream instances, and `project:view` on their projects. |
 | bundle-scanner | `repo:view` and `repo:pull` on the bundle repos. With a result attribute key, also `repo:update`. |
+| drift | `project:view` and `instance:plan` on the matched instances. Mode `resolve` also needs `instance:deploy`, and `instance:propose` with `resolve_with: deployed`. Mode `propose` needs `instance:propose`. |
 | freeze-guard | `instance:deploy` and `instance:decommission` on the instances that the windows cover. |
 | github-deployments | None. |
 | proposal-chatops | `instance:deploy` on the instances. |
 | release-notes | `repo:view` on the bundle repos, and `project:view` on the projects whose instances are listed. |
+| rollback-on-failure | `instance:propose` and `instance:deploy` on the opted-in instances, and `project:view` on their projects. |
 | router | The permissions of the operations in its `massdriver` steps. None without them. |
 | sandbox-on-join | `project:view` on the template's project, `environment:create` for environments with the attributes `owner` and `sandbox`, and `environment:deploy`, `environment:decommission`, and `environment:delete` on the forks. With the `copy*` options, also `resource:view`, a resource grant for each copied environment default and remote reference, and `instance:configure` on each template instance with secrets. |
 | statuspage | `project:view` on the projects of the configured environments. |
@@ -81,15 +83,16 @@ Each secret is set on the instance. Set only the secrets of the automations that
 | Secret | Automation | Variable |
 |---|---|---|
 | `MASSDRIVER_API_KEY` | all that call the API | `MASSDRIVER_API_KEY` |
-| `ATTRIBUTE_ENFORCER_SLACK_WEBHOOK_URL` | attribute-enforcer | `SLACK_WEBHOOK_URL` |
 | `AUDIT_ARCHIVER_AWS_ACCESS_KEY_ID`, `AUDIT_ARCHIVER_AWS_SECRET_ACCESS_KEY` | audit-archiver | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `AUDIT_ARCHIVER_SPLUNK_HEC_TOKEN` | audit-archiver | `SPLUNK_HEC_TOKEN` |
 | `AUDIT_ARCHIVER_DD_API_KEY` | audit-archiver | `DD_API_KEY` |
 | `BUNDLE_SCANNER_SLACK_WEBHOOK_URL` | bundle-scanner | `SLACK_WEBHOOK_URL` |
+| `DRIFT_SLACK_WEBHOOK_URL`, `DRIFT_RUN_TOKEN` | drift | `SLACK_WEBHOOK_URL`, `DRIFT_RUN_TOKEN` |
 | `FREEZE_GUARD_SLACK_WEBHOOK_URL` | freeze-guard | `SLACK_WEBHOOK_URL` |
 | `GITHUB_DEPLOYMENTS_TOKEN` | github-deployments | `GITHUB_TOKEN` |
 | `PROPOSAL_CHATOPS_SLACK_BOT_TOKEN`, `PROPOSAL_CHATOPS_SLACK_SIGNING_SECRET` | proposal-chatops | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` |
 | `RELEASE_NOTES_SLACK_WEBHOOK_URL`, `RELEASE_NOTES_TEAMS_WEBHOOK_URL` | release-notes | `SLACK_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL` |
+| `ROLLBACK_ON_FAILURE_SLACK_WEBHOOK_URL` | rollback-on-failure | `SLACK_WEBHOOK_URL` |
 | `ROUTER_ENV` | router | Each key of the JSON object |
 
 ## Event destinations
@@ -97,11 +100,10 @@ Each secret is set on the instance. Set only the secrets of the automations that
 Each destination is named `<instance>-<automation>`. The bundle writes the condition from the configuration where
 the automation's README says to:
 
-- attribute-enforcer: from the keys and `allowed` values of the configuration, so only entities that break a rule
-  are sent.
 - sandbox-on-join: from the `group` of each sandbox rule.
 - statuspage: from the environment `id`s of the configuration.
 - github-deployments: from the repository attribute key.
+- rollback-on-failure: from the opt-in attribute key and value.
 
 The router destination sends the event types of every route in its configuration, with no attributes and no
 condition. Each route filters with its own `match` and `when`.

@@ -1,7 +1,0 @@
-mutation UpdateProjectAttributes($org: ID!, $id: ID!, $input: UpdateProjectInput!) {
-  updateProject(organizationId: $org, id: $id, input: $input) {
-    successful
-    messages { field message }
-    result { id }
-  }
-}

@@ -18,10 +18,9 @@ locals {
   # The secret may arrive as a JSON string or as an object.
   router_env = try(jsondecode(local.secrets.ROUTER_ENV), lookup(local.secrets, "ROUTER_ENV", {}))
 
-  attribute_enforcer_config = try(yamldecode(var.attribute_enforcer.config), {})
-  statuspage_config         = try(yamldecode(var.statuspage.config), {})
-  sandbox_config            = try(yamldecode(var.sandbox_on_join.config), {})
-  router_config             = try(yamldecode(var.router.config), {})
+  statuspage_config = try(yamldecode(var.statuspage.config), {})
+  sandbox_config    = try(yamldecode(var.sandbox_on_join.config), {})
+  router_config     = try(yamldecode(var.router.config), {})
 
   router_routes      = try(coalesce(local.router_config.routes), [])
   router_event_types = distinct(flatten([for r in local.router_routes : try(coalesce(r.events), [])]))
@@ -31,19 +30,6 @@ locals {
   ]))
   scripts_dir = "/scripts"
 
-  # One jq test per required key: a key without `allowed` must be present, and a key with `allowed` must hold one
-  # of its values. Only entities that break a rule reach attribute-enforcer.
-  attribute_rules = {
-    for scope in ["project", "environment", "component"] : scope => join(" or ", concat(
-      [
-        for rule in try(coalesce(local.attribute_enforcer_config[scope]), []) :
-        length(try(coalesce(rule.allowed), [])) > 0
-        ? "($a[${jsonencode(rule.key)}] | IN(${join(", ", [for v in rule.allowed : jsonencode(tostring(v))])}) | not)"
-        : "$a[${jsonencode(rule.key)}] == null"
-      ],
-      ["false"]
-    ))
-  }
 
   statuspage_environments = distinct(flatten([
     for page in try(coalesce(local.statuspage_config.pages), []) : [
@@ -68,26 +54,6 @@ locals {
   tls_secret_name = try(coalesce(var.ingress.tls_secret_name), "")
 
   automations = {
-    attribute-enforcer = {
-      enabled    = var.attribute_enforcer.enabled
-      image      = local.image
-      host       = "attribute-enforcer.${var.ingress.domain}"
-      files      = { "config.yaml" = var.attribute_enforcer.config }
-      state_size = 0
-      env = merge(local.massdriver_env, {
-        ATTRIBUTE_ENFORCER_CONFIG = "${local.config_dir}/config.yaml"
-        SLACK_WEBHOOK_URL         = lookup(local.secrets, "ATTRIBUTE_ENFORCER_SLACK_WEBHOOK_URL", "")
-      })
-      event_types = ["project.created", "project.cloned", "environment.created", "component.created"]
-      attributes  = var.attribute_enforcer.attributes
-      condition   = <<-JQ
-        .data.attributes as $a
-        | if (.type | startswith("project.")) then (${local.attribute_rules.project})
-          elif .type == "environment.created" then (${local.attribute_rules.environment})
-          else (${local.attribute_rules.component}) end
-      JQ
-    }
-
     audit-archiver = {
       enabled    = var.audit_archiver.enabled
       image      = local.image
@@ -147,6 +113,24 @@ locals {
       event_types = ["repo.published"]
       attributes  = var.bundle_scanner.attributes
       condition   = ".data.entity.artifact_type == \"application/vnd.massdriver.bundle.v1+json\""
+    }
+
+    drift = {
+      enabled    = var.drift.enabled
+      image      = local.image
+      host       = "drift.${var.ingress.domain}"
+      files      = { "drift.yaml" = var.drift.config }
+      state_size = var.drift.storage_size_gi
+      env = merge(local.massdriver_env, {
+        DRIFT_CONFIG       = "${local.config_dir}/drift.yaml"
+        STATE_DIR          = local.state_dir
+        MASSDRIVER_APP_URL = var.massdriver.app_url
+        SLACK_WEBHOOK_URL  = lookup(local.secrets, "DRIFT_SLACK_WEBHOOK_URL", "")
+        DRIFT_RUN_TOKEN    = lookup(local.secrets, "DRIFT_RUN_TOKEN", "")
+      })
+      event_types = ["deployment.completed", "deployment.failed", "deployment.aborted"]
+      attributes  = var.drift.attributes
+      condition   = ".data.metadata.deployment_action == \"PLAN\""
     }
 
     freeze-guard = {
@@ -216,6 +200,23 @@ locals {
       event_types = ["repo.published"]
       attributes  = { "md-repo-artifact-type" = "bundle" }
       condition   = ""
+    }
+
+    rollback-on-failure = {
+      enabled    = var.rollback_on_failure.enabled
+      image      = local.image
+      host       = "rollback-on-failure.${var.ingress.domain}"
+      files      = {}
+      state_size = 0
+      env = merge(local.massdriver_env, {
+        AUTO_ROLLBACK_ATTR_KEY   = var.rollback_on_failure.attribute_key
+        AUTO_ROLLBACK_ATTR_VALUE = var.rollback_on_failure.attribute_value
+        MASSDRIVER_APP_URL       = var.massdriver.app_url
+        SLACK_WEBHOOK_URL        = lookup(local.secrets, "ROLLBACK_ON_FAILURE_SLACK_WEBHOOK_URL", "")
+      })
+      event_types = ["deployment.failed"]
+      attributes  = var.rollback_on_failure.attributes
+      condition   = ".data.metadata.deployment_action == \"PROVISION\" and .data.attributes[${jsonencode(var.rollback_on_failure.attribute_key)}] == ${jsonencode(var.rollback_on_failure.attribute_value)}"
     }
 
     router = {

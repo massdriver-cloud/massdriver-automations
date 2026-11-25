@@ -14,14 +14,15 @@ params:
     - image
     - massdriver
     - ingress
-    - attribute_enforcer
     - audit_archiver
     - autodeploy_downstream
     - bundle_scanner
+    - drift
     - freeze_guard
     - github_deployments
     - proposal_chatops
     - release_notes
+    - rollback_on_failure
     - router
     - sandbox_on_join
     - statuspage
@@ -71,7 +72,7 @@ params:
         app_url:
           type: string
           title: App URL
-          description: The URL of the Massdriver UI. github-deployments links each status to it.
+          description: The URL of the Massdriver UI. github-deployments, drift, and rollback-on-failure link to it.
           default: https://app.massdriver.cloud
           format: uri
     ingress:
@@ -106,37 +107,6 @@ params:
           description: >-
             A Secret in the namespace that holds a certificate for `*.<domain>`. Ignored when a ClusterIssuer is
             set.
-
-    attribute_enforcer:
-      type: object
-      title: attribute-enforcer
-      description: Sets default attributes on new projects, environments, and components, and reports missing ones.
-      required: [enabled, config, attributes]
-      properties:
-        enabled:
-          type: boolean
-          title: Enabled
-          default: false
-        config:
-          type: string
-          title: Configuration
-          description: >-
-            The `config.yaml` of attribute-enforcer. The event destination condition is built from it, so only
-            entities that break a rule are sent. `notify` needs the `ATTRIBUTE_ENFORCER_SLACK_WEBHOOK_URL` secret.
-          default: |
-            actions: [notify]
-            project: []
-            environment: []
-            component: []
-        attributes: &attributes
-          type: object
-          title: Event attributes
-          description: >-
-            Attribute values that an event's entity must have, such as `md-environment` = `prod`. Empty sends
-            events of any attributes.
-          default: {}
-          additionalProperties:
-            type: string
 
     audit_archiver:
       type: object
@@ -214,7 +184,15 @@ params:
           type: string
           title: Opt-in attribute value
           default: "true"
-        attributes: *attributes
+        attributes: &attributes
+          type: object
+          title: Event attributes
+          description: >-
+            Attribute values that an event's entity must have, such as `md-environment` = `prod`. Empty sends
+            events of any attributes.
+          default: {}
+          additionalProperties:
+            type: string
 
     bundle_scanner:
       type: object
@@ -251,6 +229,35 @@ params:
           description: The longest time for one bundle version, such as `10m`.
           default: 10m
           pattern: ^[0-9]+(s|m|h)$
+        attributes: *attributes
+
+    drift:
+      type: object
+      title: drift
+      description: >-
+        Plans the instances that match each check on a schedule, and alerts Slack about drift. Set the
+        `DRIFT_SLACK_WEBHOOK_URL` secret for alerts, and the `DRIFT_RUN_TOKEN` secret to turn on
+        `POST https://drift.<domain>/drift/run?check=<name>`.
+      required: [enabled, config, storage_size_gi, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        config:
+          type: string
+          title: Checks
+          description: The `drift.yaml` of drift.
+          default: |
+            checks: []
+        storage_size_gi:
+          type: integer
+          title: State storage (GiB)
+          description: The volume for the plans in progress and the queues.
+          default: 1
+          minimum: 1
+          maximum: 10
+          $md.immutable: true
         attributes: *attributes
 
     freeze_guard:
@@ -354,6 +361,32 @@ params:
           title: Include development versions
           default: false
 
+    rollback_on_failure:
+      type: object
+      title: rollback-on-failure
+      description: >-
+        Rolls an opted-in instance back to its last completed deployment when a deployment fails. Notices go to the
+        `ROLLBACK_ON_FAILURE_SLACK_WEBHOOK_URL` secret, or to the logs only.
+      required: [enabled, attribute_key, attribute_value, attributes]
+      properties:
+        enabled:
+          type: boolean
+          title: Enabled
+          default: false
+        attribute_key:
+          type: string
+          title: Opt-in attribute key
+          description: A component custom attribute that allows the value below.
+          default: autorollback
+          pattern: ^[A-Za-z_][A-Za-z0-9_]{0,63}$
+          message:
+            pattern: Must start with a letter or an underscore, and hold only letters, digits, and underscores.
+        attribute_value:
+          type: string
+          title: Opt-in attribute value
+          default: "true"
+        attributes: *attributes
+
     router:
       type: object
       title: router
@@ -451,8 +484,6 @@ app:
         An `md_` token of a service account. It creates the event destinations and is given to the automations
         that call the Massdriver API.
       required: true
-    ATTRIBUTE_ENFORCER_SLACK_WEBHOOK_URL:
-      title: attribute-enforcer Slack webhook URL
     AUDIT_ARCHIVER_AWS_ACCESS_KEY_ID:
       title: audit-archiver AWS access key ID
     AUDIT_ARCHIVER_AWS_SECRET_ACCESS_KEY:
@@ -463,6 +494,12 @@ app:
       title: audit-archiver Datadog API key
     BUNDLE_SCANNER_SLACK_WEBHOOK_URL:
       title: bundle-scanner Slack webhook URL
+    DRIFT_SLACK_WEBHOOK_URL:
+      title: drift Slack webhook URL
+    DRIFT_RUN_TOKEN:
+      title: drift run token
+      description: >-
+        Callers of `POST /drift/run` send it as `Authorization: Bearer <token>`.
     FREEZE_GUARD_SLACK_WEBHOOK_URL:
       title: freeze-guard Slack webhook URL
     GITHUB_DEPLOYMENTS_TOKEN:
@@ -476,6 +513,8 @@ app:
       title: release-notes Slack webhook URL
     RELEASE_NOTES_TEAMS_WEBHOOK_URL:
       title: release-notes Teams webhook URL
+    ROLLBACK_ON_FAILURE_SLACK_WEBHOOK_URL:
+      title: rollback-on-failure Slack webhook URL
     ROUTER_ENV:
       title: router environment
       description: >-
@@ -487,14 +526,15 @@ ui:
     - image
     - massdriver
     - ingress
-    - attribute_enforcer
     - audit_archiver
     - autodeploy_downstream
     - bundle_scanner
+    - drift
     - freeze_guard
     - github_deployments
     - proposal_chatops
     - release_notes
+    - rollback_on_failure
     - router
     - sandbox_on_join
     - statuspage
@@ -505,12 +545,6 @@ ui:
     ui:order: [organization_id, url, app_url]
   ingress:
     ui:order: [domain, class_name, cluster_issuer, tls_secret_name]
-  attribute_enforcer:
-    ui:order: [enabled, config, attributes]
-    config:
-      ui:widget: textarea
-      ui:options:
-        rows: 12
   audit_archiver:
     ui:order:
       - enabled
@@ -528,6 +562,12 @@ ui:
     ui:order: [enabled, attribute_key, attribute_value, attributes]
   bundle_scanner:
     ui:order: [enabled, scanners, fail_severity, result_attribute_key, timeout, attributes]
+  drift:
+    ui:order: [enabled, config, storage_size_gi, attributes]
+    config:
+      ui:widget: textarea
+      ui:options:
+        rows: 16
   freeze_guard:
     ui:order: [enabled, windows, override_token, attributes]
     windows:
@@ -540,6 +580,8 @@ ui:
     ui:order: [enabled, channel, channel_attribute_key, allowed_users, attributes]
   release_notes:
     ui:order: [enabled, include_development]
+  rollback_on_failure:
+    ui:order: [enabled, attribute_key, attribute_value, attributes]
   router:
     ui:order: [enabled, config, scripts]
     config:

@@ -1,0 +1,7 @@
+mutation PlanDeployment($org: ID!, $id: UUID!) {
+  planDeployment(organizationId: $org, id: $id) {
+    successful
+    messages { field message }
+    result { id }
+  }
+}
