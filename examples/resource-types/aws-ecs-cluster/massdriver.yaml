@@ -1,0 +1,166 @@
+name: aws-ecs-cluster
+version: 0.1.0
+label: AWS ECS Cluster
+icon: https://raw.githubusercontent.com/massdriver-cloud/massdriver-automations/main/examples/resource-types/aws-ecs-cluster/icon.svg
+
+ui:
+  connectionOrientation: link
+  instructions:
+    - label: AWS CLI
+      path: ./instructions/aws-cli.md
+
+schema:
+  title: AWS ECS Cluster
+  description: >-
+    An Amazon ECS cluster that runs Fargate services in private subnets behind a shared, internet-facing Application
+    Load Balancer. A service adds a target group and a host-header rule to the HTTPS listener.
+  type: object
+  additionalProperties: false
+  required:
+    - cluster
+    - region
+    - vpc_id
+    - private_subnet_ids
+    - load_balancer
+  examples:
+    - cluster:
+        name: platform
+        arn: arn:aws:ecs:us-east-1:123456789012:cluster/platform
+      region: us-east-1
+      vpc_id: vpc-0a1b2c3d4e5f67890
+      private_subnet_ids:
+        - subnet-0a1b2c3d4e5f67890
+        - subnet-0b2c3d4e5f6789012
+      load_balancer:
+        https_listener_arn: arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/platform/50dc6c495c0c9188/f2f7dc8efc522ab2
+        security_group_id: sg-0c1d2e3f4a5b6c7d8
+        dns_name: platform-1234567890.us-east-1.elb.amazonaws.com
+      dns:
+        zone_id: Z0123456789ABCDEFGHIJ
+        base_domain: acme.com
+    - cluster:
+        name: shared-services
+        arn: arn:aws:ecs:eu-west-1:210987654321:cluster/shared-services
+      region: eu-west-1
+      vpc_id: vpc-12345678
+      private_subnet_ids:
+        - subnet-12345678
+      load_balancer:
+        https_listener_arn: arn:aws:elasticloadbalancing:eu-west-1:210987654321:listener/app/shared/0123456789abcdef/fedcba9876543210
+        security_group_id: sg-12345678
+        dns_name: shared-987654321.eu-west-1.elb.amazonaws.com
+  properties:
+    cluster:
+      title: Cluster
+      description: The ECS cluster that runs the services.
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - arn
+      properties:
+        name:
+          title: Name
+          description: The name of the cluster, such as `platform`.
+          type: string
+          pattern: ^[A-Za-z0-9_-]{1,255}$
+          examples:
+            - platform
+        arn:
+          title: ARN
+          description: The ARN of the cluster. Its Region must be the Region below.
+          type: string
+          pattern: ^arn:aws(-cn|-us-gov)?:ecs:[a-z]{2}(-[a-z]+)+-[0-9]:[0-9]{12}:cluster/[A-Za-z0-9_-]{1,255}$
+          examples:
+            - arn:aws:ecs:us-east-1:123456789012:cluster/platform
+    region:
+      title: Region
+      description: The AWS Region of the cluster, the VPC, and the load balancer, such as `us-east-1`.
+      type: string
+      pattern: ^[a-z]{2}(-[a-z]+)+-[0-9]$
+      examples:
+        - us-east-1
+        - us-gov-west-1
+    vpc_id:
+      title: VPC ID
+      description: The VPC of the cluster's subnets and the load balancer.
+      type: string
+      pattern: ^vpc-([0-9a-f]{8}|[0-9a-f]{17})$
+      examples:
+        - vpc-0a1b2c3d4e5f67890
+    private_subnet_ids:
+      title: Private subnet IDs
+      description: >-
+        Subnets for the tasks, with no public IP addresses. Each subnet needs a route to the internet through a NAT
+        gateway, so tasks can pull images and call external APIs. Use one subnet in each Availability Zone.
+      type: array
+      minItems: 1
+      uniqueItems: true
+      items:
+        title: Subnet ID
+        description: The ID of a private subnet in the VPC.
+        type: string
+        pattern: ^subnet-([0-9a-f]{8}|[0-9a-f]{17})$
+      examples:
+        - - subnet-0a1b2c3d4e5f67890
+          - subnet-0b2c3d4e5f6789012
+    load_balancer:
+      title: Load balancer
+      description: >-
+        An internet-facing Application Load Balancer in the VPC. Its security group must allow traffic from the
+        load balancer to the tasks.
+      type: object
+      additionalProperties: false
+      required:
+        - https_listener_arn
+        - security_group_id
+        - dns_name
+      properties:
+        https_listener_arn:
+          title: HTTPS listener ARN
+          description: >-
+            The HTTPS listener that services add host-header rules to. Its certificates must cover the hosts of
+            the services.
+          type: string
+          pattern: ^arn:aws(-cn|-us-gov)?:elasticloadbalancing:[a-z]{2}(-[a-z]+)+-[0-9]:[0-9]{12}:listener/app/[A-Za-z0-9-]{1,32}/[0-9a-f]{16}/[0-9a-f]{16}$
+          examples:
+            - arn:aws:elasticloadbalancing:us-east-1:123456789012:listener/app/platform/50dc6c495c0c9188/f2f7dc8efc522ab2
+        security_group_id:
+          title: Security group ID
+          description: The security group of the load balancer. Services allow traffic from this group only.
+          type: string
+          pattern: ^sg-([0-9a-f]{8}|[0-9a-f]{17})$
+          examples:
+            - sg-0c1d2e3f4a5b6c7d8
+        dns_name:
+          title: DNS name
+          description: The DNS name of the load balancer. DNS records for service hosts point to it.
+          type: string
+          pattern: ^[A-Za-z0-9-]{1,128}\.[a-z]{2}(-[a-z]+)+-[0-9]\.elb\.amazonaws\.com(\.cn)?$
+          examples:
+            - platform-1234567890.us-east-1.elb.amazonaws.com
+    dns:
+      title: DNS
+      description: >-
+        A public Route 53 hosted zone for service hosts. Without it, services do not create DNS records, and you
+        point each host at the load balancer.
+      type: object
+      additionalProperties: false
+      required:
+        - zone_id
+        - base_domain
+      properties:
+        zone_id:
+          title: Hosted zone ID
+          description: The ID of the public hosted zone.
+          type: string
+          pattern: ^Z[A-Z0-9]{1,31}$
+          examples:
+            - Z0123456789ABCDEFGHIJ
+        base_domain:
+          title: Base domain
+          description: The domain name of the hosted zone, without a trailing dot, such as `acme.com`.
+          type: string
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          examples:
+            - acme.com
