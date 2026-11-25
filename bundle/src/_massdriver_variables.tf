@@ -3,36 +3,22 @@
 // To opt a variable out of regeneration, move it to another file (e.g. variables.tf).
 variable "audit_archiver" {
   type = object({
-    datadog_site        = string
-    datadog_tags        = optional(string)
-    enabled             = bool
-    s3_bucket           = optional(string)
-    s3_endpoint         = optional(string)
-    s3_object_lock_days = number
-    s3_object_lock_mode = optional(string)
-    s3_prefix           = string
-    s3_region           = optional(string)
-    splunk_hec_url      = optional(string)
-    splunk_index        = optional(string)
+    config  = string
+    enabled = bool
   })
 }
 variable "autodeploy_downstream" {
   type = object({
-    attribute_key   = string
-    attribute_value = string
-    attributes      = map(string)
-    config          = string
-    enabled         = bool
+    attributes = map(string)
+    config     = string
+    enabled    = bool
   })
 }
 variable "bundle_scanner" {
   type = object({
-    attributes           = map(string)
-    enabled              = bool
-    fail_severity        = string
-    result_attribute_key = optional(string)
-    scanners             = string
-    timeout              = string
+    attributes = map(string)
+    config     = string
+    enabled    = bool
   })
 }
 variable "drift" {
@@ -45,18 +31,15 @@ variable "drift" {
 }
 variable "freeze_guard" {
   type = object({
+    config          = string
     enabled         = bool
     storage_size_gi = number
-    windows         = string
   })
 }
 variable "github_deployments" {
   type = object({
-    api_url            = string
-    enabled            = bool
-    environment_name   = string
-    ref_attribute_key  = string
-    repo_attribute_key = string
+    config  = string
+    enabled = bool
   })
 }
 variable "image" {
@@ -100,11 +83,6 @@ variable "kubernetes_cluster" {
     })
   })
 }
-variable "massdriver" {
-  type = object({
-    app_url = string
-  })
-}
 variable "md_metadata" {
   type = object({
     default_tags = map(string)
@@ -128,25 +106,22 @@ variable "md_metadata" {
 }
 variable "proposal_chatops" {
   type = object({
-    allowed_users         = optional(string)
-    attributes            = map(string)
-    channel               = optional(string)
-    channel_attribute_key = optional(string)
-    enabled               = bool
+    attributes = map(string)
+    config     = string
+    enabled    = bool
   })
 }
 variable "release_notes" {
   type = object({
-    enabled             = bool
-    include_development = bool
+    config  = string
+    enabled = bool
   })
 }
 variable "rollback_on_failure" {
   type = object({
-    attribute_key   = string
-    attribute_value = string
-    attributes      = map(string)
-    enabled         = bool
+    attributes = map(string)
+    config     = string
+    enabled    = bool
   })
 }
 variable "router" {

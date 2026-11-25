@@ -100,10 +100,10 @@ data "aws_iam_policy_document" "task" {
     content {
       actions = concat(
         ["s3:PutObject"],
-        try(coalesce(var.audit_archiver.s3_object_lock_mode), "") != "" ? ["s3:PutObjectRetention"] : [],
+        local.audit_archiver_s3_object_lock ? ["s3:PutObjectRetention"] : [],
       )
       resources = [
-        "arn:${data.aws_partition.current.partition}:s3:::${var.audit_archiver.s3_bucket}/${local.audit_archiver_s3_prefix}/*"
+        "arn:${data.aws_partition.current.partition}:s3:::${local.audit_archiver_s3_bucket}/${local.audit_archiver_s3_prefix}/*"
       ]
     }
   }

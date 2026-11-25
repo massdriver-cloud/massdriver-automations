@@ -18,11 +18,32 @@ locals {
   # The secret may arrive as a JSON string or as an object.
   router_env = try(jsondecode(local.secrets.ROUTER_ENV), lookup(local.secrets, "ROUTER_ENV", {}))
 
-  statuspage_config = try(yamldecode(var.statuspage.config), {})
-  sandbox_config    = try(yamldecode(var.sandbox_on_join.config), {})
-  router_config     = try(yamldecode(var.router.config), {})
+  # One Slack app serves every automation that posts.
+  slack_env = {
+    SLACK_BOT_TOKEN   = lookup(local.secrets, "SLACK_BOT_TOKEN", "")
+    SLACK_WEBHOOK_URL = lookup(local.secrets, "SLACK_WEBHOOK_URL", "")
+  }
 
-  autodeploy_rules = trimspace(var.autodeploy_downstream.config) != ""
+  # Each automation reads its configuration at CONFIG_FILE, whose default is this path.
+  config_file = "config.yaml"
+
+  configs = {
+    audit-archiver      = try(yamldecode(var.audit_archiver.config), {})
+    github-deployments  = try(yamldecode(var.github_deployments.config), {})
+    proposal-chatops    = try(yamldecode(var.proposal_chatops.config), {})
+    rollback-on-failure = try(yamldecode(var.rollback_on_failure.config), {})
+    router              = try(yamldecode(var.router.config), {})
+    sandbox-on-join     = try(yamldecode(var.sandbox_on_join.config), {})
+    statuspage          = try(yamldecode(var.statuspage.config), {})
+  }
+  statuspage_config = local.configs.statuspage
+  sandbox_config    = local.configs["sandbox-on-join"]
+  router_config     = local.configs.router
+
+  # The same defaults as the automations, so the destination conditions match what they act on.
+  github_repo_attribute    = try(coalesce(local.configs["github-deployments"].github.repo_attribute), "github_repo")
+  rollback_attribute_key   = try(coalesce(local.configs["rollback-on-failure"].attribute.key), "autorollback")
+  rollback_attribute_value = try(tostring(coalesce(local.configs["rollback-on-failure"].attribute.value)), "true")
 
   router_routes      = try(coalesce(local.router_config.routes), [])
   router_event_types = distinct(flatten([for r in local.router_routes : try(coalesce(r.events), [])]))
@@ -60,23 +81,13 @@ locals {
       enabled    = var.audit_archiver.enabled
       image      = local.image
       host       = "audit-archiver.${var.ingress.domain}"
-      files      = {}
+      files      = { (local.config_file) = var.audit_archiver.config }
       state_size = 0
       env = {
-        ARCHIVE_S3_BUCKET           = var.audit_archiver.s3_bucket
-        ARCHIVE_S3_PREFIX           = var.audit_archiver.s3_prefix
-        ARCHIVE_S3_ENDPOINT         = var.audit_archiver.s3_endpoint
-        ARCHIVE_S3_OBJECT_LOCK_MODE = var.audit_archiver.s3_object_lock_mode
-        ARCHIVE_S3_OBJECT_LOCK_DAYS = var.audit_archiver.s3_object_lock_days > 0 ? tostring(var.audit_archiver.s3_object_lock_days) : null
-        AWS_REGION                  = var.audit_archiver.s3_region
-        AWS_ACCESS_KEY_ID           = lookup(local.secrets, "AUDIT_ARCHIVER_AWS_ACCESS_KEY_ID", "")
-        AWS_SECRET_ACCESS_KEY       = lookup(local.secrets, "AUDIT_ARCHIVER_AWS_SECRET_ACCESS_KEY", "")
-        SPLUNK_HEC_URL              = var.audit_archiver.splunk_hec_url
-        SPLUNK_HEC_TOKEN            = lookup(local.secrets, "AUDIT_ARCHIVER_SPLUNK_HEC_TOKEN", "")
-        SPLUNK_INDEX                = var.audit_archiver.splunk_index
-        DD_API_KEY                  = lookup(local.secrets, "AUDIT_ARCHIVER_DD_API_KEY", "")
-        DD_SITE                     = var.audit_archiver.datadog_site
-        DD_TAGS                     = var.audit_archiver.datadog_tags
+        AWS_ACCESS_KEY_ID     = lookup(local.secrets, "AUDIT_ARCHIVER_AWS_ACCESS_KEY_ID", "")
+        AWS_SECRET_ACCESS_KEY = lookup(local.secrets, "AUDIT_ARCHIVER_AWS_SECRET_ACCESS_KEY", "")
+        SPLUNK_HEC_TOKEN      = lookup(local.secrets, "AUDIT_ARCHIVER_SPLUNK_HEC_TOKEN", "")
+        DD_API_KEY            = lookup(local.secrets, "AUDIT_ARCHIVER_DD_API_KEY", "")
       }
       # An attribute filter would drop events without attributes, such as service account events.
       event_types = []
@@ -85,35 +96,25 @@ locals {
     }
 
     autodeploy-downstream = {
-      enabled    = var.autodeploy_downstream.enabled
-      image      = local.image
-      host       = "autodeploy-downstream.${var.ingress.domain}"
-      files      = local.autodeploy_rules ? { "autodeploy.yaml" = var.autodeploy_downstream.config } : {}
-      state_size = 0
-      # The automation refuses to start with both a rules file and the attribute variables.
-      env = merge(local.massdriver_env, {
-        AUTODEPLOY_CONFIG      = local.autodeploy_rules ? "${local.config_dir}/autodeploy.yaml" : null
-        AUTO_DEPLOY_ATTR_KEY   = local.autodeploy_rules ? null : var.autodeploy_downstream.attribute_key
-        AUTO_DEPLOY_ATTR_VALUE = local.autodeploy_rules ? null : var.autodeploy_downstream.attribute_value
-      })
+      enabled     = var.autodeploy_downstream.enabled
+      image       = local.image
+      host        = "autodeploy-downstream.${var.ingress.domain}"
+      files       = { (local.config_file) = var.autodeploy_downstream.config }
+      state_size  = 0
+      env         = local.massdriver_env
       event_types = ["deployment.completed"]
       attributes  = var.autodeploy_downstream.attributes
-      condition   = ".data.metadata.deployment_action == \"PROVISION\""
+      # The rules' upstream attributes are left to the automation, which checks them on each event.
+      condition = ".data.metadata.deployment_action == \"PROVISION\""
     }
 
     bundle-scanner = {
-      enabled    = var.bundle_scanner.enabled
-      image      = "${local.image}-scanner"
-      host       = "bundle-scanner.${var.ingress.domain}"
-      files      = {}
-      state_size = 0
-      env = merge(local.massdriver_env, {
-        SLACK_WEBHOOK_URL  = lookup(local.secrets, "BUNDLE_SCANNER_SLACK_WEBHOOK_URL", "")
-        SCANNERS           = var.bundle_scanner.scanners
-        SCAN_FAIL_SEVERITY = var.bundle_scanner.fail_severity
-        SCAN_ATTRIBUTE_KEY = var.bundle_scanner.result_attribute_key
-        SCAN_TIMEOUT       = var.bundle_scanner.timeout
-      })
+      enabled     = var.bundle_scanner.enabled
+      image       = "${local.image}-scanner"
+      host        = "bundle-scanner.${var.ingress.domain}"
+      files       = { (local.config_file) = var.bundle_scanner.config }
+      state_size  = 0
+      env         = merge(local.massdriver_env, local.slack_env)
       event_types = ["repo.published"]
       attributes  = var.bundle_scanner.attributes
       condition   = ".data.entity.artifact_type == \"application/vnd.massdriver.bundle.v1+json\""
@@ -123,14 +124,11 @@ locals {
       enabled    = var.drift.enabled
       image      = local.image
       host       = "drift.${var.ingress.domain}"
-      files      = { "drift.yaml" = var.drift.config }
+      files      = { (local.config_file) = var.drift.config }
       state_size = var.drift.storage_size_gi
-      env = merge(local.massdriver_env, {
-        DRIFT_CONFIG       = "${local.config_dir}/drift.yaml"
-        STATE_DIR          = local.state_dir
-        MASSDRIVER_APP_URL = var.massdriver.app_url
-        SLACK_WEBHOOK_URL  = lookup(local.secrets, "DRIFT_SLACK_WEBHOOK_URL", "")
-        DRIFT_RUN_TOKEN    = lookup(local.secrets, "DRIFT_RUN_TOKEN", "")
+      env = merge(local.massdriver_env, local.slack_env, {
+        STATE_DIR       = local.state_dir
+        DRIFT_RUN_TOKEN = lookup(local.secrets, "DRIFT_RUN_TOKEN", "")
       })
       event_types = ["deployment.completed", "deployment.failed", "deployment.aborted"]
       attributes  = var.drift.attributes
@@ -141,14 +139,13 @@ locals {
       enabled    = var.freeze_guard.enabled
       image      = local.image
       host       = "freeze-guard.${var.ingress.domain}"
-      files      = { "windows.yaml" = var.freeze_guard.windows }
+      files      = { (local.config_file) = var.freeze_guard.config }
       state_size = var.freeze_guard.storage_size_gi
-      env = merge(local.massdriver_env, {
-        FREEZE_WINDOWS_FILE = "${local.config_dir}/windows.yaml"
-        STATE_DIR           = local.state_dir
-        FREEZE_ADMIN_TOKEN  = lookup(local.secrets, "FREEZE_GUARD_ADMIN_TOKEN", "")
-        SLACK_WEBHOOK_URL   = lookup(local.secrets, "FREEZE_GUARD_SLACK_WEBHOOK_URL", "")
+      env = merge(local.massdriver_env, local.slack_env, {
+        STATE_DIR          = local.state_dir
+        FREEZE_ADMIN_TOKEN = lookup(local.secrets, "FREEZE_GUARD_ADMIN_TOKEN", "")
       })
+      # Group events have no attributes, and freeze-guard reconciles every group on each one.
       event_types = ["group.created", "group.updated", "group.deleted"]
       attributes  = {}
       condition   = ""
@@ -158,33 +155,25 @@ locals {
       enabled    = var.github_deployments.enabled
       image      = local.image
       host       = "github-deployments.${var.ingress.domain}"
-      files      = {}
+      files      = { (local.config_file) = var.github_deployments.config }
       state_size = 0
       env = {
-        GITHUB_TOKEN            = lookup(local.secrets, "GITHUB_DEPLOYMENTS_TOKEN", "")
-        GITHUB_API_URL          = var.github_deployments.api_url
-        MASSDRIVER_APP_URL      = var.massdriver.app_url
-        GITHUB_REPO_ATTR_KEY    = var.github_deployments.repo_attribute_key
-        GITHUB_REF_ATTR_KEY     = var.github_deployments.ref_attribute_key
-        GITHUB_ENVIRONMENT_NAME = var.github_deployments.environment_name
+        GITHUB_TOKEN = lookup(local.secrets, "GITHUB_DEPLOYMENTS_TOKEN", "")
       }
       event_types = ["deployment.started", "deployment.completed", "deployment.failed", "deployment.aborted"]
       attributes  = {}
-      condition   = ".data.metadata.deployment_action != \"PLAN\" and (.data.attributes[${jsonencode(var.github_deployments.repo_attribute_key)}] // \"\") != \"\""
+      condition   = ".data.metadata.deployment_action != \"PLAN\" and (.data.attributes[${jsonencode(local.github_repo_attribute)}] // \"\") != \"\""
     }
 
     proposal-chatops = {
       enabled    = var.proposal_chatops.enabled
       image      = local.image
       host       = "proposal-chatops.${var.ingress.domain}"
-      files      = {}
+      files      = { (local.config_file) = var.proposal_chatops.config }
       state_size = 0
       env = merge(local.massdriver_env, {
-        SLACK_BOT_TOKEN        = lookup(local.secrets, "PROPOSAL_CHATOPS_SLACK_BOT_TOKEN", "")
-        SLACK_SIGNING_SECRET   = lookup(local.secrets, "PROPOSAL_CHATOPS_SLACK_SIGNING_SECRET", "")
-        SLACK_CHANNEL          = var.proposal_chatops.channel
-        SLACK_CHANNEL_ATTR_KEY = var.proposal_chatops.channel_attribute_key
-        SLACK_ALLOWED_USERS    = var.proposal_chatops.allowed_users
+        SLACK_BOT_TOKEN      = lookup(local.secrets, "SLACK_BOT_TOKEN", "")
+        SLACK_SIGNING_SECRET = lookup(local.secrets, "SLACK_SIGNING_SECRET", "")
       })
       event_types = ["deployment.proposed", "deployment.approved", "deployment.rejected"]
       attributes  = var.proposal_chatops.attributes
@@ -195,12 +184,10 @@ locals {
       enabled    = var.release_notes.enabled
       image      = local.image
       host       = "release-notes.${var.ingress.domain}"
-      files      = {}
+      files      = { (local.config_file) = var.release_notes.config }
       state_size = 0
-      env = merge(local.massdriver_env, {
-        SLACK_WEBHOOK_URL   = lookup(local.secrets, "RELEASE_NOTES_SLACK_WEBHOOK_URL", "")
-        TEAMS_WEBHOOK_URL   = lookup(local.secrets, "RELEASE_NOTES_TEAMS_WEBHOOK_URL", "")
-        INCLUDE_DEVELOPMENT = tostring(var.release_notes.include_development)
+      env = merge(local.massdriver_env, local.slack_env, {
+        TEAMS_WEBHOOK_URL = lookup(local.secrets, "RELEASE_NOTES_TEAMS_WEBHOOK_URL", "")
       })
       event_types = ["repo.published"]
       attributes  = { "md-repo-artifact-type" = "bundle" }
@@ -208,31 +195,29 @@ locals {
     }
 
     rollback-on-failure = {
-      enabled    = var.rollback_on_failure.enabled
-      image      = local.image
-      host       = "rollback-on-failure.${var.ingress.domain}"
-      files      = {}
-      state_size = 0
-      env = merge(local.massdriver_env, {
-        AUTO_ROLLBACK_ATTR_KEY   = var.rollback_on_failure.attribute_key
-        AUTO_ROLLBACK_ATTR_VALUE = var.rollback_on_failure.attribute_value
-        MASSDRIVER_APP_URL       = var.massdriver.app_url
-        SLACK_WEBHOOK_URL        = lookup(local.secrets, "ROLLBACK_ON_FAILURE_SLACK_WEBHOOK_URL", "")
-      })
-      event_types = ["deployment.failed"]
+      enabled     = var.rollback_on_failure.enabled
+      image       = local.image
+      host        = "rollback-on-failure.${var.ingress.domain}"
+      files       = { (local.config_file) = var.rollback_on_failure.config }
+      state_size  = 0
+      env         = merge(local.massdriver_env, local.slack_env)
+      event_types = ["deployment.failed", "deployment.completed"]
       attributes  = var.rollback_on_failure.attributes
-      condition   = ".data.metadata.deployment_action == \"PROVISION\" and .data.attributes[${jsonencode(var.rollback_on_failure.attribute_key)}] == ${jsonencode(var.rollback_on_failure.attribute_value)}"
+      # A completed deployment matters only when it is a rollback, whose result goes in the notice's thread.
+      condition = join(" ", [
+        ".data.metadata.deployment_action == \"PROVISION\"",
+        "and .data.attributes[${jsonencode(local.rollback_attribute_key)}] == ${jsonencode(local.rollback_attribute_value)}",
+        "and (.type == \"deployment.failed\" or ((.data.entity.message // \"\") | startswith(\"Rollback to deployment \")))",
+      ])
     }
 
     router = {
-      enabled    = var.router.enabled
-      image      = local.router_uses_exec ? "${local.image}-scripts" : local.image
-      host       = "router.${var.ingress.domain}"
-      files      = { "config.yaml" = var.router.config }
-      state_size = 0
-      env = merge(local.router_env, local.massdriver_env, {
-        ROUTER_CONFIG = "${local.config_dir}/config.yaml"
-      })
+      enabled     = var.router.enabled
+      image       = local.router_uses_exec ? "${local.image}-scripts" : local.image
+      host        = "router.${var.ingress.domain}"
+      files       = { (local.config_file) = var.router.config }
+      state_size  = 0
+      env         = merge(local.router_env, local.massdriver_env)
       event_types = local.router_event_types
       # Routes filter on attributes and jq themselves, and an attribute filter would drop events without attributes.
       attributes = {}
@@ -240,14 +225,12 @@ locals {
     }
 
     sandbox-on-join = {
-      enabled    = var.sandbox_on_join.enabled
-      image      = local.image
-      host       = "sandbox-on-join.${var.ingress.domain}"
-      files      = { "sandboxes.yaml" = var.sandbox_on_join.config }
-      state_size = 0
-      env = merge(local.massdriver_env, {
-        SANDBOX_CONFIG = "${local.config_dir}/sandboxes.yaml"
-      })
+      enabled     = var.sandbox_on_join.enabled
+      image       = local.image
+      host        = "sandbox-on-join.${var.ingress.domain}"
+      files       = { (local.config_file) = var.sandbox_on_join.config }
+      state_size  = 0
+      env         = local.massdriver_env
       event_types = ["group_membership.added", "group_membership.removed", "deployment.completed"]
       # Group membership events have no attributes, so an attribute filter would drop them.
       attributes = {}
@@ -263,11 +246,10 @@ locals {
       enabled    = var.statuspage.enabled
       image      = local.image
       host       = local.statuspage_host
-      files      = { "statuspage.yaml" = var.statuspage.config }
+      files      = { (local.config_file) = var.statuspage.config }
       state_size = var.statuspage.storage_size_gi
       env = merge(local.massdriver_env, {
-        STATUSPAGE_CONFIG = "${local.config_dir}/statuspage.yaml"
-        STATE_DIR         = local.state_dir
+        STATE_DIR = local.state_dir
       })
       event_types = [
         "alarm.*", "alarm_state.created", "deployment.started", "deployment.completed", "deployment.failed",

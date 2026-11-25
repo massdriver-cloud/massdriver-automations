@@ -13,12 +13,16 @@ resource "massdriver_event_destination" "main" {
 
   lifecycle {
     precondition {
-      condition     = each.key != "audit-archiver" || length(setintersection(keys(local.settings[each.key]), ["ARCHIVE_S3_BUCKET", "SPLUNK_HEC_URL", "DD_API_KEY"])) > 0
-      error_message = "audit-archiver needs an S3 bucket, a Splunk HEC URL, or the AUDIT_ARCHIVER_DD_API_KEY secret."
+      condition     = each.key != "audit-archiver" || length(setintersection(try(keys(local.configs["audit-archiver"]), []), ["s3", "splunk", "datadog"])) > 0
+      error_message = "The audit-archiver configuration needs s3, splunk, or datadog."
     }
     precondition {
-      condition     = each.key != "proposal-chatops" || contains(keys(local.settings[each.key]), "SLACK_CHANNEL")
-      error_message = "proposal-chatops needs a channel."
+      condition     = each.key != "proposal-chatops" || try(coalesce(local.configs["proposal-chatops"].slack.channel), "") != ""
+      error_message = "The proposal-chatops configuration needs slack.channel."
+    }
+    precondition {
+      condition     = each.key != "proposal-chatops" || alltrue([for k in ["SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET"] : lookup(local.secrets, k, "") != ""])
+      error_message = "proposal-chatops needs the SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET secrets."
     }
     precondition {
       condition     = each.key != "router" || length(local.router_event_types) > 0
@@ -26,7 +30,7 @@ resource "massdriver_event_destination" "main" {
     }
     precondition {
       condition     = alltrue([for f, content in each.value.files : can(yamldecode(content))])
-      error_message = "The YAML configuration of ${each.key} is not valid YAML."
+      error_message = "The configuration of ${each.key} is not valid YAML."
     }
   }
 }
