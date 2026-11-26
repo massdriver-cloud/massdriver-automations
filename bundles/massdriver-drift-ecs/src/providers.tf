@@ -16,11 +16,23 @@ terraform {
 provider "aws" {
   region = var.ecs_cluster.region
 
-  # Massdriver writes one identity token for each level; the role's trust policy accepts the level it names.
-  assume_role_with_web_identity {
-    role_arn                = var.aws_authentication.arn
-    session_name            = var.md_metadata.name_prefix
-    web_identity_token_file = "/massdriver/oidc/${var.aws_authentication.token_level}.jwt"
+  # An aws-iam-role with token_level trusts the deployment's Massdriver identity token of that level. One without
+  # it trusts Massdriver's AWS account, with an optional external ID.
+  dynamic "assume_role_with_web_identity" {
+    for_each = try(var.aws_authentication.token_level, null) == null ? [] : [var.aws_authentication]
+    content {
+      role_arn                = assume_role_with_web_identity.value.arn
+      session_name            = var.md_metadata.name_prefix
+      web_identity_token_file = "/massdriver/oidc/${assume_role_with_web_identity.value.token_level}.jwt"
+    }
+  }
+
+  dynamic "assume_role" {
+    for_each = try(var.aws_authentication.token_level, null) == null ? [var.aws_authentication] : []
+    content {
+      role_arn    = assume_role.value.arn
+      external_id = try(assume_role.value.external_id, null)
+    }
   }
 
   default_tags {

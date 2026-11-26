@@ -29,13 +29,11 @@ Every bundle:
 - calls the Massdriver API with the `massdriver-service-account` dependency, which needs
   `organization:manageEventDestinations` and the permissions in the automation's README
 
-massdriver-statuspage and massdriver-cost-explorer also produce a `website` resource with the URL to open. The type
-is an example in [examples/resource-types/website](../examples/resource-types/website). Publish it to your
-organization before you publish those bundles.
+massdriver-statuspage and massdriver-cost-explorer also produce a `website` resource with the URL to open.
 
-Before you publish a bundle, install the official resource types `massdriver-service-account` and
-`massdriver-kubernetes-cluster` from
-[massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types).
+Publish the resource types that a bundle uses before you publish the bundle. See
+[Deploy](../README.md#deploy) for the list: `massdriver-service-account` and `massdriver-kubernetes-cluster` are
+official, `website` and `aws-ecs-cluster` are examples in this repo, and `aws-iam-role` is the AWS credential type.
 
 An attribute value with commas, such as `api, web`, matches any of its values, where the config file accepts a
 list: the attributes of autodeploy-downstream rules, drift checks, and freeze-guard windows.
@@ -60,8 +58,10 @@ CPUs and 2Gi.
 
 ## Amazon ECS
 
-Depends on an `aws-iam-role` with `arn` and `token_level` (the provider assumes the role with the deployment's
-Massdriver identity token of that level), and an `aws-ecs-cluster`. That cluster type is an example in
+Depends on an `aws-iam-role` and an `aws-ecs-cluster`. The `aws-iam-role` can be the AWS credential type from
+[massdriver-catalog](https://github.com/massdriver-cloud/massdriver-catalog/tree/main/platforms/aws), with `arn`
+and an optional `external_id`, or a type with `arn` and `token_level`, where the role trusts the deployment's
+Massdriver identity token of that level. The `aws-ecs-cluster` type is an example in
 [examples/resource-types/aws-ecs-cluster](../examples/resource-types/aws-ecs-cluster). The bundle creates:
 
 - an ECS service with one Fargate task (ARM64). An init container writes the config file and router's **Scripts**

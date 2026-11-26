@@ -5,7 +5,7 @@ type. Copy it to your own resource types repository, change it if you need to, a
 
 ```bash
 mass resource-type create website
-mass resource-type publish massdriver.yaml
+mass resource-type publish .
 ```
 
 [massdriver-statuspage](../../../bundles/massdriver-statuspage) and

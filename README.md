@@ -89,8 +89,18 @@ Each automation has two Massdriver bundles: `massdriver-<automation>` for Kubern
 destination that sends it only the events it uses. The status page and the cost dashboard also produce a `website`
 resource with the URL to open. See [bundles](bundles) for the list and what each platform needs.
 
-Before you publish a bundle, install the official resource types from
-[massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types) in your organization:
+The bundles depend on and produce these resource types. Publish the ones your bundles use to your organization
+before you publish a bundle:
+
+| Type | Used by | Where it comes from |
+|---|---|---|
+| `massdriver-service-account` | every bundle | Official, in [massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types) |
+| `massdriver-kubernetes-cluster` | Kubernetes bundles | Official, in [massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types) |
+| `aws-iam-role` | `-ecs` bundles | The AWS credential type in [massdriver-catalog](https://github.com/massdriver-cloud/massdriver-catalog/tree/main/platforms/aws), or your own |
+| `aws-ecs-cluster` | `-ecs` bundles | Example in this repo: [examples/resource-types/aws-ecs-cluster](examples/resource-types/aws-ecs-cluster) |
+| `website` | statuspage and cost-explorer bundles | Example in this repo: [examples/resource-types/website](examples/resource-types/website) |
+
+The official types:
 
 ```bash
 git clone https://github.com/massdriver-cloud/massdriver-resource-types.git
@@ -99,6 +109,24 @@ for type in massdriver-service-account massdriver-kubernetes-cluster; do
   mass resource-type create "$type"
   mass resource-type publish "$type"
 done
+```
+
+The examples are not official Massdriver types. Use them as they are, or change them to match how your
+organization runs things and change the bundles to match:
+
+```bash
+for type in website aws-ecs-cluster; do
+  mass resource-type create "$type"
+  mass resource-type publish "examples/resource-types/$type"
+done
+```
+
+Then build and publish a bundle:
+
+```bash
+cd bundles/massdriver-drift
+mass bundle build
+mass bundle publish
 ```
 
 ## Common settings

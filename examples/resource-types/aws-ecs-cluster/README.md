@@ -5,7 +5,7 @@ Balancer. It is not an official Massdriver resource type. Copy it to your own re
 fields to match how your organization runs ECS, and publish it:
 
 ```bash
-mass resource-type publish massdriver.yaml
+mass resource-type publish .
 ```
 
 The `-ecs` bundles in [bundles](../../../bundles) depend on this type. If you rename the type or its
