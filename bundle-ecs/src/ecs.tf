@@ -214,7 +214,7 @@ resource "aws_ecs_service" "main" {
   for_each = local.enabled
 
   name             = local.names[each.key]
-  cluster          = var.ecs_cluster.cluster.arn
+  cluster          = var.ecs_cluster.arn
   task_definition  = aws_ecs_task_definition.main[each.key].arn
   launch_type      = "FARGATE"
   platform_version = "LATEST"
@@ -235,7 +235,7 @@ resource "aws_ecs_service" "main" {
   }
 
   network_configuration {
-    subnets          = var.ecs_cluster.private_subnet_ids
+    subnets          = var.ecs_cluster.network.private_subnet_ids
     security_groups  = [aws_security_group.tasks[0].id]
     assign_public_ip = false
   }

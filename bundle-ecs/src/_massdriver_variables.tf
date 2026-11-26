@@ -17,7 +17,7 @@ variable "autodeploy_downstream" {
 variable "aws_authentication" {
   type = object({
     arn         = string
-    external_id = string
+    token_level = string
   })
 }
 variable "bundle_scanner" {
@@ -36,22 +36,26 @@ variable "drift" {
 }
 variable "ecs_cluster" {
   type = object({
-    cluster = object({
-      arn  = string
-      name = string
-    })
-    dns = optional(object({
-      base_domain = string
-      zone_id     = string
-    }))
+    arn = string
     load_balancer = object({
-      dns_name           = string
-      https_listener_arn = string
-      security_group_id  = string
+      arn               = string
+      dns_name          = string
+      listener_arn      = string
+      protocol          = optional(string)
+      security_group_id = string
+      zone_id           = string
     })
-    private_subnet_ids = list(string)
-    region             = string
-    vpc_id             = string
+    name = string
+    network = object({
+      id                 = string
+      internet_egress    = bool
+      private_subnet_ids = list(string)
+    })
+    region = string
+    zone = optional(object({
+      domain  = string
+      zone_id = string
+    }))
   })
 }
 variable "freeze_guard" {

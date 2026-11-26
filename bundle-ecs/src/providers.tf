@@ -16,9 +16,11 @@ terraform {
 provider "aws" {
   region = var.ecs_cluster.region
 
-  assume_role {
-    role_arn    = var.aws_authentication.arn
-    external_id = try(var.aws_authentication.external_id, null)
+  # Massdriver writes one identity token for each level; the role's trust policy accepts the level it names.
+  assume_role_with_web_identity {
+    role_arn                = var.aws_authentication.arn
+    session_name            = var.md_metadata.name_prefix
+    web_identity_token_file = "/massdriver/oidc/${var.aws_authentication.token_level}.jwt"
   }
 
   default_tags {

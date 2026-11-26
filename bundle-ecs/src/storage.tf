@@ -1,5 +1,5 @@
 data "aws_subnet" "private" {
-  for_each = length(local.stateful) > 0 ? toset(var.ecs_cluster.private_subnet_ids) : toset([])
+  for_each = length(local.stateful) > 0 ? toset(var.ecs_cluster.network.private_subnet_ids) : toset([])
 
   id = each.value
 }
@@ -27,7 +27,7 @@ resource "aws_security_group" "efs" {
 
   name_prefix = "${trimsuffix(substr(local.name_prefix, 0, 40), "-")}-efs-"
   description = "State of the Massdriver automations of ${local.name_prefix}"
-  vpc_id      = var.ecs_cluster.vpc_id
+  vpc_id      = var.ecs_cluster.network.id
 
   lifecycle {
     create_before_destroy = true

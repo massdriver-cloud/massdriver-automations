@@ -3,7 +3,7 @@ resource "aws_security_group" "tasks" {
 
   name_prefix = "${trimsuffix(substr(local.name_prefix, 0, 40), "-")}-tasks-"
   description = "Massdriver automations of ${local.name_prefix}"
-  vpc_id      = var.ecs_cluster.vpc_id
+  vpc_id      = var.ecs_cluster.network.id
 
   lifecycle {
     create_before_destroy = true
@@ -35,7 +35,7 @@ resource "aws_lb_target_group" "main" {
   for_each = local.enabled
 
   name                 = local.target_group_names[each.key]
-  vpc_id               = var.ecs_cluster.vpc_id
+  vpc_id               = var.ecs_cluster.network.id
   target_type          = "ip"
   protocol             = "HTTP"
   port                 = 8080
@@ -54,7 +54,7 @@ resource "aws_lb_target_group" "main" {
 resource "aws_lb_listener_rule" "main" {
   for_each = local.enabled
 
-  listener_arn = var.ecs_cluster.load_balancer.https_listener_arn
+  listener_arn = var.ecs_cluster.load_balancer.listener_arn
 
   action {
     type             = "forward"
@@ -76,4 +76,22 @@ resource "aws_route53_record" "main" {
   type    = "CNAME"
   ttl     = 300
   records = [var.ecs_cluster.load_balancer.dns_name]
+}
+
+# The cluster's listener is HTTPS when it has a DNS zone. Without one it may be HTTP, and Massdriver and Slack send
+# requests only to https:// URLs.
+check "https_listener" {
+  assert {
+    condition = coalesce(
+      try(var.ecs_cluster.load_balancer.protocol, null), try(var.ecs_cluster.zone.zone_id, null) != null ? "HTTPS" : "HTTP"
+    ) == "HTTPS"
+    error_message = "The cluster's load balancer listener is not HTTPS. Massdriver sends events only to https:// URLs, so the event destinations will fail until TLS ends in front of the load balancer."
+  }
+}
+
+check "internet_egress" {
+  assert {
+    condition     = var.ecs_cluster.network.internet_egress
+    error_message = "The cluster's private subnets have no internet egress. The tasks cannot pull the image or call the Massdriver API and Slack."
+  }
 }

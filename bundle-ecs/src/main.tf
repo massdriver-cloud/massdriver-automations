@@ -9,7 +9,7 @@ locals {
 
   image = "${var.image.repository}:${var.image.tag}"
 
-  domain = try(coalesce(var.ingress.domain, try(var.ecs_cluster.dns.base_domain, null)), "")
+  domain = try(coalesce(var.ingress.domain, try(var.ecs_cluster.zone.domain, null)), "")
 
   massdriver_env = {
     MASSDRIVER_ORGANIZATION_ID = var.service_account.organization_id
@@ -333,8 +333,8 @@ locals {
     for name, _ in local.automations : name => "${substr(sha1("${local.name_prefix}-${name}"), 0, 10)}-${name}"
   }
 
-  zone_id     = try(var.ecs_cluster.dns.zone_id, "")
-  zone_domain = try(var.ecs_cluster.dns.base_domain, "")
+  zone_id     = try(var.ecs_cluster.zone.zone_id, "")
+  zone_domain = try(var.ecs_cluster.zone.domain, "")
   dns_hosts = {
     for name, a in local.enabled : name => a.host
     if var.ingress.dns_records && local.zone_id != "" && endswith(a.host, ".${local.zone_domain}")

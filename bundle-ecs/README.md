@@ -30,24 +30,26 @@ The bundle produces no resources for other bundles.
   `massdriver_event_destination`
   ([terraform-provider-massdriver#56](https://github.com/massdriver-cloud/terraform-provider-massdriver/pull/56)).
   The bundle does not deploy until 2.7.0 is published.
-- An `aws-iam-role` dependency, the AWS credential type of the
-  [Massdriver catalog](https://github.com/massdriver-cloud/massdriver-catalog/tree/main/platforms/aws).
+- An `aws-iam-role` dependency with `arn` and `token_level`. The provider assumes the role with the deployment's
+  Massdriver identity token of that level, so the role's trust policy must accept it.
 - An `aws-ecs-cluster` dependency. This type is an example in
   [examples/resource-types/aws-ecs-cluster](../examples/resource-types/aws-ecs-cluster). Publish it, or a copy that
   you change, to your organization.
 - A [`massdriver-service-account`](https://github.com/massdriver-cloud/massdriver-resource-types/tree/main/massdriver-service-account)
   dependency.
-- An internet-facing Application Load Balancer with an HTTPS listener. The listener needs a certificate for
+- An internet-facing Application Load Balancer whose listener, `load_balancer.listener_arn`, is HTTPS. The plan
+  warns when `load_balancer.protocol` is not `HTTPS`, or when it is not set and the cluster has no `zone`. The
+  listener needs a certificate for
   `*.<domain>`, and for the statuspage host when it is outside `<domain>`. Massdriver and Slack send requests to
   `https://` URLs.
 - The load balancer's security group allows outbound traffic to the tasks on port 8080.
-- Private subnets with a route through a NAT gateway, so tasks can pull images and call the Massdriver API, Slack,
-  GitHub, and the other services in their settings.
+- Private subnets, `network.private_subnet_ids`, with a route through a NAT gateway, so tasks can pull images and
+  call the Massdriver API, Slack, GitHub, and the other services in their settings. The plan warns when
+  `network.internet_egress` is false.
 
 ## Ingress host
 
-Set **Ingress > Domain**, such as `automations.acme.com`, or leave it empty to use the base domain of the cluster's
-hosted zone. Each automation is served at `<name>.<domain>`:
+Set **Ingress > Domain**, such as `automations.acme.com`, or leave it empty to use the cluster's `zone.domain`. Each automation is served at `<name>.<domain>`:
 
 | Automation | Host | Paths that must be public |
 |---|---|---|
