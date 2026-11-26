@@ -17,8 +17,8 @@ resource "massdriver_event_destination" "main" {
       error_message = "Set Ingress > Domain, or connect a cluster with a hosted zone."
     }
     precondition {
-      condition     = each.key != "audit-archiver" || length(setintersection(try(keys(local.configs["audit-archiver"]), []), ["s3", "splunk", "datadog"])) > 0
-      error_message = "The audit-archiver configuration needs s3, splunk, or datadog."
+      condition     = each.key != "audit-archiver" || length(setintersection(try(keys(local.configs["audit-archiver"]), []), ["disk", "s3", "splunk", "datadog"])) > 0
+      error_message = "Turn on at least one audit-archiver sink."
     }
     precondition {
       condition     = each.key != "proposal-chatops" || try(coalesce(local.configs["proposal-chatops"].slack.channel), "") != ""

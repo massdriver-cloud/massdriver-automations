@@ -44,7 +44,7 @@ Set **Ingress > Domain**, such as `automations.acme.com`. Each automation is ser
 | rollback-on-failure | `rollback-on-failure.<domain>` | `/hooks/massdriver` |
 | router | `router.<domain>` | `/hooks/massdriver` |
 | sandbox-on-join | `sandbox-on-join.<domain>` | `/hooks/massdriver` |
-| statuspage | **statuspage > Host**, or `statuspage.<domain>` | every path |
+| statuspage | **Status page > Host**, or `statuspage.<domain>` | every path |
 
 Each Ingress sends every path of its host to the automation. Two instances of this bundle need different domains,
 because each host serves one automation.
@@ -54,19 +54,22 @@ For proposal-chatops, set the Slack app's interactivity request URL to
 
 ## Configuration
 
-Each automation has one **Configuration** parameter: the YAML of its config file, as its README and its
-`config.example.yaml` describe. The default is a small valid config to edit. The bundle writes it to
-`/etc/massdriver-automations/config.yaml`, the default `CONFIG_FILE`, and the automation reads it at start. A change
-restarts the automation. A config that does not decode or validate stops the automation with one `invalid config`
-log record.
+Each automation is off until you check **Run <name>**, which shows its settings. The settings have the same
+keys as the automation's config file, described in its README and its `config.example.yaml`. The bundle writes
+them as YAML to `/etc/massdriver-automations/config.yaml`, the default `CONFIG_FILE`, and a setting you leave empty
+uses the automation's default. A change restarts the automation. router is the exception: its routes are free-form,
+so its form holds the YAML of its config file.
 
-A key that names an environment variable for a credential, such as `github.token_env` or `splunk.token_env`, must
-keep its default: the bundle sets only the variables in [Secrets](#secrets).
+An attribute value with commas, such as `api, web`, matches any of its values, where the config file accepts a
+list: the dependent and upstream attributes of autodeploy-downstream rules, the instance attributes of drift
+checks, and the attributes of freeze-guard windows.
+
+Credentials are not settings. The bundle sets them from [Secrets](#secrets).
 
 ## Slack
 
 The automations share one Slack app. Set the `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` secrets from it, and set
-`slack.channel` in the config of each automation that posts. Without the app, set the `SLACK_WEBHOOK_URL` secret:
+**Slack > Channel** for each automation that posts. Without the app, set the `SLACK_WEBHOOK_URL` secret:
 every automation that posts then sends to the webhook's one channel. See [Slack](../README.md#slack).
 
 ## Service account
@@ -141,8 +144,8 @@ because their events can have no attributes. release-notes always filters on `md
 
 ## Status page files
 
-When the statuspage config sets `output_dir`, such as `/srv/status`, the bundle mounts a volume of its own there,
-sized by **statuspage > Site storage (GiB)**. statuspage writes the static site to it after each change. The claim
+When **Output directory** of statuspage is set, such as `/srv/status`, the bundle mounts a volume of its own there,
+sized by **Site storage (GiB)**. statuspage writes the static site to it after each change. The claim
 is separate from the history volume, so a pod that reads the site cannot change the history.
 
 To serve or copy the files, mount the claim `<instance>-statuspage-site` in another pod or Job in the same

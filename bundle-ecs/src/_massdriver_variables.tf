@@ -3,15 +3,49 @@
 // To opt a variable out of regeneration, move it to another file (e.g. variables.tf).
 variable "audit_archiver" {
   type = object({
-    config  = string
     enabled = bool
+    config = optional(object({
+      datadog = optional(object({
+        enabled = bool
+        service = optional(string)
+        site    = optional(string)
+        tags    = optional(list(string))
+      }))
+      disk = optional(object({
+        enabled = bool
+        dir     = optional(string)
+      }))
+      s3 = optional(object({
+        enabled          = bool
+        bucket           = optional(string)
+        endpoint         = optional(string)
+        object_lock_days = optional(number)
+        object_lock_mode = optional(string)
+        prefix           = optional(string)
+        region           = optional(string)
+      }))
+      splunk = optional(object({
+        enabled    = bool
+        index      = optional(string)
+        source     = optional(string)
+        sourcetype = optional(string)
+        url        = optional(string)
+      }))
+    }))
   })
 }
 variable "autodeploy_downstream" {
   type = object({
-    attributes = map(string)
-    config     = string
     enabled    = bool
+    attributes = optional(map(string))
+    config = optional(object({
+      rules = optional(list(object({
+        action     = string
+        downstream = map(string)
+        name       = string
+        upstream   = optional(map(string))
+      })))
+    }))
   })
 }
 variable "aws_authentication" {
@@ -22,16 +56,50 @@ variable "aws_authentication" {
 }
 variable "bundle_scanner" {
   type = object({
-    attributes = map(string)
-    config     = string
     enabled    = bool
+    attributes = optional(map(string))
+    config = optional(object({
+      fail_severity    = optional(string)
+      result_attribute = optional(string)
+      scanners         = optional(list(string))
+      slack = optional(object({
+        channel = optional(string)
+      }))
+      timeout = optional(string)
+    }))
   })
 }
 variable "drift" {
   type = object({
-    attributes = map(string)
-    config     = string
     enabled    = bool
+    attributes = optional(map(string))
+    config = optional(object({
+      checks = list(object({
+        match          = map(string)
+        max_concurrent = optional(number)
+        mode           = string
+        name           = string
+        notify_clean   = optional(bool)
+        patterns = optional(object({
+          clean    = optional(string)
+          drift    = optional(string)
+          resource = optional(string)
+        }))
+        resolve_with = string
+        schedule     = optional(string)
+        slack = optional(object({
+          channel = optional(string)
+        }))
+        summary  = optional(bool)
+        timezone = optional(string)
+      }))
+      massdriver = optional(object({
+        app_url = optional(string)
+      }))
+      slack = optional(object({
+        channel = optional(string)
+      }))
+    }))
   })
 }
 variable "ecs_cluster" {
@@ -60,14 +128,47 @@ variable "ecs_cluster" {
 }
 variable "freeze_guard" {
   type = object({
-    config  = string
     enabled = bool
+    config = optional(object({
+      actions       = optional(list(string))
+      exempt_groups = optional(list(string))
+      slack = optional(object({
+        channel = optional(string)
+      }))
+      timezone = optional(string)
+      windows = optional(list(object({
+        actions       = optional(list(string))
+        exempt_groups = optional(list(string))
+        from          = optional(string)
+        match         = optional(map(string))
+        name          = string
+        slack = optional(object({
+          channel = optional(string)
+        }))
+        timezone = optional(string)
+        to       = optional(string)
+        weekly = optional(list(object({
+          from = string
+          to   = string
+        })))
+      })))
+    }))
   })
 }
 variable "github_deployments" {
   type = object({
-    config  = string
     enabled = bool
+    config = optional(object({
+      github = optional(object({
+        api_url          = optional(string)
+        environment_name = optional(string)
+        ref_attribute    = optional(string)
+        repo_attribute   = optional(string)
+      }))
+      massdriver = optional(object({
+        app_url = optional(string)
+      }))
+    }))
   })
 }
 variable "image" {
@@ -116,35 +217,71 @@ variable "otel" {
 }
 variable "proposal_chatops" {
   type = object({
-    attributes = map(string)
-    config     = string
     enabled    = bool
+    attributes = optional(map(string))
+    config = optional(object({
+      slack = object({
+        allowed_users     = optional(list(string))
+        channel           = string
+        channel_attribute = optional(string)
+      })
+    }))
   })
 }
 variable "release_notes" {
   type = object({
-    config  = string
     enabled = bool
+    config = optional(object({
+      include_development = optional(bool)
+      slack = optional(object({
+        channel = optional(string)
+      }))
+      teams = optional(object({
+        enabled = optional(bool)
+      }))
+    }))
   })
 }
 variable "rollback_on_failure" {
   type = object({
-    attributes = map(string)
-    config     = string
     enabled    = bool
+    attributes = optional(map(string))
+    config = optional(object({
+      attribute = object({
+        key   = string
+        value = string
+      })
+      massdriver = optional(object({
+        app_url = optional(string)
+      }))
+      slack = optional(object({
+        channel = optional(string)
+      }))
+    }))
   })
 }
 variable "router" {
   type = object({
-    config  = string
     enabled = bool
-    scripts = map(string)
+    config  = optional(string)
+    scripts = optional(map(string))
   })
 }
 variable "sandbox_on_join" {
   type = object({
-    config  = string
     enabled = bool
+    config = optional(object({
+      sandboxes = list(object({
+        copyEnvironmentDefaults = optional(bool)
+        copyRemoteReferences    = optional(bool)
+        copySecrets             = optional(bool)
+        deleteAfterDecommission = optional(bool)
+        deploy                  = optional(bool)
+        environment             = string
+        group                   = string
+        project                 = string
+      }))
+    }))
   })
 }
 variable "service_account" {
@@ -156,9 +293,63 @@ variable "service_account" {
 }
 variable "statuspage" {
   type = object({
-    attributes = map(string)
-    config     = string
     enabled    = bool
-    host       = optional(string)
+    attributes = optional(map(string))
+    config = optional(object({
+      announcements = optional(list(object({
+        ends_at   = optional(string)
+        level     = string
+        message   = string
+        pages     = optional(list(string))
+        starts_at = optional(string)
+        url       = optional(string)
+      })))
+      attributes = optional(object({
+        hidden = optional(string)
+        impact = optional(string)
+        title  = optional(string)
+      }))
+      deploys_as_maintenance = optional(bool)
+      history_days           = optional(number)
+      maintenance = optional(list(object({
+        components   = optional(list(string))
+        description  = optional(string)
+        ends_at      = string
+        environments = list(string)
+        starts_at    = string
+        title        = string
+      })))
+      min_duration = optional(string)
+      output_dir   = optional(string)
+      pages = list(object({
+        description = optional(string)
+        environments = list(object({
+          components = optional(list(object({
+            description = optional(string)
+            impact      = optional(string)
+            match       = map(string)
+            title       = string
+          })))
+          description = optional(string)
+          id          = string
+          title       = string
+        }))
+        slug  = optional(string)
+        title = string
+      }))
+      site = object({
+        accent_color = optional(string)
+        base_url     = optional(string)
+        footer_links = optional(list(object({
+          title = string
+          url   = string
+        })))
+        logo               = optional(string)
+        show_alarm_details = optional(bool)
+        timezone           = optional(string)
+        title              = string
+      })
+    }))
+    host = optional(string)
   })
 }

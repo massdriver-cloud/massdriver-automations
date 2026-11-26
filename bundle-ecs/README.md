@@ -62,7 +62,7 @@ Set **Ingress > Domain**, such as `automations.acme.com`, or leave it empty to u
 | rollback-on-failure | `rollback-on-failure.<domain>` | `/hooks/massdriver` |
 | router | `router.<domain>` | `/hooks/massdriver` |
 | sandbox-on-join | `sandbox-on-join.<domain>` | `/hooks/massdriver` |
-| statuspage | **statuspage > Host**, or `statuspage.<domain>` | every path |
+| statuspage | **Status page > Host**, or `statuspage.<domain>` | every path |
 
 Each listener rule sends every path of its host to the automation. Two instances of this bundle on one load balancer
 need different domains, because each host serves one automation.
@@ -93,7 +93,7 @@ that freeze-guard created, and incident and uptime history. Each one gets an acc
 system, with the root directory `/<name>` and the user `65532`. EFS grows with the data, so there is no size
 setting. Decommissioning the instance deletes the file system and the state.
 
-When the statuspage config sets `output_dir`, such as `/srv/status`, statuspage writes the static site to an access
+When **Output directory** of statuspage is set, such as `/srv/status`, statuspage writes the static site to an access
 point of its own on the same file system, with the root directory `/statuspage-site`. To serve or copy the files,
 mount that access point in another task or service, read-only. Its role needs `elasticfilesystem:ClientMount` on the
 file system with the condition `elasticfilesystem:AccessPointArn` set to the access point, and its security group
@@ -101,19 +101,22 @@ needs to be allowed by the file system's security group on port 2049.
 
 ## Configuration
 
-Each automation has one **Configuration** parameter: the YAML of its config file, as its README and its
-`config.example.yaml` describe. The default is a small valid config to edit. The bundle writes it to
-`/etc/massdriver-automations/config.yaml`, the default `CONFIG_FILE`, and the automation reads it at start. A change
-restarts the automation. A config that does not decode or validate stops the automation with one `invalid config`
-log record.
+Each automation is off until you check **Run <name>**, which shows its settings. The settings have the same
+keys as the automation's config file, described in its README and its `config.example.yaml`. The bundle writes
+them as YAML to `/etc/massdriver-automations/config.yaml`, the default `CONFIG_FILE`, and a setting you leave empty
+uses the automation's default. A change restarts the automation. router is the exception: its routes are free-form,
+so its form holds the YAML of its config file.
 
-A key that names an environment variable for a credential, such as `github.token_env` or `splunk.token_env`, must
-keep its default: the bundle sets only the variables in [Secrets](#secrets).
+An attribute value with commas, such as `api, web`, matches any of its values, where the config file accepts a
+list: the dependent and upstream attributes of autodeploy-downstream rules, the instance attributes of drift
+checks, and the attributes of freeze-guard windows.
+
+Credentials are not settings. The bundle sets them from [Secrets](#secrets).
 
 ## Slack
 
 The automations share one Slack app. Set the `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` secrets from it, and set
-`slack.channel` in the config of each automation that posts. Without the app, set the `SLACK_WEBHOOK_URL` secret:
+**Slack > Channel** for each automation that posts. Without the app, set the `SLACK_WEBHOOK_URL` secret:
 every automation that posts then sends to the webhook's one channel. See [Slack](../README.md#slack).
 
 ## Service account

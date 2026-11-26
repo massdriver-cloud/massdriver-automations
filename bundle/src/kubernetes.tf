@@ -23,7 +23,7 @@ resource "kubernetes_config_map_v1" "files" {
 }
 
 resource "kubernetes_config_map_v1" "scripts" {
-  for_each = { for name, a in local.enabled : name => a if name == "router" && length(var.router.scripts) > 0 }
+  for_each = { for name, a in local.enabled : name => a if name == "router" && length(local.router_scripts) > 0 }
 
   metadata {
     name      = "${local.names[each.key]}-scripts"
@@ -31,7 +31,7 @@ resource "kubernetes_config_map_v1" "scripts" {
     labels    = merge(local.labels, { "app.kubernetes.io/name" = each.key })
   }
 
-  data = var.router.scripts
+  data = local.router_scripts
 }
 
 resource "kubernetes_persistent_volume_claim_v1" "state" {
@@ -115,7 +115,7 @@ resource "kubernetes_deployment_v1" "main" {
         annotations = {
           # Restarts the pod when its settings change. The files and the env are read only at start.
           "massdriver.cloud/config-hash" = sha256(jsonencode([
-            local.env[each.key], each.value.files, each.key == "router" ? var.router.scripts : {}
+            local.env[each.key], each.value.files, each.key == "router" ? local.router_scripts : {}
           ]))
         }
       }
@@ -201,7 +201,7 @@ resource "kubernetes_deployment_v1" "main" {
           }
 
           dynamic "volume_mount" {
-            for_each = each.key == "router" && length(var.router.scripts) > 0 ? [1] : []
+            for_each = each.key == "router" && length(local.router_scripts) > 0 ? [1] : []
             content {
               name       = "scripts"
               mount_path = local.scripts_dir
@@ -242,7 +242,7 @@ resource "kubernetes_deployment_v1" "main" {
         }
 
         dynamic "volume" {
-          for_each = each.key == "router" && length(var.router.scripts) > 0 ? [1] : []
+          for_each = each.key == "router" && length(local.router_scripts) > 0 ? [1] : []
           content {
             name = "scripts"
             config_map {
