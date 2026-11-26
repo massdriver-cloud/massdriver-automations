@@ -64,7 +64,7 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "AccountGroups":
 		items := []any{}
 		for _, g := range f.groups[v["accountId"].(string)] {
-			items = append(items, map[string]any{"name": g})
+			items = append(items, map[string]any{"id": "id-" + g, "name": g})
 		}
 		data = map[string]any{"groups": map[string]any{"cursor": done, "items": items}}
 	case "MembersByEmail":
@@ -223,6 +223,27 @@ func TestJoinForksAndDeploysWithFreeIdentifier(t *testing.T) {
 	}
 	if api.calls[1].op != "DeployEnvironment" || api.calls[1].vars["id"] != "api-samlee3" {
 		t.Errorf("deploy = %v", api.calls[1])
+	}
+}
+
+func TestJoinMatchesARuleThatNamesTheGroupByID(t *testing.T) {
+	api := &fakeAPI{
+		groups: map[string][]string{"acct-sam": {"Ops"}},
+		envs:   map[string]fakeEnv{"ops-template": {}},
+	}
+	srv := httptest.NewServer(api)
+	t.Cleanup(srv.Close)
+	s := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"},
+		[]Rule{{Group: "id-Ops", Project: "ops", Environment: "template"}})
+	s.run = func(f func()) { f() }
+
+	ev := membershipEvent("group_membership.added", "Ops")
+	ev["data"].(map[string]any)["entity"].(map[string]any)["group_id"] = "id-Ops"
+	if code := post(t, automation.Handler(s, secret), "evt-1", ev); code != http.StatusNoContent {
+		t.Fatalf("status = %d", code)
+	}
+	if got := ops(api.calls); !reflect.DeepEqual(got, []string{"ForkEnvironment ops-template samlee"}) {
+		t.Errorf("calls = %v", got)
 	}
 }
 

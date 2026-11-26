@@ -102,6 +102,8 @@ def storage(title, desc):
     return i(title, desc, default=1, minimum=1, maximum=10, **{"$md.immutable": True})
 
 
+GROUPS = {"type": "string", "$md.list": {"resource": "group"}}
+
 DEPLOY_ACTIONS = [("instance:deploy", "Deploy instances"), ("instance:decommission", "Decommission instances"),
                   ("environment:deploy", "Deploy environments"),
                   ("environment:decommission", "Decommission environments")]
@@ -294,7 +296,7 @@ def automations(k8s):
                   "RFC 3339.", examples=["2026-12-24"]),
         "to": s("Once, to", examples=["2026-12-26 12:00"]),
         "timezone": s("Time zone", "Replaces the default time zone for this window.", **TIMEZONE),
-        "exempt_groups": arr("More exempt groups", s("Group name"), default=[]),
+        "exempt_groups": arr("More exempt groups", GROUPS, uniqueItems=True, default=[]),
         "actions": {**actions, "title": "Denied actions", "description": "Replaces the default actions for this "
                     "window."},
         "slack": slack("Replaces the default channel for this window."),
@@ -310,8 +312,8 @@ def automations(k8s):
                     "lift a window early with `POST https://freeze-guard.<domain>/freeze/lift?window=<name>`.",
         config=obj("Windows", {
             "timezone": s("Default time zone", default="UTC", **TIMEZONE),
-            "exempt_groups": arr("Exempt groups", s("Group name"), "Groups that every window leaves alone, by "
-                                 "name, such as the on-call team.", default=[]),
+            "exempt_groups": arr("Exempt groups", GROUPS, "Groups that every window leaves alone, such as the "
+                                 "on-call team.", uniqueItems=True, default=[]),
             "actions": {**actions, "default": [v for v, _ in DEPLOY_ACTIONS]},
             "slack": slack("The channel for window starts, ends, and lifts. Empty posts nothing."),
             "windows": arr("Windows", window, default=[]),
@@ -319,9 +321,7 @@ def automations(k8s):
         extra=extra,
         ui={"ui:order": ["timezone", "exempt_groups", "actions", "slack", "windows"],
             "actions": {"ui:widget": "checkboxes"},
-            "exempt_groups": TAG,
             "windows": {"ui:options": {"itemTitle": "{{name}}"}, "items": {
-                "exempt_groups": TAG,
                 "weekly": {"ui:options": {"itemTitle": "{{from}} to {{to}}"}},
                 "ui:order": ["name", "match", "weekly", "from", "to", "timezone", "exempt_groups", "actions",
                              "slack"],
@@ -439,19 +439,21 @@ def automations(k8s):
                     "leave.",
         config=obj("Sandboxes", {
             "sandboxes": arr("Rules", obj("Rule", {
-                "group": s("Group", "The group name, as shown in Massdriver."),
-                "project": s("Project", "The project of the template. Forks go into the same project."),
+                "group": {"type": "string", "title": "Group", "description": "Each person who joins it gets a sandbox.",
+                          "$md.list": {"resource": "group"}},
+                "project": {"type": "string", "title": "Project",
+                            "description": "The project of the template. Forks go into the same project.",
+                            "$md.list": {"resource": "project"}},
                 "environment": s("Template environment"),
                 "deploy": b("Deploy the fork after it is created"),
                 "deleteAfterDecommission": b("Delete the fork after its decommission, when the person leaves"),
                 "copyEnvironmentDefaults": b("Copy the template's environment defaults"),
                 "copySecrets": b("Copy the secrets of the template's instances"),
                 "copyRemoteReferences": b("Copy the template's remote references"),
-            }, required=["group", "project", "environment"]), minItems=1,
-                default=[{"group": "Developers", "project": "sandbox", "environment": "template"}]),
+            }, required=["group", "project", "environment"]), minItems=1),
         }, required=["sandboxes"]),
         extra={},
-        ui={"sandboxes": {"ui:options": {"itemTitle": "{{group}}: {{project}}-{{environment}}"}, "items": {"ui:order": [
+        ui={"sandboxes": {"ui:options": {"itemTitle": "{{project}}-{{environment}}"}, "items": {"ui:order": [
             "group", "project", "environment", "deploy", "deleteAfterDecommission", "copyEnvironmentDefaults",
             "copySecrets", "copyRemoteReferences"]}}},
     )

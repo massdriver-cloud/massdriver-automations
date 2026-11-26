@@ -120,7 +120,7 @@ windows:
 | `name` | Required and unique. Shown in Slack messages, and used by the lift endpoint. |
 | `match` | The policy's conditions. Each key is an attribute. Each value is a string, a list of strings, or `"*"` for any value. Empty denies the actions everywhere. |
 | `actions` | The actions to deny. The default is `instance:deploy`, `instance:decommission`, `environment:deploy`, and `environment:decommission`. |
-| `exempt_groups` | Names of the groups that the window does not freeze. A name must equal the group's name exactly. |
+| `exempt_groups` | The groups that the window does not freeze, by name or ID. A name must equal the group's name exactly. |
 | `slack.channel` | The channel for this window's announcements. The default is the top-level `slack.channel`. |
 | `timezone` | An IANA time zone, such as `America/New_York`. |
 | `weekly` | A list of ranges, each `from` and `to` as `<day> HH:MM`. A range whose `to` is earlier in the week than its `from` continues into the next week. |
@@ -194,7 +194,7 @@ The config file is YAML. [`config.example.yaml`](config.example.yaml) has every 
 |---|---|---|
 | `timezone` | `UTC` | The timezone of the windows that do not set their own. |
 | `actions` | the deployment actions | The actions that every window denies, unless it sets its own. |
-| `exempt_groups` | | Groups that no window freezes. |
+| `exempt_groups` | | Groups that no window freezes, by name or ID. |
 | `slack.channel` | | The channel for announcements, with `SLACK_BOT_TOKEN`. |
 | `windows` | | The [windows](#windows). Without any, freeze-guard adds no policies and removes the ones it made. |
 
@@ -255,4 +255,4 @@ freeze-guard deletes the policies that it created for the old window.
 - Policies change at most one minute after a window starts or ends, or longer while the Massdriver API is
   unavailable.
 - Run one replica. Two replicas create two policies per group.
-- Exemptions match group names. Renaming a group changes whether it is exempt.
+- An exemption by name stops matching when the group is renamed. An exemption by ID does not.

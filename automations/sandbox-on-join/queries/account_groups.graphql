@@ -1,6 +1,6 @@
 query AccountGroups($org: ID!, $accountId: ID!, $cursor: Cursor) {
   groups(organizationId: $org, filter: { accountId: { eq: $accountId } }, cursor: $cursor) {
     cursor { next }
-    items { name }
+    items { id name }
   }
 }

@@ -2,7 +2,7 @@
 # Required: at least one rule. A group can have more than one rule.
 
 sandboxes:
-  - # Required. The group name, as shown in Massdriver. Each person who joins it gets a sandbox.
+  - # Required. The group name, as shown in Massdriver, or the group ID. Each person who joins it gets a sandbox.
     group: Developers
     # Required. The project of the template environment. Forks go into the same project.
     project: api

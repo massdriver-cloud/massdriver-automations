@@ -675,10 +675,12 @@ params:
                   exempt_groups:
                     type: array
                     title: Exempt groups
-                    description: Groups that every window leaves alone, by name, such as the on-call team.
+                    description: Groups that every window leaves alone, such as the on-call team.
                     items:
                       type: string
-                      title: Group name
+                      $md.list:
+                        resource: group
+                    uniqueItems: true
                     default: []
                   actions:
                     type: array
@@ -790,7 +792,9 @@ params:
                           title: More exempt groups
                           items:
                             type: string
-                            title: Group name
+                            $md.list:
+                              resource: group
+                          uniqueItems: true
                           default: []
                         actions:
                           type: array
@@ -1177,11 +1181,15 @@ params:
                         group:
                           type: string
                           title: Group
-                          description: The group name, as shown in Massdriver.
+                          description: Each person who joins it gets a sandbox.
+                          $md.list:
+                            resource: group
                         project:
                           type: string
                           title: Project
                           description: The project of the template. Forks go into the same project.
+                          $md.list:
+                            resource: project
                         environment:
                           type: string
                           title: Template environment
@@ -1206,10 +1214,6 @@ params:
                           title: Copy the template's remote references
                           default: false
                     minItems: 1
-                    default:
-                    - group: Developers
-                      project: sandbox
-                      environment: template
             required:
             - config
     statuspage:
@@ -1766,14 +1770,10 @@ ui:
       - windows
       actions:
         ui:widget: checkboxes
-      exempt_groups:
-        ui:field: tagInput
       windows:
         ui:options:
           itemTitle: '{{name}}'
         items:
-          exempt_groups:
-            ui:field: tagInput
           weekly:
             ui:options:
               itemTitle: '{{from}} to {{to}}'
@@ -1856,7 +1856,7 @@ ui:
     config:
       sandboxes:
         ui:options:
-          itemTitle: '{{group}}: {{project}}-{{environment}}'
+          itemTitle: '{{project}}-{{environment}}'
         items:
           ui:order:
           - group

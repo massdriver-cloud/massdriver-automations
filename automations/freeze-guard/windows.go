@@ -261,8 +261,10 @@ func (w Window) NextStart(t time.Time) time.Time {
 	return next
 }
 
-// Exempt reports whether the window leaves the group named name unfrozen.
-func (w Window) Exempt(name string) bool { return slices.Contains(w.ExemptGroups, name) }
+// Exempt reports whether the window leaves a group unfrozen. An exempt group is named by its name or its ID.
+func (w Window) Exempt(id, name string) bool {
+	return slices.Contains(w.ExemptGroups, id) || slices.Contains(w.ExemptGroups, name)
+}
 
 // conditionsInput is the `conditions` of createGroupPolicy: "*" or a JSON object.
 func (w Window) conditionsInput() string {

@@ -122,8 +122,10 @@ locals {
   sandbox_groups = distinct([for rule in try(coalesce(local.sandbox_config.sandboxes), []) : rule.group])
 
   # jq has no empty IN(), so an empty list tests false.
+  # A rule names its group by name or by ID.
+  sandbox_group_list = join(", ", [for g in local.sandbox_groups : jsonencode(g)])
   sandbox_group_test = (length(local.sandbox_groups) > 0
-    ? "(.data.entity.group_name | IN(${join(", ", [for g in local.sandbox_groups : jsonencode(g)])}))"
+    ? "((.data.entity.group_name | IN(${local.sandbox_group_list})) or (.data.entity.group_id | IN(${local.sandbox_group_list})))"
   : "false")
   statuspage_environment_test = (length(local.statuspage_environments) > 0
     ? "($env | IN(${join(", ", [for e in local.statuspage_environments : jsonencode(e)])}))"

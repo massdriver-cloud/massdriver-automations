@@ -45,7 +45,7 @@ The config file is YAML. [`config.example.yaml`](config.example.yaml) has every 
 
 | Key | Default | |
 |---|---|---|
-| `sandboxes[].group` | | Required. The group name, as shown in Massdriver. |
+| `sandboxes[].group` | | Required. The group name, as shown in Massdriver, or the group ID. |
 | `sandboxes[].project` | | Required. The project of the template environment. Forks go into the same project. |
 | `sandboxes[].environment` | | Required. The template environment. |
 | `sandboxes[].deploy` | `false` | Deploy the fork after it is created. |
@@ -81,7 +81,7 @@ mass event destination create \
 ```
 
 List each configured group in the condition, for example
-`(.data.entity.group_name | IN("Developers", "Contractors"))`. Do not set `--attribute`: group membership events
+`(.data.entity.group_name | IN("Developers", "Contractors"))`, or `.data.entity.group_id` for a group named by ID. Do not set `--attribute`: group membership events
 have no attributes, so an attribute filter drops them.
 
 Copy the signing secret from the destination into `MASSDRIVER_SIGNING_SECRET`.

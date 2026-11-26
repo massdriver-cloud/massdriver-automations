@@ -8,7 +8,7 @@ timezone: America/New_York
 # and environment:decommission.
 actions: [instance:deploy, instance:decommission, environment:deploy, environment:decommission]
 
-# Groups that every window leaves alone, by name.
+# Groups that every window leaves alone, by name or ID.
 exempt_groups: [SRE]
 
 slack:

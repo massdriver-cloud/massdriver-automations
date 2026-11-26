@@ -295,7 +295,7 @@ func (g *Guard) Reconcile(ctx context.Context) error {
 		frozen := map[string]bool{}
 		if active {
 			for _, gr := range groups {
-				if gr.Role == "CUSTOM" && !w.Exempt(gr.Name) {
+				if gr.Role == "CUSTOM" && !w.Exempt(gr.ID, gr.Name) {
 					frozen[gr.ID] = true
 				}
 			}
@@ -548,7 +548,7 @@ func (g *Guard) announce(ctx context.Context, w Window, active bool, groups map[
 		}
 		sort.Strings(frozen)
 		text = fmt.Sprintf("Freeze window %q started. Denied %s %s.\nFrozen groups: %s.\nExempt groups: %s.",
-			w.Name, strings.Join(w.Actions, ", "), w.describeConditions(), list(frozen), list(w.ExemptGroups))
+			w.Name, strings.Join(w.Actions, ", "), w.describeConditions(), list(frozen), list(exemptNames(w, groups)))
 	case !g.st.Lifts[w.Name].IsZero():
 		msg = "freeze lifted"
 		text = fmt.Sprintf("Freeze window %q lifted until %s. Removed its deny policies.",
@@ -564,6 +564,19 @@ func (g *Guard) announce(ctx context.Context, w Window, active bool, groups map[
 	if _, err := g.slack.Post(ctx, slack.Message{Channel: w.Slack.Channel, Text: text}); err != nil {
 		automation.Logger(ctx).Error("slack post failed", "window", w.Name, "err", err)
 	}
+}
+
+// exemptNames shows an exempt group named by its ID with the group's name.
+func exemptNames(w Window, groups map[string]group) []string {
+	names := make([]string, 0, len(w.ExemptGroups))
+	for _, e := range w.ExemptGroups {
+		if gr, ok := groups[e]; ok {
+			e = gr.Name
+		}
+		names = append(names, e)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func list(names []string) string {

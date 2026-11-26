@@ -31,7 +31,8 @@ windows:
   - name: weekend
     match:
       md-environment: prod
-    exempt_groups: [Release Managers]
+    # By ID: the Massdriver group picker stores IDs.
+    exempt_groups: [group-release]
     weekly:
       - from: Fri 17:00
         to: Mon 08:00

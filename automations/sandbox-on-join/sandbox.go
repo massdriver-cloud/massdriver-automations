@@ -62,7 +62,7 @@ var Definition = automation.Definition{
 	},
 }
 
-// Rule gives the members of Group a fork of the template environment Project-Environment.
+// Rule gives the members of Group, a group name or ID, a fork of the template environment Project-Environment.
 type Rule struct {
 	Group                   string `yaml:"group"`
 	Project                 string `yaml:"project"`
@@ -122,6 +122,7 @@ type membership struct {
 	AccountID    string `json:"account_id"`
 	AccountEmail string `json:"account_email"`
 	AccountName  string `json:"account_name"`
+	GroupID      string `json:"group_id"`
 	GroupName    string `json:"group_name"`
 }
 
@@ -136,7 +137,7 @@ func (s *Sandboxes) Handle(ctx context.Context, ev automation.Event) error {
 			return err
 		}
 		// A service account's membership has no account_id.
-		if m.AccountID == "" || len(s.rulesForGroup(m.GroupName)) == 0 {
+		if m.AccountID == "" || len(s.rulesForGroup(m)) == 0 {
 			return nil
 		}
 		if ev.Type == "group_membership.added" {
@@ -165,10 +166,10 @@ func (s *Sandboxes) Handle(ctx context.Context, ev automation.Event) error {
 	return nil
 }
 
-func (s *Sandboxes) rulesForGroup(group string) []Rule {
+func (s *Sandboxes) rulesForGroup(m membership) []Rule {
 	var out []Rule
 	for _, r := range s.rules {
-		if r.Group == group {
+		if r.Group == m.GroupName || r.Group == m.GroupID {
 			out = append(out, r)
 		}
 	}
@@ -195,7 +196,7 @@ func (s *Sandboxes) createSandboxes(ctx context.Context, m membership) {
 		log.Error("group lookup failed", "err", err)
 		return
 	}
-	if !groups[m.GroupName] {
+	if !groups[m.GroupID] && !groups[m.GroupName] {
 		log.Debug("sandbox create skipped", "reason", "not_in_group")
 		return
 	}
@@ -206,7 +207,7 @@ func (s *Sandboxes) createSandboxes(ctx context.Context, m membership) {
 		return
 	}
 
-	for _, rule := range s.rulesForGroup(m.GroupName) {
+	for _, rule := range s.rulesForGroup(m) {
 		l := log.With("template", rule.template())
 		if hasSandboxFrom(existing, rule.template()) {
 			l.Debug("sandbox create skipped", "reason", "sandbox_exists")
@@ -252,7 +253,7 @@ func (s *Sandboxes) removeSandboxes(ctx context.Context, m membership) {
 		return
 	}
 
-	for _, rule := range s.rulesForGroup(m.GroupName) {
+	for _, rule := range s.rulesForGroup(m) {
 		if kept[rule.template()] {
 			log.Debug("sandbox remove skipped", "reason", "kept_by_other_group", "template", rule.template())
 			continue
@@ -425,6 +426,7 @@ func (s *Sandboxes) accountGroups(ctx context.Context, accountID string) (map[st
 			Groups struct {
 				Cursor cursor `json:"cursor"`
 				Items  []struct {
+					ID   string `json:"id"`
 					Name string `json:"name"`
 				} `json:"items"`
 			} `json:"groups"`
@@ -435,8 +437,10 @@ func (s *Sandboxes) accountGroups(ctx context.Context, accountID string) (map[st
 		if err != nil {
 			return nil, err
 		}
+		// A rule names its group by name or by ID.
 		for _, g := range out.Groups.Items {
 			groups[g.Name] = true
+			groups[g.ID] = true
 		}
 		if next = out.Groups.Cursor.Next; next == nil {
 			return groups, nil
