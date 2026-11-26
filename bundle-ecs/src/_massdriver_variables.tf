@@ -104,6 +104,12 @@ variable "md_metadata" {
     })
   })
 }
+variable "otel" {
+  type = object({
+    endpoint = optional(string)
+  })
+  default = null
+}
 variable "proposal_chatops" {
   type = object({
     attributes = map(string)

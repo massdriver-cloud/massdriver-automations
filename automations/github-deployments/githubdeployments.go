@@ -353,6 +353,8 @@ func (c *github) latestState(ctx context.Context, repo string, id int64) (string
 	return out[0].State, nil
 }
 
+var httpClient = automation.HTTPClient(0)
+
 func (c *github) do(ctx context.Context, method, path string, in, out any) error {
 	var body io.Reader
 	if in != nil {
@@ -373,7 +375,7 @@ func (c *github) do(ctx context.Context, method, path string, in, out any) error
 		req.Header.Set("content-type", "application/json")
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return err
 	}

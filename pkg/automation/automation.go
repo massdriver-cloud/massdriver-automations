@@ -140,6 +140,7 @@ func newHandler(a Automation, signingSecret []byte, base *slog.Logger) http.Hand
 		ev.Raw = body
 
 		log = log.With("event_id", ev.ID, "event_type", ev.Type)
+		recordEvent(r.Context(), ev)
 		if info, ok := r.Context().Value(requestInfoKey{}).(*requestInfo); ok {
 			info.eventID, info.eventType = ev.ID, ev.Type
 		}
@@ -152,6 +153,7 @@ func newHandler(a Automation, signingSecret []byte, base *slog.Logger) http.Hand
 		}
 		if err := a.Handle(WithLogger(r.Context(), log), ev); err != nil {
 			log.Error("event handler failed", "err", err)
+			recordError(r.Context(), err)
 			http.Error(w, "handler failed", http.StatusInternalServerError)
 			return
 		}
@@ -162,7 +164,7 @@ func newHandler(a Automation, signingSecret []byte, base *slog.Logger) http.Hand
 	if router, ok := a.(Router); ok {
 		router.Routes(mux)
 	}
-	return withAccessLog(withRecovery(mux), base)
+	return withTracing(withAccessLog(withRecovery(mux), base), mux)
 }
 
 // Env returns the environment variable name, or fallback when it is unset or empty.

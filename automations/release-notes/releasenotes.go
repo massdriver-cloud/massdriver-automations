@@ -433,6 +433,8 @@ func TeamsMessage(n Note) map[string]any {
 	}
 }
 
+var httpClient = automation.HTTPClient(0)
+
 func postJSON(ctx context.Context, url string, payload any) error {
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -443,7 +445,7 @@ func postJSON(ctx context.Context, url string, payload any) error {
 		return err
 	}
 	req.Header.Set("content-type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return automation.RedactURL(err)
 	}

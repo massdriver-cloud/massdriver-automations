@@ -74,7 +74,7 @@ func New(opts Options) *Client {
 	}
 	c.api = strings.TrimRight(c.api, "/")
 	if c.http == nil {
-		c.http = &http.Client{Timeout: 10 * time.Second}
+		c.http = automation.HTTPClient(10 * time.Second)
 	}
 	return c
 }
@@ -172,7 +172,8 @@ func (c *Client) call(ctx context.Context, method string, payload map[string]any
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.api+"/"+method, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(automation.WithClientSpan(ctx, "slack "+method), http.MethodPost,
+		c.api+"/"+method, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

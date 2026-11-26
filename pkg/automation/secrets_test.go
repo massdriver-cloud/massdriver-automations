@@ -15,6 +15,13 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
+
 	"github.com/massdriver-cloud/massdriver-automations/automations"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 )
@@ -43,7 +50,7 @@ func closedURL(t *testing.T) string {
 	return srv.URL
 }
 
-func TestLogsNeverHoldSecrets(t *testing.T) {
+func TestLogsAndSpansNeverHoldSecrets(t *testing.T) {
 	signingKey := []byte("leak-signing-key-0123456789abcdef")
 	dead := closedURL(t)
 	secrets := map[string]string{
@@ -70,6 +77,15 @@ func TestLogsNeverHoldSecrets(t *testing.T) {
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	spans := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(spans))
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	t.Cleanup(func() {
+		otel.SetTracerProvider(noop.NewTracerProvider())
+		otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator())
+	})
 
 	// Startup of every automation, with its example config, as a bot and as a webhook.
 	for _, slackEnv := range []map[string]string{
@@ -141,6 +157,24 @@ func TestLogsNeverHoldSecrets(t *testing.T) {
 	automation.Handler(rb, signingKey).ServeHTTP(httptest.NewRecorder(), req)
 
 	logs := buf.String()
+	var clientSpans int
+	for _, s := range spans.GetSpans() {
+		if s.SpanKind == trace.SpanKindClient {
+			clientSpans++
+		}
+		logs += "\n" + s.Name + " " + s.Status.Description
+		for _, kv := range s.Attributes {
+			logs += " " + string(kv.Key) + "=" + kv.Value.Emit()
+		}
+		for _, e := range s.Events {
+			for _, kv := range e.Attributes {
+				logs += " " + string(kv.Key) + "=" + kv.Value.Emit()
+			}
+		}
+	}
+	if clientSpans == 0 {
+		t.Error("no client spans; the sinks and the Slack webhook should be traced")
+	}
 	for _, want := range []string{`"msg":"listening"`, `"msg":"event handler failed"`, `"msg":"slack post failed"`} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("logs are missing %s", want)
@@ -153,7 +187,7 @@ func TestLogsNeverHoldSecrets(t *testing.T) {
 			probe = v[i+1:]
 		}
 		if strings.Contains(logs, probe) {
-			t.Errorf("logs hold %s", name)
+			t.Errorf("logs or spans hold %s", name)
 		}
 	}
 }

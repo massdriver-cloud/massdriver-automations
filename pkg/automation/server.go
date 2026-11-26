@@ -107,7 +107,7 @@ func withAccessLog(next http.Handler, base *slog.Logger) http.Handler {
 		if info.eventID != "" {
 			attrs = append(attrs, slog.String("event_id", info.eventID), slog.String("event_type", info.eventType))
 		}
-		log.LogAttrs(ctx, level, "request", attrs...)
+		Logger(ctx).LogAttrs(ctx, level, "request", attrs...)
 	})
 }
 

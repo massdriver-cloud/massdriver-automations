@@ -120,7 +120,7 @@ func New(api *massdriver.Client, sl *slack.Client, cfg Config) *Scanner {
 		slack:    sl,
 		registry: strings.TrimSuffix(api.Endpoint, "/api/v2"),
 		cfg:      cfg,
-		http:     &http.Client{Timeout: 5 * time.Minute},
+		http:     automation.HTTPClient(5 * time.Minute),
 		queue:    make(chan job, queueSize),
 		scanned:  map[string]bool{},
 	}

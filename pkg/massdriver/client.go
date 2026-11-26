@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	semconv "go.opentelemetry.io/otel/semconv/v1.40.0"
+
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 )
 
@@ -48,7 +50,14 @@ func (c *Client) Do(ctx context.Context, query string, vars map[string]any, out 
 	if err != nil {
 		return err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Endpoint, bytes.NewReader(body))
+	opType, opName := operation(query)
+	spanName := "graphql"
+	if opName != "" {
+		spanName += " " + opName
+	}
+	spanCtx := automation.WithClientSpan(ctx, spanName,
+		semconv.GraphQLOperationTypeKey.String(opType), semconv.GraphQLOperationName(opName))
+	req, err := http.NewRequestWithContext(spanCtx, http.MethodPost, c.Endpoint, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -57,9 +66,9 @@ func (c *Client) Do(ctx context.Context, query string, vars map[string]any, out 
 
 	httpClient := c.HTTP
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = defaultHTTP
 	}
-	resp, err := c.send(ctx, httpClient, req, body, isQuery(query))
+	resp, err := c.send(ctx, httpClient, req, body, opType == "query")
 	if err != nil {
 		return err
 	}
@@ -124,16 +133,36 @@ func (c *Client) send(ctx context.Context, hc *http.Client, req *http.Request, b
 	}
 }
 
-// isQuery reports whether the operation is a query, which is safe to send again.
-func isQuery(op string) bool {
-	for _, line := range strings.Split(op, "\n") {
+var defaultHTTP = automation.HTTPClient(0)
+
+// operation returns the type (query, mutation, or subscription) and name of the first operation in doc. A
+// shorthand `{ ... }` is an unnamed query.
+func operation(doc string) (opType, name string) {
+	for _, line := range strings.Split(doc, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		return strings.HasPrefix(line, "query") || strings.HasPrefix(line, "{")
+		if strings.HasPrefix(line, "{") {
+			return "query", ""
+		}
+		if i := strings.IndexAny(line, "({@"); i >= 0 {
+			line = line[:i]
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			return "", ""
+		}
+		switch fields[0] {
+		case "query", "mutation", "subscription":
+			if len(fields) > 1 {
+				return fields[0], fields[1]
+			}
+			return fields[0], ""
+		}
+		return "", ""
 	}
-	return false
+	return "", ""
 }
 
 // JSONString encodes v for a `Map` input, which the V2 API takes as a JSON string.

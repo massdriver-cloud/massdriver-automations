@@ -73,7 +73,7 @@ type job struct {
 func New(cfg *Config, md *massdriver.Client) *Router {
 	return &Router{
 		routes: cfg.Routes,
-		http:   &http.Client{},
+		http:   automation.HTTPClient(0),
 		md:     md,
 		queue:  make(chan job, queueSize),
 		done:   &doneSet{seen: map[string]time.Time{}},

@@ -170,6 +170,13 @@ Each secret is set on the instance. Set only the secrets of the automations that
 | `GITHUB_DEPLOYMENTS_TOKEN` | github-deployments | `GITHUB_TOKEN` |
 | `RELEASE_NOTES_TEAMS_WEBHOOK_URL` | release-notes | `TEAMS_WEBHOOK_URL` |
 | `ROUTER_ENV` | router | Each key of the JSON object |
+| `OTEL_EXPORTER_OTLP_HEADERS` | every automation | `OTEL_EXPORTER_OTLP_HEADERS` |
+
+## Tracing
+
+Set **Tracing > OTLP endpoint** to send the traces of every automation to an OpenTelemetry collector over
+OTLP/HTTP. Each automation gets it as `OTEL_EXPORTER_OTLP_ENDPOINT`, and the `OTEL_EXPORTER_OTLP_HEADERS` secret as
+`OTEL_EXPORTER_OTLP_HEADERS`. See [Tracing](../README.md#tracing).
 
 ## Event destinations
 

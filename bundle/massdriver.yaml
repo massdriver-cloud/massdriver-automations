@@ -404,6 +404,20 @@ params:
           $md.immutable: true
         attributes: *attributes
 
+    otel:
+      type: object
+      title: Tracing
+      description: >-
+        Sends OpenTelemetry traces of every automation to an OTLP endpoint. Empty turns tracing off. Set the
+        `OTEL_EXPORTER_OTLP_HEADERS` secret when the endpoint needs credentials.
+      properties:
+        endpoint:
+          type: string
+          title: OTLP endpoint
+          description: >-
+            The OTLP/HTTP base URL of a collector, such as `http://otel-collector.observability:4318`. Each
+            automation sends spans to `<endpoint>/v1/traces`.
+
 dependencies:
   kubernetes_cluster:
     resource_type: massdriver-kubernetes-cluster
@@ -455,6 +469,11 @@ app:
       description: >-
         A JSON object of environment variables for routes, such as `{"PAGERDUTY_ROUTING_KEY": "..."}`.
       json: true
+    OTEL_EXPORTER_OTLP_HEADERS:
+      title: OTLP headers
+      description: >-
+        Headers for the OTLP endpoint, as `key=value` pairs separated by commas, such as
+        `authorization=Bearer abc123`.
 
 ui:
   ui:order:
@@ -472,6 +491,7 @@ ui:
     - router
     - sandbox_on_join
     - statuspage
+    - otel
     - "*"
   image:
     ui:order: [repository, tag]
@@ -552,3 +572,5 @@ ui:
       ui:widget: textarea
       ui:options:
         rows: 16
+  otel:
+    ui:order: [endpoint]

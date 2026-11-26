@@ -86,6 +86,44 @@ The same record as text. In color, the level and the `status` value are green, a
 22:05:42.539 INF request automation=router version=v1.4.0 method=POST path=/hooks/massdriver status=204 duration_ms=10.42 bytes=0 event_id=evt-local-1 event_type=deployment.completed
 ```
 
+### Tracing
+
+Every automation can send [OpenTelemetry](https://opentelemetry.io) traces to an OTLP endpoint. Tracing is off until
+`OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set.
+
+| Variable | Default | |
+|---|---|---|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | | The base URL of an OTLP collector, such as `http://otel-collector:4318`. Spans go to `<endpoint>/v1/traces`. |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | | The full URL for spans, in place of the base URL. |
+| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | `http/protobuf` or `grpc`. With `grpc`, the endpoint is the collector's gRPC port, such as `http://otel-collector:4317`. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | | Headers for the collector, such as `authorization=Bearer abc123`. |
+| `OTEL_SERVICE_NAME` | `massdriver-automations` | |
+| `OTEL_RESOURCE_ATTRIBUTES` | | More resource attributes, such as `deployment.environment.name=prod`. |
+
+The other standard `OTEL_*` variables of the OTLP exporter, the batch span processor, and the sampler also apply.
+`OTEL_SDK_DISABLED=true` or `OTEL_TRACES_EXPORTER=none` turns tracing off. Each span has the resource attributes
+`service.name`, `service.version`, and `automation`.
+
+The traces have these spans:
+
+- One server span for each request, such as `POST /hooks/massdriver` or `GET /`, with `http.request.method`,
+  `http.route`, and `http.response.status_code`. `/healthz` has none. The span of an event also has
+  `cloudevents.event_id`, `cloudevents.event_type`, and `cloudevents.event_subject`. A handler error marks the span
+  as failed.
+- One client span for each outgoing HTTP request: to the Massdriver API, Slack, GitHub, Splunk, Datadog, Teams, and
+  the `http` steps of router. A Massdriver API call is named for its operation, such as `graphql Groups`, and a
+  Slack Web API call for its method, such as `slack chat.postMessage`. Other calls are named `<method> <host>`.
+  `url.full` is the scheme and host only, and spans never hold variables, bodies, or headers.
+
+The span of an event continues the trace in the event's `traceparent` and `tracestate` attributes (the
+[CloudEvents distributed tracing extension](https://github.com/cloudevents/spec/blob/main/cloudevents/extensions/distributed-tracing.md)),
+then in a `traceparent` header, and otherwise starts a trace. Massdriver does not send these yet
+([massdriver#3807](https://github.com/massdriver-cloud/massdriver/issues/3807)). Each outgoing request sends a
+`traceparent` header. Work that an automation starts after it responds, from `context.WithoutCancel(ctx)`, stays in
+the trace of its event.
+
+While a span is active, log records also have `trace_id` and `span_id`.
+
 ## Slack
 
 Create one Slack app for all of the automations:
@@ -246,6 +284,7 @@ type Automation interface {
 - Read settings with `automation.LoadConfig(&cfg)`. It decodes the file at `CONFIG_FILE` and refuses unknown keys.
   Give the config a `Validate() error` method to check it and fill its defaults. Read only credentials and
   deployment wiring from the environment.
+- Call other services with `automation.HTTPClient(timeout)`, so the calls are in the event's trace.
 - `pkg/slack` posts to Slack with the bot token or the webhook. Give the config a `slack` section of type
   `slack.Config`.
 - `pkg/massdriver` calls the V2 GraphQL API. Put each operation in a `.graphql` file under `queries/` and load it

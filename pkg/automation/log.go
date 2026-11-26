@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/lmittmann/tint"
+	"go.opentelemetry.io/otel/trace"
 	"golang.org/x/term"
 )
 
@@ -100,16 +101,50 @@ type loggerKey struct{}
 
 // WithLogger returns a copy of ctx that carries l. Logger(ctx) returns it.
 func WithLogger(ctx context.Context, l *slog.Logger) context.Context {
+	// The trace ids belong to the span in the context where Logger is called, not to the one where l was stored.
+	if h, ok := l.Handler().(spanHandler); ok {
+		l = slog.New(h.base)
+	}
 	return context.WithValue(ctx, loggerKey{}, l)
 }
 
 // Logger returns the logger for ctx. In Handle it carries event_id and event_type. Work that outlives the request
-// keeps the logger when it starts from context.WithoutCancel(ctx). Without one, it is slog.Default().
+// keeps the logger when it starts from context.WithoutCancel(ctx). Without one, it is slog.Default(). When ctx has
+// a span, its records also carry trace_id and span_id.
 func Logger(ctx context.Context) *slog.Logger {
-	if l, ok := ctx.Value(loggerKey{}).(*slog.Logger); ok {
+	l, ok := ctx.Value(loggerKey{}).(*slog.Logger)
+	if !ok {
+		l = slog.Default()
+	}
+	sc := trace.SpanContextFromContext(ctx)
+	if !sc.IsValid() {
 		return l
 	}
-	return slog.Default()
+	base := l.Handler()
+	if h, ok := base.(spanHandler); ok {
+		base = h.base
+	}
+	return slog.New(spanHandler{
+		Handler: base.WithAttrs([]slog.Attr{
+			slog.String("trace_id", sc.TraceID().String()),
+			slog.String("span_id", sc.SpanID().String()),
+		}),
+		base: base,
+	})
+}
+
+// spanHandler writes trace_id and span_id, and keeps the handler without them so WithLogger can store that one.
+type spanHandler struct {
+	slog.Handler
+	base slog.Handler
+}
+
+func (h spanHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return spanHandler{Handler: h.Handler.WithAttrs(attrs), base: h.base.WithAttrs(attrs)}
+}
+
+func (h spanHandler) WithGroup(name string) slog.Handler {
+	return spanHandler{Handler: h.Handler.WithGroup(name), base: h.base.WithGroup(name)}
 }
 
 // RedactURL removes the path and query from the URL inside a *url.Error. The net/http client puts the full request

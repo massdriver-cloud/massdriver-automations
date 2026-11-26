@@ -58,14 +58,16 @@ var Definition = automation.Definition{
 			sinks = append(sinks, NewS3Sink(*cfg.S3, awsCfg))
 		}
 		if cfg.Splunk != nil {
-			sinks = append(sinks, &SplunkSink{cfg: *cfg.Splunk, http: http.DefaultClient})
+			sinks = append(sinks, &SplunkSink{cfg: *cfg.Splunk, http: httpClient})
 		}
 		if cfg.Datadog != nil {
-			sinks = append(sinks, &DatadogSink{cfg: *cfg.Datadog, http: http.DefaultClient})
+			sinks = append(sinks, &DatadogSink{cfg: *cfg.Datadog, http: httpClient})
 		}
 		return New(sinks), nil
 	},
 }
+
+var httpClient = automation.HTTPClient(0)
 
 // Config is the config file of audit-archiver. Each section that is set turns on its sink.
 type Config struct {

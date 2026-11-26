@@ -16,6 +16,7 @@ import (
 	"strings"
 	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/massdriver-cloud/massdriver-automations/automations"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
@@ -59,6 +60,23 @@ func run(name string) int {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	shutdownTracing, err := automation.StartTracing(ctx, name, version)
+	if err != nil {
+		log.Error("invalid tracing config", "err", err)
+		return 1
+	}
+	if automation.TracingConfigured() {
+		log.Info("tracing on")
+	}
+	defer func() {
+		// ctx is already done at shutdown; the flush needs its own deadline.
+		fctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracing(fctx); err != nil {
+			log.Warn("trace flush failed", "err", automation.RedactURL(err))
+		}
+	}()
 	if err := serve(ctx, name); err != nil {
 		var ce *automation.ConfigError
 		if errors.As(err, &ce) {

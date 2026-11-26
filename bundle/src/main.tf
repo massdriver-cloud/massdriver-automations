@@ -266,9 +266,16 @@ locals {
 
   enabled = { for name, a in local.automations : name => a if a.enabled }
 
+  otel_env = {
+    OTEL_EXPORTER_OTLP_ENDPOINT = try(var.otel.endpoint, null)
+    OTEL_EXPORTER_OTLP_HEADERS  = lookup(local.secrets, "OTEL_EXPORTER_OTLP_HEADERS", "")
+  }
+
   # Unset settings are left out, so each automation uses its own default.
   settings = {
-    for name, a in local.enabled : name => { for k, v in a.env : k => tostring(v) if v != null && v != "" }
+    for name, a in local.enabled : name => {
+      for k, v in merge(a.env, local.otel_env) : k => tostring(v) if v != null && v != ""
+    }
   }
 
   env = {
