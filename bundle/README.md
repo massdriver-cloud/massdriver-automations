@@ -9,6 +9,8 @@ the bundle creates:
 - a Massdriver event destination that sends events to `https://<name>.<domain>/hooks/massdriver`, with the event
   types, attributes, and condition from the automation's README
 - for drift, freeze-guard, and statuspage, a PersistentVolumeClaim for `STATE_DIR`
+- for statuspage with `output_dir` in its config, a PersistentVolumeClaim `<instance>-statuspage-site`, mounted
+  writable at `output_dir`
 - for router, a ConfigMap with its **Scripts**, mounted as executables in `/scripts`
 
 The signing secret of each event destination goes into the automation's Secret as `MASSDRIVER_SIGNING_SECRET`.
@@ -139,6 +141,17 @@ condition. Each route filters with its own `match` and `when`.
 **Event attributes** on an automation adds an attribute filter to its destination, such as
 `md-environment` = `prod`. audit-archiver, freeze-guard, github-deployments, router, and sandbox-on-join have none,
 because their events can have no attributes. release-notes always filters on `md-repo-artifact-type` = `bundle`.
+
+## Status page files
+
+When the statuspage config sets `output_dir`, such as `/srv/status`, the bundle mounts a volume of its own there,
+sized by **statuspage > Site storage (GiB)**. statuspage writes the static site to it after each change. The claim
+is separate from the history volume, so a pod that reads the site cannot change the history.
+
+To serve or copy the files, mount the claim `<instance>-statuspage-site` in another pod or Job in the same
+namespace, read-only. The claim is `ReadWriteOnce`: the other pod must run on the node of the statuspage pod, for
+example with a pod affinity on `app.kubernetes.io/name: statuspage`. A storage class with `ReadWriteMany` lifts that
+limit, but the bundle uses the default class.
 
 ## Limits
 

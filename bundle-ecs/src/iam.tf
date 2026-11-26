@@ -90,7 +90,10 @@ data "aws_iam_policy_document" "task" {
       condition {
         test     = "StringEquals"
         variable = "elasticfilesystem:AccessPointArn"
-        values   = [aws_efs_access_point.state[each.key].arn]
+        values = concat(
+          [aws_efs_access_point.state[each.key].arn],
+          each.key == "statuspage" ? aws_efs_access_point.site[*].arn : [],
+        )
       }
     }
   }

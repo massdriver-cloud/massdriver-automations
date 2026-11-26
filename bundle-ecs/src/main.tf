@@ -74,6 +74,10 @@ locals {
     ? "($env | IN(${join(", ", [for e in local.statuspage_environments : jsonencode(e)])}))"
   : "false")
 
+  # statuspage writes the static site to output_dir, when its config sets one.
+  statuspage_output_dir = try(trimsuffix(coalesce(local.statuspage_config.output_dir), "/"), "")
+  statuspage_site       = var.statuspage.enabled && local.statuspage_output_dir != ""
+
   statuspage_host = coalesce(var.statuspage.host, "statuspage.${local.domain}")
 
   audit_archiver_static_keys = lookup(local.secrets, "AUDIT_ARCHIVER_AWS_ACCESS_KEY_ID", "") != ""

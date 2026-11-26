@@ -76,3 +76,35 @@ resource "aws_efs_access_point" "state" {
     Name = local.names[each.key]
   }
 }
+
+resource "aws_efs_access_point" "site" {
+  count = local.statuspage_site ? 1 : 0
+
+  file_system_id = aws_efs_file_system.state[0].id
+
+  posix_user {
+    uid = 65532
+    gid = 65532
+  }
+
+  root_directory {
+    path = "/statuspage-site"
+    creation_info {
+      owner_uid   = 65532
+      owner_gid   = 65532
+      permissions = "0755"
+    }
+  }
+
+  tags = {
+    Name = "${local.names.statuspage}-site"
+  }
+
+  lifecycle {
+    precondition {
+      condition = (startswith(local.statuspage_output_dir, "/")
+      && !contains(["/", "/tmp", local.state_dir, local.config_dir, local.scripts_dir], local.statuspage_output_dir))
+      error_message = "statuspage output_dir must be an absolute path other than /, /tmp, ${local.state_dir}, ${local.config_dir}, and ${local.scripts_dir}."
+    }
+  }
+}

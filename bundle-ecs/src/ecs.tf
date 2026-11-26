@@ -121,6 +121,21 @@ resource "aws_ecs_task_definition" "main" {
     }
   }
 
+  dynamic "volume" {
+    for_each = each.key == "statuspage" && local.statuspage_site ? [1] : []
+    content {
+      name = "site"
+      efs_volume_configuration {
+        file_system_id     = aws_efs_file_system.state[0].id
+        transit_encryption = "ENABLED"
+        authorization_config {
+          access_point_id = aws_efs_access_point.site[0].id
+          iam             = "ENABLED"
+        }
+      }
+    }
+  }
+
   container_definitions = jsonencode([
     {
       name                   = "files"
@@ -175,6 +190,9 @@ resource "aws_ecs_task_definition" "main" {
           { sourceVolume = "scripts", containerPath = local.scripts_dir, readOnly = true },
         ],
         each.value.state ? [{ sourceVolume = "state", containerPath = local.state_dir, readOnly = false }] : [],
+        each.key == "statuspage" && local.statuspage_site ? [
+          { sourceVolume = "site", containerPath = local.statuspage_output_dir, readOnly = false }
+        ] : [],
       )
       linuxParameters = {
         capabilities       = { drop = ["ALL"] }

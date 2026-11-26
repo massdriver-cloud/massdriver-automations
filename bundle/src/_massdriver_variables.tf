@@ -156,6 +156,7 @@ variable "statuspage" {
     config          = string
     enabled         = bool
     host            = optional(string)
+    output_size_gi  = optional(number)
     storage_size_gi = number
   })
 }

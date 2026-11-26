@@ -17,6 +17,7 @@ bundle creates:
   types, attributes, and condition from the automation's README
 - for drift, freeze-guard, and statuspage, an EFS access point mounted at `STATE_DIR`, and a task role that can
   mount only that access point
+- for statuspage with `output_dir` in its config, a second EFS access point mounted writable at `output_dir`
 - for audit-archiver with an S3 bucket and no AWS key secrets, a task role that can write to the bucket
 
 The instance also gets one KMS key for the secrets, the logs, and the state, one security group for the tasks, and,
@@ -92,6 +93,12 @@ that freeze-guard created, and incident and uptime history. Each one gets an acc
 system, with the root directory `/<name>` and the user `65532`. EFS grows with the data, so there is no size
 setting. Decommissioning the instance deletes the file system and the state.
 
+When the statuspage config sets `output_dir`, such as `/srv/status`, statuspage writes the static site to an access
+point of its own on the same file system, with the root directory `/statuspage-site`. To serve or copy the files,
+mount that access point in another task or service, read-only. Its role needs `elasticfilesystem:ClientMount` on the
+file system with the condition `elasticfilesystem:AccessPointArn` set to the access point, and its security group
+needs to be allowed by the file system's security group on port 2049.
+
 ## Configuration
 
 Each automation has one **Configuration** parameter: the YAML of its config file, as its README and its
@@ -146,7 +153,7 @@ The roles that the bundle creates get only these permissions:
 | Role | Permissions |
 |---|---|
 | Task execution role, one for each automation | `logs:CreateLogStream` and `logs:PutLogEvents` on its log group, `secretsmanager:GetSecretValue` on its secret, and `kms:Decrypt` on the instance's key. When **Image > Repository** is an ECR repository, also `ecr:GetAuthorizationToken`, and pull on that repository. |
-| Task role of drift, freeze-guard, and statuspage | `elasticfilesystem:ClientMount` and `elasticfilesystem:ClientWrite` through its access point. |
+| Task role of drift, freeze-guard, and statuspage | `elasticfilesystem:ClientMount` and `elasticfilesystem:ClientWrite` through its access point, and for statuspage also through the site access point. |
 | Task role of audit-archiver | `s3:PutObject` on `<bucket>/<prefix>/*`, and `s3:PutObjectRetention` with `s3.object_lock`. |
 
 audit-archiver uses the task role when its config sets `s3.bucket` and no `s3.endpoint`, and the

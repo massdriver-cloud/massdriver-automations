@@ -402,6 +402,16 @@ params:
           minimum: 1
           maximum: 10
           $md.immutable: true
+        output_size_gi:
+          type: integer
+          title: Site storage (GiB)
+          description: >-
+            The volume mounted at `output_dir` when the configuration sets it. Other pods on the same node can
+            mount its claim, `<instance>-statuspage-site`, to serve or copy the files.
+          default: 1
+          minimum: 1
+          maximum: 10
+          $md.immutable: true
         attributes: *attributes
 
     otel:
@@ -567,7 +577,7 @@ ui:
       ui:options:
         rows: 12
   statuspage:
-    ui:order: [enabled, host, config, storage_size_gi, attributes]
+    ui:order: [enabled, host, config, storage_size_gi, output_size_gi, attributes]
     config:
       ui:widget: textarea
       ui:options:

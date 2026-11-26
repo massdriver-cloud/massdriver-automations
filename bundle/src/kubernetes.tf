@@ -56,6 +56,35 @@ resource "kubernetes_persistent_volume_claim_v1" "state" {
   wait_until_bound = false
 }
 
+resource "kubernetes_persistent_volume_claim_v1" "site" {
+  count = local.statuspage_site ? 1 : 0
+
+  metadata {
+    name      = "${local.names.statuspage}-site"
+    namespace = local.namespace
+    labels    = merge(local.labels, { "app.kubernetes.io/name" = "statuspage" })
+  }
+
+  spec {
+    access_modes = ["ReadWriteOnce"]
+    resources {
+      requests = {
+        storage = "${coalesce(var.statuspage.output_size_gi, 1)}Gi"
+      }
+    }
+  }
+
+  wait_until_bound = false
+
+  lifecycle {
+    precondition {
+      condition = (startswith(local.statuspage_output_dir, "/")
+      && !contains(["/", "/tmp", local.state_dir, local.config_dir], local.statuspage_output_dir))
+      error_message = "statuspage output_dir must be an absolute path other than /, /tmp, ${local.state_dir}, and ${local.config_dir}."
+    }
+  }
+}
+
 resource "kubernetes_deployment_v1" "main" {
   for_each = local.enabled
 
@@ -187,6 +216,14 @@ resource "kubernetes_deployment_v1" "main" {
               mount_path = local.state_dir
             }
           }
+
+          dynamic "volume_mount" {
+            for_each = each.key == "statuspage" && local.statuspage_site ? [1] : []
+            content {
+              name       = "site"
+              mount_path = local.statuspage_output_dir
+            }
+          }
         }
 
         volume {
@@ -221,6 +258,16 @@ resource "kubernetes_deployment_v1" "main" {
             name = "state"
             persistent_volume_claim {
               claim_name = kubernetes_persistent_volume_claim_v1.state[each.key].metadata[0].name
+            }
+          }
+        }
+
+        dynamic "volume" {
+          for_each = each.key == "statuspage" && local.statuspage_site ? [1] : []
+          content {
+            name = "site"
+            persistent_volume_claim {
+              claim_name = kubernetes_persistent_volume_claim_v1.site[0].metadata[0].name
             }
           }
         }
