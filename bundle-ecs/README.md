@@ -22,15 +22,12 @@ bundle creates:
 
 The instance also gets one KMS key for the secrets, the logs, and the state, one security group for the tasks, and,
 when an automation keeps state, an EFS file system with a mount target in each Availability Zone of the subnets.
-Each enabled automation also produces a
-[`massdriver-event-destination-https`](https://github.com/massdriver-cloud/massdriver-resource-types/tree/main/massdriver-event-destination-https)
-resource, `<automation>_destination` (such as `autodeploy_downstream_destination`), with the destination's ID,
-URL, signing secret, event types, attributes, and condition.
+The bundle produces no resources for other bundles.
 
 ## Requirements
 
-- The resource types `massdriver-service-account` and `massdriver-event-destination-https` installed in your
-  organization from [massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types).
+- The resource type `massdriver-service-account` installed in your organization from
+  [massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types).
 - An `aws-iam-role` dependency with `arn` and `token_level`. The provider assumes the role with the deployment's
   Massdriver identity token of that level, so the role's trust policy must accept it.
 - An `aws-ecs-cluster` dependency. This type is an example in

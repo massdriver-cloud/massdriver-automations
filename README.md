@@ -83,8 +83,7 @@ build provenance attestation. See [SECURITY.md](SECURITY.md) to verify one.
 
 ## Deploy
 
-Two Massdriver bundles run any set of the automations. For each one, they create an event destination and produce a
-`massdriver-event-destination-https` resource that holds it.
+Two Massdriver bundles run any set of the automations, and create one event destination for each:
 
 | Bundle | Runs on |
 |---|---|
@@ -99,18 +98,6 @@ bundle, install the official resource types from
 git clone https://github.com/massdriver-cloud/massdriver-resource-types.git
 cd massdriver-resource-types
 for type in massdriver-service-account massdriver-kubernetes-cluster; do
-  mass resource-type create "$type"
-  mass resource-type publish "$type"
-done
-```
-
-Before you publish a bundle, install the official resource types from
-[massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types) in your organization:
-
-```bash
-git clone https://github.com/massdriver-cloud/massdriver-resource-types.git
-cd massdriver-resource-types
-for type in massdriver-service-account massdriver-kubernetes-cluster massdriver-event-destination-https; do
   mass resource-type create "$type"
   mass resource-type publish "$type"
 done

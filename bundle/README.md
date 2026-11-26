@@ -14,15 +14,12 @@ the bundle creates:
 - for router, a ConfigMap with its **Scripts**, mounted as executables in `/scripts`
 
 The signing secret of each event destination goes into the automation's Secret as `MASSDRIVER_SIGNING_SECRET`.
-Each enabled automation also produces a
-[`massdriver-event-destination-https`](https://github.com/massdriver-cloud/massdriver-resource-types/tree/main/massdriver-event-destination-https)
-resource, `<automation>_destination` (such as `autodeploy_downstream_destination`), with the destination's ID,
-URL, signing secret, event types, attributes, and condition.
+The bundle produces no resources for other bundles.
 
 ## Requirements
 
-- The resource types `massdriver-service-account` and `massdriver-event-destination-https` installed in your
-  organization from [massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types), and `massdriver-kubernetes-cluster`.
+- The resource types `massdriver-service-account` and `massdriver-kubernetes-cluster` installed in your organization
+  from [massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types).
 - A [`massdriver-kubernetes-cluster`](https://github.com/massdriver-cloud/massdriver-resource-types/tree/main/massdriver-kubernetes-cluster) dependency. The bundle deploys
   into the namespace of that resource, or `default` when it has none. It does not create the namespace.
 - An ingress controller, and a wildcard DNS record for `*.<domain>` that points at it.
