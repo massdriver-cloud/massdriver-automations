@@ -91,6 +91,19 @@ Two Massdriver bundles run any set of the automations. For each one, they create
 | [massdriver-automations](bundle) | A Kubernetes cluster, with an ingress controller. |
 | [massdriver-automations-ecs](bundle-ecs) | Amazon ECS with Fargate, behind an Application Load Balancer. Its cluster type is an example in [examples/resource-types/aws-ecs-cluster](examples/resource-types/aws-ecs-cluster). |
 
+Each bundle creates its event destinations with a `massdriver-service-account` dependency. Before you publish a
+bundle, install the official resource types from
+[massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types) in your organization:
+
+```bash
+git clone https://github.com/massdriver-cloud/massdriver-resource-types.git
+cd massdriver-resource-types
+for type in massdriver-service-account massdriver-kubernetes-cluster; do
+  mass resource-type create "$type"
+  mass resource-type publish "$type"
+done
+```
+
 Before you publish a bundle, install the official resource types from
 [massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types) in your organization:
 
