@@ -29,6 +29,8 @@ The config file is YAML. [`config.example.yaml`](config.example.yaml) has every 
 
 | Key | Default | |
 |---|---|---|
+| `disk` | | Turns on the disk sink. |
+| `disk.dir` | | Required with `disk`. Events are written to `<dir>/YYYY/MM/DD/HH/<time>-<id>.json`. |
 | `s3` | | Turns on the S3 sink. |
 | `s3.bucket` | | Required with `s3`. |
 | `s3.region` | `AWS_REGION` | The region of the bucket. Use `auto` for Cloudflare R2. |

@@ -296,3 +296,29 @@ func TestExampleConfigLoads(t *testing.T) {
 		t.Fatalf("config = %+v", c)
 	}
 }
+
+func TestDiskSinkWritesTheRawEventOncePerID(t *testing.T) {
+	dir := t.TempDir()
+	sink := &DiskSink{dir: dir}
+	ev := automation.Event{ID: "4b0b5a8e", Time: time.Date(2026, 11, 24, 5, 54, 3, 482913000, time.UTC), Raw: []byte(`{"id":"4b0b5a8e"}`)}
+
+	if err := sink.Write(t.Context(), ev); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.Write(t.Context(), ev); err != nil {
+		t.Fatal(err)
+	}
+
+	hour := filepath.Join(dir, "2026", "11", "24", "05")
+	entries, err := os.ReadDir(hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "20261124T055403.482913Z-4b0b5a8e.json" {
+		t.Fatalf("files = %v", entries)
+	}
+	got, _ := os.ReadFile(filepath.Join(hour, entries[0].Name()))
+	if string(got) != `{"id":"4b0b5a8e"}` {
+		t.Fatalf("body = %s", got)
+	}
+}

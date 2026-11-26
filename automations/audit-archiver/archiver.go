@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +43,9 @@ var Definition = automation.Definition{
 			return nil, err
 		}
 		var sinks []Sink
+		if cfg.Disk != nil {
+			sinks = append(sinks, &DiskSink{dir: cfg.Disk.Dir})
+		}
 		if cfg.S3 != nil {
 			var opts []func(*awsconfig.LoadOptions) error
 			if cfg.S3.Region != "" {
@@ -64,9 +69,15 @@ var Definition = automation.Definition{
 
 // Config is the config file of audit-archiver. Each section that is set turns on its sink.
 type Config struct {
+	Disk    *DiskConfig    `yaml:"disk"`
 	S3      *S3Config      `yaml:"s3"`
 	Splunk  *SplunkConfig  `yaml:"splunk"`
 	Datadog *DatadogConfig `yaml:"datadog"`
+}
+
+// DiskConfig writes events under a directory, with the same layout as S3 keys.
+type DiskConfig struct {
+	Dir string `yaml:"dir"`
 }
 
 // S3Config selects the bucket and the retention of each object.
@@ -109,8 +120,11 @@ type DatadogConfig struct {
 
 // Validate checks the sinks and fills their defaults.
 func (c *Config) Validate() error {
-	if c.S3 == nil && c.Splunk == nil && c.Datadog == nil {
-		return errors.New("no sink configured: set s3, splunk, datadog, or more than one")
+	if c.Disk == nil && c.S3 == nil && c.Splunk == nil && c.Datadog == nil {
+		return errors.New("no sink configured: set disk, s3, splunk, datadog, or more than one")
+	}
+	if d := c.Disk; d != nil && d.Dir == "" {
+		return errors.New("disk.dir is required")
 	}
 	if s := c.S3; s != nil {
 		if s.Bucket == "" {
@@ -275,6 +289,38 @@ func NewS3Sink(cfg S3Config, awsCfg aws.Config) *S3Sink {
 }
 
 // Name is "s3".
+// DiskSink writes each event to a file.
+type DiskSink struct {
+	dir string
+}
+
+// Name names the sink in logs.
+func (d *DiskSink) Name() string { return "disk" }
+
+// Write stores the event body at <dir>/YYYY/MM/DD/HH/<time>-<id>.json.
+// The path depends only on the event, so a redelivered event overwrites the same file. The rename makes a
+// crash leave either the old file or the new one, never part of one.
+func (d *DiskSink) Write(_ context.Context, ev automation.Event) error {
+	t := ev.Time.UTC()
+	dir := filepath.Join(d.dir, t.Format("2006/01/02/15"))
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(ev.Raw); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), filepath.Join(dir, fmt.Sprintf("%s-%s.json", t.Format(keyTime), filepath.Base(ev.ID))))
+}
+
 func (s *S3Sink) Name() string { return "s3" }
 
 // The key depends only on the event, so a redelivered event lands on the same object.

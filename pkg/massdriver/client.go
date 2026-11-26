@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 )
@@ -58,15 +59,11 @@ func (c *Client) Do(ctx context.Context, query string, vars map[string]any, out 
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	resp, err := httpClient.Do(req)
+	resp, err := c.send(ctx, httpClient, req, body, isQuery(query))
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("graphql: HTTP %d: %s", resp.StatusCode, b)
-	}
 
 	var envelope struct {
 		Data   json.RawMessage `json:"data"`
@@ -88,6 +85,55 @@ func (c *Client) Do(ctx context.Context, query string, vars map[string]any, out 
 		return nil
 	}
 	return json.Unmarshal(envelope.Data, out)
+}
+
+// retryDelays are the waits between attempts of a query. A dropped connection (unexpected EOF, reset) or a
+// gateway error from a load balancer is usually gone on the next attempt.
+var retryDelays = []time.Duration{250 * time.Millisecond, time.Second}
+
+// send posts the request. Only queries are retried: a mutation that failed after it was sent may have run.
+func (c *Client) send(ctx context.Context, hc *http.Client, req *http.Request, body []byte, retry bool) (*http.Response, error) {
+	for attempt := 0; ; attempt++ {
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		resp, err := hc.Do(req)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			return resp, nil
+		}
+		transient := err != nil && ctx.Err() == nil
+		if err == nil {
+			transient = resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable ||
+				resp.StatusCode == http.StatusGatewayTimeout
+		}
+		if !retry || !transient || attempt >= len(retryDelays) {
+			if err != nil {
+				return nil, err
+			}
+			defer resp.Body.Close()
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			return nil, fmt.Errorf("graphql: HTTP %d: %s", resp.StatusCode, b)
+		}
+		if resp != nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(retryDelays[attempt]):
+		}
+	}
+}
+
+// isQuery reports whether the operation is a query, which is safe to send again.
+func isQuery(op string) bool {
+	for _, line := range strings.Split(op, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		return strings.HasPrefix(line, "query") || strings.HasPrefix(line, "{")
+	}
+	return false
 }
 
 // JSONString encodes v for a `Map` input, which the V2 API takes as a JSON string.

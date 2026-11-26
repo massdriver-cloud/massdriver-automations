@@ -2,6 +2,11 @@
 #
 # Each section that is set turns on its sink. Set at least one. Every event goes to every sink.
 
+# A local directory, for testing or a mounted volume. Files use the S3 key layout:
+# <dir>/YYYY/MM/DD/HH/<time>-<id>.json. A redelivered event overwrites its file.
+disk:
+  dir: /var/lib/audit-archiver
+
 # S3, or an S3-compatible store. Credentials come from the standard AWS sources: AWS_ACCESS_KEY_ID and
 # AWS_SECRET_ACCESS_KEY, a profile, web identity (IRSA, EKS Pod Identity), or the instance or task role.
 s3:
