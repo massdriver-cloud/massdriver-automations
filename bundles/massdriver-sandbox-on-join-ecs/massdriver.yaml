@@ -1,0 +1,203 @@
+name: massdriver-sandbox-on-join-ecs
+description: Forks a template environment for each person who joins a group, and removes it when they leave. Runs on Amazon
+  ECS with Fargate, with an event destination that sends it only the events it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/massdriver-sandbox-on-join-ecs
+version: 0.1.0
+steps:
+- path: src
+  provisioner: opentofu:1.10
+params:
+  required:
+  - image
+  - ingress
+  - logs
+  - config
+  properties:
+    image:
+      type: object
+      title: Image
+      required:
+      - repository
+      - tag
+      properties:
+        repository:
+          type: string
+          title: Repository
+          description: The automations image. bundle-scanner adds `-scanner` to the tag, and router adds `-scripts` when
+            it runs commands.
+          default: ghcr.io/massdriver-cloud/massdriver-automations
+        tag:
+          type: string
+          title: Tag
+          description: The image tag, such as `0.1.0`. Pin a version so that a redeploy runs the same code.
+          default: '0.1'
+          pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
+          message:
+            pattern: Must be a valid image tag.
+    ingress:
+      type: object
+      title: Ingress
+      required:
+      - dns_records
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Where the automation is served. Empty uses `sandbox-on-join.<domain of the cluster's hosted zone>`.
+            The load balancer's HTTPS listener needs a certificate for it. Massdriver sends events to `https://<host>/hooks/massdriver`.
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          message:
+            pattern: Must be a lowercase DNS name, such as drift.automations.acme.com.
+        dns_records:
+          type: boolean
+          title: Create a DNS record
+          description: Creates a CNAME record to the load balancer when the host is in the cluster's hosted zone.
+          default: true
+    logs:
+      type: object
+      title: Logs
+      required:
+      - retention_days
+      properties:
+        retention_days:
+          type: integer
+          title: Retention (days)
+          description: Days that CloudWatch Logs keeps the logs.
+          default: 90
+          enum:
+          - 1
+          - 3
+          - 5
+          - 7
+          - 14
+          - 30
+          - 60
+          - 90
+          - 120
+          - 150
+          - 180
+          - 365
+          - 400
+          - 545
+          - 731
+          - 1096
+          - 1827
+          - 2192
+          - 2557
+          - 2922
+          - 3288
+          - 3653
+    config:
+      type: object
+      title: Settings
+      required:
+      - sandboxes
+      properties:
+        sandboxes:
+          type: array
+          title: Rules
+          items:
+            type: object
+            title: Rule
+            required:
+            - group
+            - project
+            - environment
+            properties:
+              group:
+                type: string
+                title: Group
+                description: Each person who joins it gets a sandbox.
+                $md.list:
+                  resource: group
+              project:
+                type: string
+                title: Project
+                description: The project of the template. Forks go into the same project.
+                $md.list:
+                  resource: project
+              environment:
+                type: string
+                title: Template environment
+              deploy:
+                type: boolean
+                title: Deploy the fork after it is created
+                default: false
+              deleteAfterDecommission:
+                type: boolean
+                title: Delete the fork after its decommission, when the person leaves
+                default: false
+              copyEnvironmentDefaults:
+                type: boolean
+                title: Copy the template's environment defaults
+                default: false
+              copySecrets:
+                type: boolean
+                title: Copy the secrets of the template's instances
+                default: false
+              copyRemoteReferences:
+                type: boolean
+                title: Copy the template's remote references
+                default: false
+          minItems: 1
+    otel:
+      type: object
+      title: Tracing
+      description: Sends OpenTelemetry traces to an OTLP endpoint. Set the `OTEL_EXPORTER_OTLP_HEADERS` secret when the
+        endpoint needs credentials.
+      properties:
+        endpoint:
+          type: string
+          title: OTLP endpoint
+          description: The OTLP/HTTP base URL of a collector, such as `http://otel-collector.observability:4318`. Empty
+            turns tracing off.
+dependencies:
+  aws_authentication:
+    resource_type: aws-iam-role
+    required: true
+  ecs_cluster:
+    resource_type: aws-ecs-cluster
+    required: true
+  service_account:
+    resource_type: massdriver-service-account
+    required: true
+resources: {}
+app:
+  secrets:
+    OTEL_EXPORTER_OTLP_HEADERS:
+      title: OTLP headers
+      description: Headers for the OTLP endpoint, as `key=value` pairs separated by commas, such as `authorization=Bearer
+        abc123`.
+ui:
+  ui:order:
+  - image
+  - ingress
+  - logs
+  - config
+  - otel
+  - '*'
+  image:
+    ui:order:
+    - repository
+    - tag
+  ingress:
+    ui:order:
+    - host
+    - dns_records
+  logs:
+    ui:order:
+    - retention_days
+  config:
+    sandboxes:
+      ui:options:
+        itemTitle: '{{project}}-{{environment}}'
+      items:
+        ui:order:
+        - group
+        - project
+        - environment
+        - deploy
+        - deleteAfterDecommission
+        - copyEnvironmentDefaults
+        - copySecrets
+        - copyRemoteReferences

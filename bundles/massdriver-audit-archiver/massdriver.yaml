@@ -1,0 +1,310 @@
+name: massdriver-audit-archiver
+description: Archives every event, unchanged, to disk, S3, Splunk, or Datadog. Every event goes to every sink that is
+  on. Runs on a Kubernetes cluster, with an event destination that sends it only the events it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/massdriver-audit-archiver
+version: 0.1.0
+steps:
+- path: src
+  provisioner: opentofu:1.10
+params:
+  required:
+  - image
+  - ingress
+  - config
+  properties:
+    image:
+      type: object
+      title: Image
+      required:
+      - repository
+      - tag
+      properties:
+        repository:
+          type: string
+          title: Repository
+          description: The automations image. bundle-scanner adds `-scanner` to the tag, and router adds `-scripts` when
+            it runs commands.
+          default: ghcr.io/massdriver-cloud/massdriver-automations
+        tag:
+          type: string
+          title: Tag
+          description: The image tag, such as `0.1.0`. Pin a version so that a redeploy runs the same code.
+          default: '0.1'
+          pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
+          message:
+            pattern: Must be a valid image tag.
+    ingress:
+      type: object
+      title: Ingress
+      required:
+      - host
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Where the automation is served, such as `audit-archiver.automations.acme.com`. Point it at the
+            ingress controller. Massdriver sends events to `https://<host>/hooks/massdriver`.
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          message:
+            pattern: Must be a lowercase DNS name, such as drift.automations.acme.com.
+        class_name:
+          type: string
+          title: Ingress class
+          description: Empty uses the default class of the cluster.
+        cluster_issuer:
+          type: string
+          title: cert-manager ClusterIssuer
+          description: Issues a certificate for the host. Leave empty when TLS ends in front of the ingress controller,
+            or when you set a TLS secret.
+        tls_secret_name:
+          type: string
+          title: TLS secret
+          description: A Secret in the namespace with a certificate for the host. Ignored when a ClusterIssuer is set.
+    config:
+      type: object
+      title: Settings
+      properties:
+        s3:
+          type: object
+          title: S3
+          description: S3 or an S3-compatible store. Credentials come from the AWS secrets.
+          required:
+          - enabled
+          properties:
+            enabled:
+              type: boolean
+              title: Archive to S3
+              default: false
+          dependencies:
+            enabled:
+              oneOf:
+              - properties:
+                  enabled:
+                    const: false
+              - properties:
+                  enabled:
+                    const: true
+                  bucket:
+                    type: string
+                    title: Bucket
+                    examples:
+                    - acme-massdriver-audit
+                  region:
+                    type: string
+                    title: Region
+                    description: The region of the bucket. Use `auto` for Cloudflare R2.
+                    examples:
+                    - us-east-1
+                  prefix:
+                    type: string
+                    title: Key prefix
+                    description: The first part of each key.
+                    default: events
+                  endpoint:
+                    type: string
+                    title: Endpoint
+                    description: The URL of an S3-compatible store, such as MinIO or Cloudflare R2. Empty uses AWS.
+                    pattern: ^https?://[^\s]+$
+                    message:
+                      pattern: Must be a URL.
+                  object_lock_days:
+                    type: integer
+                    title: Object Lock retention (days)
+                    description: Retains each object for this many days. The bucket must have Object Lock turned on. 0
+                      sets no retention.
+                    default: 0
+                    minimum: 0
+                  object_lock_mode:
+                    type: string
+                    title: Object Lock mode
+                    oneOf:
+                    - const: COMPLIANCE
+                      title: Compliance
+                    - const: GOVERNANCE
+                      title: Governance
+                    default: COMPLIANCE
+                required:
+                - bucket
+                - region
+        splunk:
+          type: object
+          title: Splunk
+          description: A Splunk HTTP Event Collector. The `SPLUNK_HEC_TOKEN` secret holds the token.
+          required:
+          - enabled
+          properties:
+            enabled:
+              type: boolean
+              title: Archive to Splunk
+              default: false
+          dependencies:
+            enabled:
+              oneOf:
+              - properties:
+                  enabled:
+                    const: false
+              - properties:
+                  enabled:
+                    const: true
+                  url:
+                    type: string
+                    title: Collector URL
+                    examples:
+                    - https://splunk.example.com:8088
+                    pattern: ^https?://[^\s]+$
+                    message:
+                      pattern: Must be a URL.
+                  index:
+                    type: string
+                    title: Index
+                    description: Empty uses the default index of the token.
+                  source:
+                    type: string
+                    title: Source
+                    default: massdriver
+                  sourcetype:
+                    type: string
+                    title: Source type
+                    default: massdriver:cloudevent
+                required:
+                - url
+        datadog:
+          type: object
+          title: Datadog
+          description: The Datadog Logs intake. The `DD_API_KEY` secret holds the API key.
+          required:
+          - enabled
+          properties:
+            enabled:
+              type: boolean
+              title: Archive to Datadog
+              default: false
+          dependencies:
+            enabled:
+              oneOf:
+              - properties:
+                  enabled:
+                    const: false
+              - properties:
+                  enabled:
+                    const: true
+                  site:
+                    type: string
+                    title: Site
+                    description: Your Datadog site, such as datadoghq.eu or us5.datadoghq.com.
+                    default: datadoghq.com
+                  service:
+                    type: string
+                    title: Service
+                    default: massdriver
+                  tags:
+                    type: array
+                    title: Tags
+                    items:
+                      type: string
+                      title: Tag
+                      examples:
+                      - env:prod
+                    default: []
+                required: []
+        disk:
+          type: object
+          title: Disk
+          description: A directory in the container. Files are lost when the container restarts, so use it only to test.
+          required:
+          - enabled
+          properties:
+            enabled:
+              type: boolean
+              title: Archive to Disk
+              default: false
+          dependencies:
+            enabled:
+              oneOf:
+              - properties:
+                  enabled:
+                    const: false
+              - properties:
+                  enabled:
+                    const: true
+                  dir:
+                    type: string
+                    title: Directory
+                    default: /var/lib/audit-archiver
+                    pattern: ^/.+
+                required:
+                - dir
+    otel:
+      type: object
+      title: Tracing
+      description: Sends OpenTelemetry traces to an OTLP endpoint. Set the `OTEL_EXPORTER_OTLP_HEADERS` secret when the
+        endpoint needs credentials.
+      properties:
+        endpoint:
+          type: string
+          title: OTLP endpoint
+          description: The OTLP/HTTP base URL of a collector, such as `http://otel-collector.observability:4318`. Empty
+            turns tracing off.
+dependencies:
+  kubernetes_cluster:
+    resource_type: massdriver-kubernetes-cluster
+    required: true
+  service_account:
+    resource_type: massdriver-service-account
+    required: true
+resources: {}
+app:
+  secrets:
+    AWS_ACCESS_KEY_ID:
+      title: AWS access key ID
+    AWS_SECRET_ACCESS_KEY:
+      title: AWS secret access key
+    SPLUNK_HEC_TOKEN:
+      title: Splunk HEC token
+    DD_API_KEY:
+      title: Datadog API key
+    OTEL_EXPORTER_OTLP_HEADERS:
+      title: OTLP headers
+      description: Headers for the OTLP endpoint, as `key=value` pairs separated by commas, such as `authorization=Bearer
+        abc123`.
+ui:
+  ui:order:
+  - image
+  - ingress
+  - config
+  - otel
+  - '*'
+  image:
+    ui:order:
+    - repository
+    - tag
+  ingress:
+    ui:order:
+    - host
+    - class_name
+    - cluster_issuer
+    - tls_secret_name
+  config:
+    ui:order:
+    - s3
+    - splunk
+    - datadog
+    - disk
+    s3:
+      ui:order:
+      - enabled
+      - '*'
+    splunk:
+      ui:order:
+      - enabled
+      - '*'
+    datadog:
+      ui:order:
+      - enabled
+      - '*'
+      tags:
+        ui:field: tagInput
+    disk:
+      ui:order:
+      - enabled
+      - '*'

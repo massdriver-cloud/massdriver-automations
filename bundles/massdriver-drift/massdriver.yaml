@@ -1,0 +1,310 @@
+name: massdriver-drift
+description: Plans the instances of each check on a schedule, and alerts Slack when the cloud no longer matches the last
+  deployment. Set the `DRIFT_RUN_TOKEN` secret to start checks with `POST https://<host>/drift/run?check=<name>`. Runs
+  on a Kubernetes cluster, with an event destination that sends it only the events it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/massdriver-drift
+version: 0.1.0
+steps:
+- path: src
+  provisioner: opentofu:1.10
+params:
+  required:
+  - image
+  - ingress
+  - config
+  - storage_size_gi
+  - attributes
+  properties:
+    image:
+      type: object
+      title: Image
+      required:
+      - repository
+      - tag
+      properties:
+        repository:
+          type: string
+          title: Repository
+          description: The automations image. bundle-scanner adds `-scanner` to the tag, and router adds `-scripts` when
+            it runs commands.
+          default: ghcr.io/massdriver-cloud/massdriver-automations
+        tag:
+          type: string
+          title: Tag
+          description: The image tag, such as `0.1.0`. Pin a version so that a redeploy runs the same code.
+          default: '0.1'
+          pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
+          message:
+            pattern: Must be a valid image tag.
+    ingress:
+      type: object
+      title: Ingress
+      required:
+      - host
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Where the automation is served, such as `drift.automations.acme.com`. Point it at the ingress controller.
+            Massdriver sends events to `https://<host>/hooks/massdriver`.
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          message:
+            pattern: Must be a lowercase DNS name, such as drift.automations.acme.com.
+        class_name:
+          type: string
+          title: Ingress class
+          description: Empty uses the default class of the cluster.
+        cluster_issuer:
+          type: string
+          title: cert-manager ClusterIssuer
+          description: Issues a certificate for the host. Leave empty when TLS ends in front of the ingress controller,
+            or when you set a TLS secret.
+        tls_secret_name:
+          type: string
+          title: TLS secret
+          description: A Secret in the namespace with a certificate for the host. Ignored when a ClusterIssuer is set.
+    config:
+      type: object
+      title: Settings
+      required:
+      - checks
+      properties:
+        slack:
+          type: object
+          title: Slack
+          properties:
+            channel:
+              type: string
+              title: Channel
+              description: The channel for checks that do not name their own. Empty writes alerts to the logs only.
+              pattern: ^([#@]?[a-z0-9._-]+|[CG][A-Z0-9]+)$
+              message:
+                pattern: 'Must be a channel name, such as #infra, or a channel ID.'
+        checks:
+          type: array
+          title: Checks
+          items:
+            type: object
+            title: Check
+            required:
+            - name
+            - match
+            - mode
+            - resolve_with
+            properties:
+              name:
+                type: string
+                title: Name
+                description: Unique. Alerts and `POST /drift/run?check=<name>` use it.
+                pattern: ^[a-z0-9][a-z0-9-]*$
+                message:
+                  pattern: Must be lowercase letters, numbers, and hyphens.
+              match:
+                type: object
+                title: Instance attributes
+                description: Effective attributes of the instances to plan. Separate values with commas to match any of
+                  them, such as `api, web`.
+                default: {}
+                additionalProperties:
+                  type: string
+              schedule:
+                type: string
+                title: Schedule
+                description: Standard cron (minute, hour, day of month, month, day of week), or `@daily`, `@hourly`, `@every
+                  6h`. Empty runs the check only from `POST /drift/run`.
+                examples:
+                - 0 6 * * *
+              timezone:
+                type: string
+                title: Time zone
+                description: The time zone of the schedule.
+                default: UTC
+                examples:
+                - America/New_York
+                pattern: ^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$
+                message:
+                  pattern: Must be an IANA time zone, such as America/New_York or UTC.
+              mode:
+                type: string
+                title: When drift is found
+                oneOf:
+                - const: detect
+                  title: Alert only
+                - const: propose
+                  title: Propose a deployment that removes it
+                - const: resolve
+                  title: Deploy now to remove it
+                default: detect
+              resolve_with:
+                type: string
+                title: Restore
+                oneOf:
+                - const: deployed
+                  title: The last completed deployment
+                - const: saved
+                  title: The saved configuration, with the current bundle version
+                default: deployed
+              max_concurrent:
+                type: integer
+                title: Plans at once
+                description: The rest wait in a queue.
+                default: 5
+                minimum: 1
+                maximum: 50
+              notify_clean:
+                type: boolean
+                title: Also post instances without drift
+                default: false
+              summary:
+                type: boolean
+                title: Post totals when the run finishes
+                default: false
+              slack:
+                type: object
+                title: Slack
+                properties:
+                  channel:
+                    type: string
+                    title: Channel
+                    description: Replaces the default channel for this check.
+                    pattern: ^([#@]?[a-z0-9._-]+|[CG][A-Z0-9]+)$
+                    message:
+                      pattern: 'Must be a channel name, such as #infra, or a channel ID.'
+              patterns:
+                type: object
+                title: Plan log patterns
+                description: Regular expressions (Go RE2) that read the plan logs. Change them only for a provisioner
+                  whose plan output differs.
+                properties:
+                  clean:
+                    type: string
+                    title: No changes
+                    default: No changes\.
+                  drift:
+                    type: string
+                    title: Drift
+                    default: 'Plan: \d+ to \w+(?:, \d+ to \w+)*'
+                  resource:
+                    type: string
+                    title: Changed resource
+                    default: (?m)^\s*# \S+.* (?:will be|must be) .*$
+          minItems: 1
+          default:
+          - name: prod-nightly
+            schedule: 0 6 * * *
+            timezone: UTC
+            match:
+              md-environment: prod
+            mode: detect
+            resolve_with: deployed
+        massdriver:
+          type: object
+          title: Massdriver UI
+          properties:
+            app_url:
+              type: string
+              title: App URL
+              description: The Massdriver UI, for the links in messages. Empty uses https://app.massdriver.cloud.
+              pattern: ^https?://[^\s]+$
+              message:
+                pattern: Must be a URL.
+    storage_size_gi:
+      type: integer
+      title: State storage (GiB)
+      description: The volume for the plans in progress and the queues.
+      default: 1
+      minimum: 1
+      maximum: 10
+      $md.immutable: true
+    attributes:
+      type: object
+      title: Event attributes
+      description: Attribute values that an event's entity must have, such as `md-environment` = `prod`. Empty sends events
+        of any attributes.
+      default: {}
+      additionalProperties:
+        type: string
+    otel:
+      type: object
+      title: Tracing
+      description: Sends OpenTelemetry traces to an OTLP endpoint. Set the `OTEL_EXPORTER_OTLP_HEADERS` secret when the
+        endpoint needs credentials.
+      properties:
+        endpoint:
+          type: string
+          title: OTLP endpoint
+          description: The OTLP/HTTP base URL of a collector, such as `http://otel-collector.observability:4318`. Empty
+            turns tracing off.
+dependencies:
+  kubernetes_cluster:
+    resource_type: massdriver-kubernetes-cluster
+    required: true
+  service_account:
+    resource_type: massdriver-service-account
+    required: true
+resources: {}
+app:
+  secrets:
+    SLACK_BOT_TOKEN:
+      title: Slack bot token
+      description: The `xoxb-` token of the Slack app. Posts go to the channels in the settings.
+    SLACK_WEBHOOK_URL:
+      title: Slack webhook URL
+      description: An incoming webhook, for a workspace without the Slack app. Every post goes to its one channel. Ignored
+        when the bot token is set.
+    DRIFT_RUN_TOKEN:
+      title: Run token
+      description: 'Callers of `POST /drift/run` send it as `Authorization: Bearer <token>`.'
+    OTEL_EXPORTER_OTLP_HEADERS:
+      title: OTLP headers
+      description: Headers for the OTLP endpoint, as `key=value` pairs separated by commas, such as `authorization=Bearer
+        abc123`.
+ui:
+  ui:order:
+  - image
+  - ingress
+  - config
+  - storage_size_gi
+  - attributes
+  - otel
+  - '*'
+  image:
+    ui:order:
+    - repository
+    - tag
+  ingress:
+    ui:order:
+    - host
+    - class_name
+    - cluster_issuer
+    - tls_secret_name
+  config:
+    ui:order:
+    - slack
+    - checks
+    - massdriver
+    checks:
+      ui:options:
+        itemTitle: '{{name}}'
+      items:
+        ui:order:
+        - name
+        - match
+        - schedule
+        - timezone
+        - mode
+        - resolve_with
+        - slack
+        - notify_clean
+        - summary
+        - max_concurrent
+        - patterns
+        schedule:
+          ui:placeholder: 0 6 * * *
+        mode:
+          ui:widget: radio
+        resolve_with:
+          ui:widget: radio
+  attributes:
+    ui:options:
+      addButtonText: Add attribute

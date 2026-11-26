@@ -1,0 +1,193 @@
+name: massdriver-bundle-scanner
+description: Scans each new bundle version with Trivy and Checkov, and posts the results. Runs on a Kubernetes cluster,
+  with an event destination that sends it only the events it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/massdriver-bundle-scanner
+version: 0.1.0
+steps:
+- path: src
+  provisioner: opentofu:1.10
+params:
+  required:
+  - image
+  - ingress
+  - config
+  - attributes
+  properties:
+    image:
+      type: object
+      title: Image
+      required:
+      - repository
+      - tag
+      properties:
+        repository:
+          type: string
+          title: Repository
+          description: The automations image. bundle-scanner adds `-scanner` to the tag, and router adds `-scripts` when
+            it runs commands.
+          default: ghcr.io/massdriver-cloud/massdriver-automations
+        tag:
+          type: string
+          title: Tag
+          description: The image tag, such as `0.1.0`. Pin a version so that a redeploy runs the same code.
+          default: '0.1'
+          pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
+          message:
+            pattern: Must be a valid image tag.
+    ingress:
+      type: object
+      title: Ingress
+      required:
+      - host
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Where the automation is served, such as `bundle-scanner.automations.acme.com`. Point it at the
+            ingress controller. Massdriver sends events to `https://<host>/hooks/massdriver`.
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          message:
+            pattern: Must be a lowercase DNS name, such as drift.automations.acme.com.
+        class_name:
+          type: string
+          title: Ingress class
+          description: Empty uses the default class of the cluster.
+        cluster_issuer:
+          type: string
+          title: cert-manager ClusterIssuer
+          description: Issues a certificate for the host. Leave empty when TLS ends in front of the ingress controller,
+            or when you set a TLS secret.
+        tls_secret_name:
+          type: string
+          title: TLS secret
+          description: A Secret in the namespace with a certificate for the host. Ignored when a ClusterIssuer is set.
+    config:
+      type: object
+      title: Settings
+      properties:
+        scanners:
+          type: array
+          title: Scanners
+          items:
+            type: string
+            enum:
+            - trivy
+            - checkov
+          uniqueItems: true
+          minItems: 1
+          default:
+          - trivy
+          - checkov
+        fail_severity:
+          type: string
+          title: Fail at
+          description: A version fails when a finding has this severity or higher.
+          oneOf:
+          - const: CRITICAL
+            title: Critical
+          - const: HIGH
+            title: High or higher
+          - const: MEDIUM
+            title: Medium or higher
+          - const: LOW
+            title: Low or higher
+          - const: UNKNOWN
+            title: Any finding
+          default: HIGH
+        result_attribute:
+          type: string
+          title: Result attribute
+          description: A repo custom attribute that records the result as `passed` or `failed`. Empty sets no attribute.
+          examples:
+          - iac_scan
+        timeout:
+          type: string
+          title: Timeout
+          description: The longest time for one bundle version.
+          default: 10m
+          pattern: ^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$
+          message:
+            pattern: Must be a duration, such as 90s, 10m, or 1h30m.
+        slack:
+          type: object
+          title: Slack
+          properties:
+            channel:
+              type: string
+              title: Channel
+              description: The channel for results. Empty posts nothing.
+              pattern: ^([#@]?[a-z0-9._-]+|[CG][A-Z0-9]+)$
+              message:
+                pattern: 'Must be a channel name, such as #infra, or a channel ID.'
+    attributes:
+      type: object
+      title: Event attributes
+      description: Attribute values that an event's entity must have, such as `md-environment` = `prod`. Empty sends events
+        of any attributes.
+      default: {}
+      additionalProperties:
+        type: string
+    otel:
+      type: object
+      title: Tracing
+      description: Sends OpenTelemetry traces to an OTLP endpoint. Set the `OTEL_EXPORTER_OTLP_HEADERS` secret when the
+        endpoint needs credentials.
+      properties:
+        endpoint:
+          type: string
+          title: OTLP endpoint
+          description: The OTLP/HTTP base URL of a collector, such as `http://otel-collector.observability:4318`. Empty
+            turns tracing off.
+dependencies:
+  kubernetes_cluster:
+    resource_type: massdriver-kubernetes-cluster
+    required: true
+  service_account:
+    resource_type: massdriver-service-account
+    required: true
+resources: {}
+app:
+  secrets:
+    SLACK_BOT_TOKEN:
+      title: Slack bot token
+      description: The `xoxb-` token of the Slack app. Posts go to the channels in the settings.
+    SLACK_WEBHOOK_URL:
+      title: Slack webhook URL
+      description: An incoming webhook, for a workspace without the Slack app. Every post goes to its one channel. Ignored
+        when the bot token is set.
+    OTEL_EXPORTER_OTLP_HEADERS:
+      title: OTLP headers
+      description: Headers for the OTLP endpoint, as `key=value` pairs separated by commas, such as `authorization=Bearer
+        abc123`.
+ui:
+  ui:order:
+  - image
+  - ingress
+  - config
+  - attributes
+  - otel
+  - '*'
+  image:
+    ui:order:
+    - repository
+    - tag
+  ingress:
+    ui:order:
+    - host
+    - class_name
+    - cluster_issuer
+    - tls_secret_name
+  config:
+    ui:order:
+    - scanners
+    - fail_severity
+    - slack
+    - result_attribute
+    - timeout
+    scanners:
+      ui:widget: checkboxes
+      ui:options:
+        inline: true
+  attributes:
+    ui:options:
+      addButtonText: Add attribute

@@ -1,0 +1,521 @@
+name: massdriver-statuspage
+description: Serves a public status page from the alarms, instances, and deployments of the environments on its pages.
+  Runs on a Kubernetes cluster, with an event destination that sends it only the events it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/massdriver-statuspage
+version: 0.1.0
+steps:
+- path: src
+  provisioner: opentofu:1.10
+params:
+  required:
+  - image
+  - ingress
+  - config
+  - storage_size_gi
+  - site_size_gi
+  - attributes
+  properties:
+    image:
+      type: object
+      title: Image
+      required:
+      - repository
+      - tag
+      properties:
+        repository:
+          type: string
+          title: Repository
+          description: The automations image. bundle-scanner adds `-scanner` to the tag, and router adds `-scripts` when
+            it runs commands.
+          default: ghcr.io/massdriver-cloud/massdriver-automations
+        tag:
+          type: string
+          title: Tag
+          description: The image tag, such as `0.1.0`. Pin a version so that a redeploy runs the same code.
+          default: '0.1'
+          pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
+          message:
+            pattern: Must be a valid image tag.
+    ingress:
+      type: object
+      title: Ingress
+      required:
+      - host
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Where the automation is served, such as `statuspage.automations.acme.com`. Point it at the ingress
+            controller. Massdriver sends events to `https://<host>/hooks/massdriver`.
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          message:
+            pattern: Must be a lowercase DNS name, such as drift.automations.acme.com.
+        class_name:
+          type: string
+          title: Ingress class
+          description: Empty uses the default class of the cluster.
+        cluster_issuer:
+          type: string
+          title: cert-manager ClusterIssuer
+          description: Issues a certificate for the host. Leave empty when TLS ends in front of the ingress controller,
+            or when you set a TLS secret.
+        tls_secret_name:
+          type: string
+          title: TLS secret
+          description: A Secret in the namespace with a certificate for the host. Ignored when a ClusterIssuer is set.
+    config:
+      type: object
+      title: Settings
+      required:
+      - site
+      - pages
+      properties:
+        site:
+          type: object
+          title: Site
+          required:
+          - title
+          properties:
+            title:
+              type: string
+              title: Title
+              default: Status
+            base_url:
+              type: string
+              title: Base URL
+              description: Absolute URLs in the Atom feed and `status.json` start with this.
+              examples:
+              - https://status.acme.com
+              pattern: ^https?://[^\s]+$
+              message:
+                pattern: Must be a URL.
+            logo:
+              type: string
+              title: Logo URL
+              pattern: ^https?://[^\s]+$
+              message:
+                pattern: Must be a URL.
+            accent_color:
+              type: string
+              title: Accent color
+              default: '#2563eb'
+              pattern: ^#[0-9a-fA-F]{3,8}$
+              message:
+                pattern: 'Must be a hex color, such as #2563eb.'
+            timezone:
+              type: string
+              title: Time zone
+              description: Dates and the day boundaries of the uptime bars use this zone.
+              default: UTC
+              examples:
+              - America/New_York
+              pattern: ^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$
+              message:
+                pattern: Must be an IANA time zone, such as America/New_York or UTC.
+            show_alarm_details:
+              type: boolean
+              title: Show alarm names and messages
+              description: They can name internal resources.
+              default: false
+            footer_links:
+              type: array
+              title: Footer links
+              items:
+                type: object
+                title: Link
+                required:
+                - title
+                - url
+                properties:
+                  title:
+                    type: string
+                    title: Title
+                  url:
+                    type: string
+                    title: URL
+                    pattern: ^https?://[^\s]+$
+                    message:
+                      pattern: Must be a URL.
+              default: []
+        pages:
+          type: array
+          title: Pages
+          items:
+            type: object
+            title: Page
+            required:
+            - title
+            - environments
+            properties:
+              title:
+                type: string
+                title: Title
+              slug:
+                type: string
+                title: Slug
+                description: The page's path. The first page is also served at `/`.
+                pattern: ^[a-z0-9][a-z0-9-]*$
+                message:
+                  pattern: Must be lowercase letters, numbers, and hyphens.
+              description:
+                type: string
+                title: Description
+              environments:
+                type: array
+                title: Environments
+                items:
+                  type: object
+                  title: Environment
+                  required:
+                  - id
+                  - title
+                  properties:
+                    id:
+                      type: string
+                      title: Environment
+                      description: The environment as `<project>-<environment>`, such as `api-prod`.
+                      pattern: ^[a-z0-9]+-[a-z0-9]+$
+                      message:
+                        pattern: Must be <project>-<environment>, such as api-prod.
+                    title:
+                      type: string
+                      title: Title
+                    description:
+                      type: string
+                      title: Description
+                    components:
+                      type: array
+                      title: Rows
+                      description: Rows appear in this order. Empty shows one row for each instance.
+                      items:
+                        type: object
+                        title: Row
+                        required:
+                        - title
+                        - match
+                        properties:
+                          title:
+                            type: string
+                            title: Title
+                          description:
+                            type: string
+                            title: Description
+                          match:
+                            type: object
+                            title: Instance attributes
+                            description: The instances in this row, such as `md-component` = `api`. An instance belongs
+                              to the first row it matches.
+                            default: {}
+                            additionalProperties:
+                              type: string
+                          impact:
+                            type: string
+                            title: Impact
+                            description: How a firing alarm of an instance in this row shows.
+                            oneOf:
+                            - const: degraded
+                              title: Degraded performance
+                            - const: partial_outage
+                              title: Partial outage
+                            - const: major_outage
+                              title: Major outage
+                            default: major_outage
+                      default: []
+                minItems: 1
+          minItems: 1
+          default:
+          - title: Status
+            slug: status
+            environments:
+            - id: api-prod
+              title: Production
+              components: []
+        history_days:
+          type: integer
+          title: History (days)
+          description: Days of uptime bars and incident history.
+          default: 90
+          minimum: 1
+          maximum: 365
+        min_duration:
+          type: string
+          title: Minimum alarm duration
+          description: An alarm must fire this long to count as an incident.
+          default: 2m
+          pattern: ^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$
+          message:
+            pattern: Must be a duration, such as 90s, 10m, or 1h30m.
+        deploys_as_maintenance:
+          type: boolean
+          title: Show deployments as maintenance
+          description: A running deployment shows its row as under maintenance.
+          default: true
+        announcements:
+          type: array
+          title: Announcements
+          items:
+            type: object
+            title: Announcement
+            required:
+            - message
+            - level
+            properties:
+              message:
+                type: string
+                title: Message
+              level:
+                type: string
+                title: Level
+                oneOf:
+                - const: info
+                  title: Info
+                - const: warning
+                  title: Warning
+                - const: critical
+                  title: Critical
+                default: info
+              url:
+                type: string
+                title: Link
+                pattern: ^https?://[^\s]+$
+                message:
+                  pattern: Must be a URL.
+              pages:
+                type: array
+                title: Pages
+                description: Empty shows it on every page.
+                items:
+                  type: string
+                  title: Page slug
+                default: []
+              starts_at:
+                type: string
+                title: Starts
+                format: date-time
+              ends_at:
+                type: string
+                title: Ends
+                format: date-time
+          default: []
+        maintenance:
+          type: array
+          title: Scheduled maintenance
+          items:
+            type: object
+            title: Maintenance
+            required:
+            - title
+            - starts_at
+            - ends_at
+            - environments
+            properties:
+              title:
+                type: string
+                title: Title
+              description:
+                type: string
+                title: Description
+              starts_at:
+                type: string
+                title: Starts
+                format: date-time
+              ends_at:
+                type: string
+                title: Ends
+                format: date-time
+              environments:
+                type: array
+                title: Environments
+                items:
+                  type: string
+                  title: Environment
+                  examples:
+                  - api-prod
+                minItems: 1
+              components:
+                type: array
+                title: Rows
+                description: Empty covers the whole environment.
+                items:
+                  type: string
+                  title: Row title
+                default: []
+          default: []
+        attributes:
+          type: object
+          title: Instance attributes
+          properties:
+            title:
+              type: string
+              title: Title attribute
+              description: Names the row of an instance in an environment without rows.
+              default: status_title
+            hidden:
+              type: string
+              title: Hidden attribute
+              description: '`true` hides the instance.'
+              default: status_hidden
+            impact:
+              type: string
+              title: Impact attribute
+              description: Sets the impact of the instance's alarms.
+              default: status_impact
+        output_dir:
+          type: string
+          title: Output directory
+          description: Writes the static site here after each change, to serve or sync elsewhere. Empty writes no files.
+          pattern: ^(/.+)?$
+    storage_size_gi:
+      type: integer
+      title: History storage (GiB)
+      description: The volume for incident and uptime history.
+      default: 1
+      minimum: 1
+      maximum: 10
+      $md.immutable: true
+    site_size_gi:
+      type: integer
+      title: Site storage (GiB)
+      description: The volume mounted at the output directory, when it is set. Other pods on the same node can mount its
+        claim, `<instance>-site`, to serve or copy the files.
+      default: 1
+      minimum: 1
+      maximum: 10
+      $md.immutable: true
+    attributes:
+      type: object
+      title: Event attributes
+      description: Attribute values that an event's entity must have, such as `md-environment` = `prod`. Empty sends events
+        of any attributes.
+      default: {}
+      additionalProperties:
+        type: string
+    otel:
+      type: object
+      title: Tracing
+      description: Sends OpenTelemetry traces to an OTLP endpoint. Set the `OTEL_EXPORTER_OTLP_HEADERS` secret when the
+        endpoint needs credentials.
+      properties:
+        endpoint:
+          type: string
+          title: OTLP endpoint
+          description: The OTLP/HTTP base URL of a collector, such as `http://otel-collector.observability:4318`. Empty
+            turns tracing off.
+dependencies:
+  kubernetes_cluster:
+    resource_type: massdriver-kubernetes-cluster
+    required: true
+  service_account:
+    resource_type: massdriver-service-account
+    required: true
+resources:
+  website:
+    resource_type: website
+    required: true
+app:
+  secrets:
+    OTEL_EXPORTER_OTLP_HEADERS:
+      title: OTLP headers
+      description: Headers for the OTLP endpoint, as `key=value` pairs separated by commas, such as `authorization=Bearer
+        abc123`.
+ui:
+  ui:order:
+  - image
+  - ingress
+  - config
+  - storage_size_gi
+  - site_size_gi
+  - attributes
+  - otel
+  - '*'
+  image:
+    ui:order:
+    - repository
+    - tag
+  ingress:
+    ui:order:
+    - host
+    - class_name
+    - cluster_issuer
+    - tls_secret_name
+  config:
+    ui:order:
+    - site
+    - pages
+    - history_days
+    - min_duration
+    - deploys_as_maintenance
+    - announcements
+    - maintenance
+    - attributes
+    - output_dir
+    site:
+      ui:order:
+      - title
+      - base_url
+      - logo
+      - accent_color
+      - timezone
+      - show_alarm_details
+      - footer_links
+      accent_color:
+        ui:widget: color
+      footer_links:
+        ui:options:
+          itemTitle: '{{title}}'
+    pages:
+      ui:options:
+        itemTitle: '{{title}}'
+      items:
+        ui:order:
+        - title
+        - slug
+        - description
+        - environments
+        description:
+          ui:widget: textarea
+          ui:options:
+            rows: 2
+        environments:
+          ui:options:
+            itemTitle: '{{title}} ({{id}})'
+          items:
+            ui:order:
+            - id
+            - title
+            - description
+            - components
+            components:
+              ui:options:
+                itemTitle: '{{title}}'
+              items:
+                ui:order:
+                - title
+                - description
+                - match
+                - impact
+    announcements:
+      ui:options:
+        itemTitle: '{{message}}'
+      items:
+        message:
+          ui:widget: textarea
+          ui:options:
+            rows: 2
+        pages:
+          ui:field: tagInput
+    maintenance:
+      ui:options:
+        itemTitle: '{{title}}'
+      items:
+        description:
+          ui:widget: textarea
+          ui:options:
+            rows: 2
+        environments:
+          ui:field: tagInput
+        components:
+          ui:field: tagInput
+  attributes:
+    ui:options:
+      addButtonText: Add attribute

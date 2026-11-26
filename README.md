@@ -84,19 +84,12 @@ build provenance attestation. See [SECURITY.md](SECURITY.md) to verify one.
 
 ## Deploy
 
-Two Massdriver bundles run any set of the automations, and create one event destination for each:
+Each automation has two Massdriver bundles: `massdriver-<automation>` for Kubernetes and
+`massdriver-<automation>-ecs` for Amazon ECS with Fargate. Each one runs the automation and creates the event
+destination that sends it only the events it uses. The status page and the cost dashboard also produce a `website`
+resource with the URL to open. See [bundles](bundles) for the list and what each platform needs.
 
-| Bundle | Runs on |
-|---|---|
-| [massdriver-automations](bundles/massdriver-automations) | A Kubernetes cluster, with an ingress controller. |
-| [massdriver-automations-ecs](bundles/massdriver-automations-ecs) | Amazon ECS with Fargate, behind an Application Load Balancer. Its cluster type is an example in [examples/resource-types/aws-ecs-cluster](examples/resource-types/aws-ecs-cluster). |
-
-Each bundle produces one resource of the example type
-[automation-server](examples/resource-types/automation-server): the automations that are on, their event
-destinations, and URLs such as the status page and the cost dashboard.
-
-Each bundle creates its event destinations with a `massdriver-service-account` dependency. Before you publish a
-bundle, install the official resource types from
+Before you publish a bundle, install the official resource types from
 [massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types) in your organization:
 
 ```bash

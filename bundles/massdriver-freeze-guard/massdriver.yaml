@@ -1,0 +1,319 @@
+name: massdriver-freeze-guard
+description: During each window, adds deny policies for deployments to every custom group except the exempt groups, and
+  removes them when it ends. Set the `FREEZE_ADMIN_TOKEN` secret to lift a window early with `POST https://<host>/freeze/lift?window=<name>`.
+  Runs on a Kubernetes cluster, with an event destination that sends it only the events it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/massdriver-freeze-guard
+version: 0.1.0
+steps:
+- path: src
+  provisioner: opentofu:1.10
+params:
+  required:
+  - image
+  - ingress
+  - config
+  - storage_size_gi
+  properties:
+    image:
+      type: object
+      title: Image
+      required:
+      - repository
+      - tag
+      properties:
+        repository:
+          type: string
+          title: Repository
+          description: The automations image. bundle-scanner adds `-scanner` to the tag, and router adds `-scripts` when
+            it runs commands.
+          default: ghcr.io/massdriver-cloud/massdriver-automations
+        tag:
+          type: string
+          title: Tag
+          description: The image tag, such as `0.1.0`. Pin a version so that a redeploy runs the same code.
+          default: '0.1'
+          pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
+          message:
+            pattern: Must be a valid image tag.
+    ingress:
+      type: object
+      title: Ingress
+      required:
+      - host
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Where the automation is served, such as `freeze-guard.automations.acme.com`. Point it at the ingress
+            controller. Massdriver sends events to `https://<host>/hooks/massdriver`.
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          message:
+            pattern: Must be a lowercase DNS name, such as drift.automations.acme.com.
+        class_name:
+          type: string
+          title: Ingress class
+          description: Empty uses the default class of the cluster.
+        cluster_issuer:
+          type: string
+          title: cert-manager ClusterIssuer
+          description: Issues a certificate for the host. Leave empty when TLS ends in front of the ingress controller,
+            or when you set a TLS secret.
+        tls_secret_name:
+          type: string
+          title: TLS secret
+          description: A Secret in the namespace with a certificate for the host. Ignored when a ClusterIssuer is set.
+    config:
+      type: object
+      title: Settings
+      properties:
+        timezone:
+          type: string
+          title: Default time zone
+          default: UTC
+          examples:
+          - America/New_York
+          pattern: ^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$
+          message:
+            pattern: Must be an IANA time zone, such as America/New_York or UTC.
+        exempt_groups:
+          type: array
+          title: Exempt groups
+          description: Groups that every window leaves alone, such as the on-call team.
+          items:
+            type: string
+            $md.list:
+              resource: group
+          uniqueItems: true
+          default: []
+        actions:
+          type: array
+          title: Denied actions
+          items:
+            type: string
+            oneOf:
+            - const: instance:deploy
+              title: Deploy instances
+            - const: instance:decommission
+              title: Decommission instances
+            - const: environment:deploy
+              title: Deploy environments
+            - const: environment:decommission
+              title: Decommission environments
+          uniqueItems: true
+          minItems: 1
+          default:
+          - instance:deploy
+          - instance:decommission
+          - environment:deploy
+          - environment:decommission
+        slack:
+          type: object
+          title: Slack
+          properties:
+            channel:
+              type: string
+              title: Channel
+              description: The channel for window starts, ends, and lifts. Empty posts nothing.
+              pattern: ^([#@]?[a-z0-9._-]+|[CG][A-Z0-9]+)$
+              message:
+                pattern: 'Must be a channel name, such as #infra, or a channel ID.'
+        windows:
+          type: array
+          title: Windows
+          items:
+            type: object
+            title: Window
+            required:
+            - name
+            properties:
+              name:
+                type: string
+                title: Name
+                description: Unique. `POST /freeze/lift?window=<name>` uses it.
+                pattern: ^[a-z0-9][a-z0-9-]*$
+                message:
+                  pattern: Must be lowercase letters, numbers, and hyphens.
+              match:
+                type: object
+                title: Attributes
+                description: Attributes of the instances and environments to freeze. `*` matches any value. Empty freezes
+                  everything. Separate values with commas to match any of them, such as `api, web`.
+                default: {}
+                additionalProperties:
+                  type: string
+              weekly:
+                type: array
+                title: Every week
+                description: Ranges from a day and time to a day and time. A range that ends before it starts wraps past
+                  Sunday.
+                items:
+                  type: object
+                  title: Range
+                  required:
+                  - from
+                  - to
+                  properties:
+                    from:
+                      type: string
+                      title: From
+                      pattern: ^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) [0-2][0-9]:[0-5][0-9]$
+                      examples:
+                      - Fri 17:00
+                      message:
+                        pattern: Must be a day and a time, such as Fri 17:00.
+                    to:
+                      type: string
+                      title: To
+                      pattern: ^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) [0-2][0-9]:[0-5][0-9]$
+                      examples:
+                      - Mon 08:00
+                      message:
+                        pattern: Must be a day and a time, such as Mon 08:00.
+                default: []
+              from:
+                type: string
+                title: Once, from
+                description: 'A fixed window instead of a weekly one: `YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, or RFC 3339.'
+                examples:
+                - '2026-12-24'
+              to:
+                type: string
+                title: Once, to
+                examples:
+                - 2026-12-26 12:00
+              timezone:
+                type: string
+                title: Time zone
+                description: Replaces the default time zone for this window.
+                examples:
+                - America/New_York
+                pattern: ^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$
+                message:
+                  pattern: Must be an IANA time zone, such as America/New_York or UTC.
+              exempt_groups:
+                type: array
+                title: More exempt groups
+                items:
+                  type: string
+                  $md.list:
+                    resource: group
+                uniqueItems: true
+                default: []
+              actions:
+                type: array
+                title: Denied actions
+                items:
+                  type: string
+                  oneOf:
+                  - const: instance:deploy
+                    title: Deploy instances
+                  - const: instance:decommission
+                    title: Decommission instances
+                  - const: environment:deploy
+                    title: Deploy environments
+                  - const: environment:decommission
+                    title: Decommission environments
+                uniqueItems: true
+                minItems: 1
+                description: Replaces the default actions for this window.
+              slack:
+                type: object
+                title: Slack
+                properties:
+                  channel:
+                    type: string
+                    title: Channel
+                    description: Replaces the default channel for this window.
+                    pattern: ^([#@]?[a-z0-9._-]+|[CG][A-Z0-9]+)$
+                    message:
+                      pattern: 'Must be a channel name, such as #infra, or a channel ID.'
+          default: []
+    storage_size_gi:
+      type: integer
+      title: State storage (GiB)
+      description: The volume for the ids of the policies that freeze-guard created, and the lifts.
+      default: 1
+      minimum: 1
+      maximum: 10
+      $md.immutable: true
+    otel:
+      type: object
+      title: Tracing
+      description: Sends OpenTelemetry traces to an OTLP endpoint. Set the `OTEL_EXPORTER_OTLP_HEADERS` secret when the
+        endpoint needs credentials.
+      properties:
+        endpoint:
+          type: string
+          title: OTLP endpoint
+          description: The OTLP/HTTP base URL of a collector, such as `http://otel-collector.observability:4318`. Empty
+            turns tracing off.
+dependencies:
+  kubernetes_cluster:
+    resource_type: massdriver-kubernetes-cluster
+    required: true
+  service_account:
+    resource_type: massdriver-service-account
+    required: true
+resources: {}
+app:
+  secrets:
+    SLACK_BOT_TOKEN:
+      title: Slack bot token
+      description: The `xoxb-` token of the Slack app. Posts go to the channels in the settings.
+    SLACK_WEBHOOK_URL:
+      title: Slack webhook URL
+      description: An incoming webhook, for a workspace without the Slack app. Every post goes to its one channel. Ignored
+        when the bot token is set.
+    FREEZE_ADMIN_TOKEN:
+      title: Admin token
+      description: 'Callers of `POST /freeze/lift` send it as `Authorization: Bearer <token>`.'
+    OTEL_EXPORTER_OTLP_HEADERS:
+      title: OTLP headers
+      description: Headers for the OTLP endpoint, as `key=value` pairs separated by commas, such as `authorization=Bearer
+        abc123`.
+ui:
+  ui:order:
+  - image
+  - ingress
+  - config
+  - storage_size_gi
+  - otel
+  - '*'
+  image:
+    ui:order:
+    - repository
+    - tag
+  ingress:
+    ui:order:
+    - host
+    - class_name
+    - cluster_issuer
+    - tls_secret_name
+  config:
+    ui:order:
+    - timezone
+    - exempt_groups
+    - actions
+    - slack
+    - windows
+    actions:
+      ui:widget: checkboxes
+    windows:
+      ui:options:
+        itemTitle: '{{name}}'
+      items:
+        weekly:
+          ui:options:
+            itemTitle: '{{from}} to {{to}}'
+        ui:order:
+        - name
+        - match
+        - weekly
+        - from
+        - to
+        - timezone
+        - exempt_groups
+        - actions
+        - slack
+        actions:
+          ui:widget: checkboxes

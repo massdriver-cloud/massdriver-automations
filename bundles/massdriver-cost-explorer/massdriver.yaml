@@ -1,0 +1,193 @@
+name: massdriver-cost-explorer
+description: Serves a dashboard of the cloud costs of every instance. Group and filter by any instance attribute, and
+  see the daily trend. Set the `COST_EXPLORER_PASSWORD` secret, or make it public. Runs on a Kubernetes cluster, with
+  an event destination that sends it only the events it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/massdriver-cost-explorer
+version: 0.1.0
+steps:
+- path: src
+  provisioner: opentofu:1.10
+params:
+  required:
+  - image
+  - ingress
+  - config
+  - storage_size_gi
+  properties:
+    image:
+      type: object
+      title: Image
+      required:
+      - repository
+      - tag
+      properties:
+        repository:
+          type: string
+          title: Repository
+          description: The automations image. bundle-scanner adds `-scanner` to the tag, and router adds `-scripts` when
+            it runs commands.
+          default: ghcr.io/massdriver-cloud/massdriver-automations
+        tag:
+          type: string
+          title: Tag
+          description: The image tag, such as `0.1.0`. Pin a version so that a redeploy runs the same code.
+          default: '0.1'
+          pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
+          message:
+            pattern: Must be a valid image tag.
+    ingress:
+      type: object
+      title: Ingress
+      required:
+      - host
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Where the automation is served, such as `cost-explorer.automations.acme.com`. Point it at the ingress
+            controller. Massdriver sends events to `https://<host>/hooks/massdriver`.
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          message:
+            pattern: Must be a lowercase DNS name, such as drift.automations.acme.com.
+        class_name:
+          type: string
+          title: Ingress class
+          description: Empty uses the default class of the cluster.
+        cluster_issuer:
+          type: string
+          title: cert-manager ClusterIssuer
+          description: Issues a certificate for the host. Leave empty when TLS ends in front of the ingress controller,
+            or when you set a TLS secret.
+        tls_secret_name:
+          type: string
+          title: TLS secret
+          description: A Secret in the namespace with a certificate for the host. Ignored when a ClusterIssuer is set.
+    config:
+      type: object
+      title: Settings
+      properties:
+        title:
+          type: string
+          title: Title
+          default: Cloud costs
+        dimensions:
+          type: array
+          title: Dimensions
+          description: Instance attributes to group and filter by, in this order. `bundle` is the bundle name. Only these
+            attributes reach the browser.
+          items:
+            type: string
+            title: Attribute
+            examples:
+            - team
+          uniqueItems: true
+          minItems: 1
+          default:
+          - md-project
+          - md-environment
+          - md-component
+          - bundle
+        refresh:
+          type: string
+          title: Refresh
+          description: How often to read the costs. A completed provision or decommission also reads them.
+          default: 1h
+          pattern: ^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$
+          message:
+            pattern: Must be a duration, such as 90s, 10m, or 1h30m.
+        history_days:
+          type: integer
+          title: History (days)
+          description: Days of daily cost history to keep.
+          default: 90
+          minimum: 1
+          maximum: 731
+        public:
+          type: boolean
+          title: Public
+          description: Serves the dashboard without a password. Costs can reveal what you run.
+          default: false
+        username:
+          type: string
+          title: Username
+          description: The basic auth user. The `COST_EXPLORER_PASSWORD` secret is the password.
+          default: massdriver
+        massdriver:
+          type: object
+          title: Massdriver UI
+          properties:
+            app_url:
+              type: string
+              title: App URL
+              description: The Massdriver UI, for the links in messages. Empty uses https://app.massdriver.cloud.
+              pattern: ^https?://[^\s]+$
+              message:
+                pattern: Must be a URL.
+    storage_size_gi:
+      type: integer
+      title: History storage (GiB)
+      description: The volume for the daily cost history.
+      default: 1
+      minimum: 1
+      maximum: 10
+      $md.immutable: true
+    otel:
+      type: object
+      title: Tracing
+      description: Sends OpenTelemetry traces to an OTLP endpoint. Set the `OTEL_EXPORTER_OTLP_HEADERS` secret when the
+        endpoint needs credentials.
+      properties:
+        endpoint:
+          type: string
+          title: OTLP endpoint
+          description: The OTLP/HTTP base URL of a collector, such as `http://otel-collector.observability:4318`. Empty
+            turns tracing off.
+dependencies:
+  kubernetes_cluster:
+    resource_type: massdriver-kubernetes-cluster
+    required: true
+  service_account:
+    resource_type: massdriver-service-account
+    required: true
+resources:
+  website:
+    resource_type: website
+    required: true
+app:
+  secrets:
+    COST_EXPLORER_PASSWORD:
+      title: Dashboard password
+      description: The basic auth password. The user is the `username` in the settings, `massdriver` by default.
+    OTEL_EXPORTER_OTLP_HEADERS:
+      title: OTLP headers
+      description: Headers for the OTLP endpoint, as `key=value` pairs separated by commas, such as `authorization=Bearer
+        abc123`.
+ui:
+  ui:order:
+  - image
+  - ingress
+  - config
+  - storage_size_gi
+  - otel
+  - '*'
+  image:
+    ui:order:
+    - repository
+    - tag
+  ingress:
+    ui:order:
+    - host
+    - class_name
+    - cluster_issuer
+    - tls_secret_name
+  config:
+    ui:order:
+    - title
+    - dimensions
+    - refresh
+    - history_days
+    - public
+    - username
+    - massdriver
+    dimensions:
+      ui:field: tagInput

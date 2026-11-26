@@ -8,7 +8,7 @@ fields to match how your organization runs ECS, and publish it:
 mass resource-type publish massdriver.yaml
 ```
 
-The [`massdriver-automations-ecs`](../../../bundles/massdriver-automations-ecs) bundle depends on this type. If you rename the type or its
+The `-ecs` bundles in [bundles](../../../bundles) depend on this type. If you rename the type or its
 fields, change the bundle's `dependencies` and `src/` to match.
 
 ## Fields

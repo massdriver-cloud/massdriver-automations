@@ -1,0 +1,23 @@
+name: website
+version: 0.1.0
+label: Website
+icon: https://raw.githubusercontent.com/massdriver-cloud/massdriver-automations/main/examples/resource-types/website/icon.svg
+
+ui:
+  connectionOrientation: link
+
+schema:
+  title: Website
+  description: A web page that people open, such as a dashboard or a status page.
+  type: object
+  additionalProperties: false
+  required:
+    - url
+  examples:
+    - url: https://status.acme.com/
+  properties:
+    url:
+      title: URL
+      description: The page to open.
+      type: string
+      pattern: ^https?://\S+$
