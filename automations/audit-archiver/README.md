@@ -79,7 +79,7 @@ docker run -p 8080:8080 \
   -e AWS_SECRET_ACCESS_KEY=... \
   -e SPLUNK_HEC_TOKEN=... \
   -e DD_API_KEY=... \
-  ghcr.io/massdriver-cloud/massdriver-automations:latest run audit-archiver
+  ghcr.io/massdriver-cloud/massdriver-automations:0.1 run audit-archiver
 ```
 
 ## Limits

@@ -72,7 +72,7 @@ docker run -p 8080:8080 \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
   -e SLACK_BOT_TOKEN=xoxb-... \
   -e SLACK_SIGNING_SECRET=... \
-  ghcr.io/massdriver-cloud/massdriver-automations:latest run proposal-chatops
+  ghcr.io/massdriver-cloud/massdriver-automations:0.1 run proposal-chatops
 ```
 
 Massdriver and Slack must both reach the service: `/hooks/massdriver` and `/slack/interactions`.

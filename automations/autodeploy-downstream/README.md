@@ -121,7 +121,7 @@ docker run -p 8080:8080 \
   -e MASSDRIVER_ORGANIZATION_ID=acme \
   -e MASSDRIVER_API_KEY=md_... \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
-  ghcr.io/massdriver-cloud/massdriver-automations:latest run autodeploy-downstream
+  ghcr.io/massdriver-cloud/massdriver-automations:0.1 run autodeploy-downstream
 ```
 
 ## Limits

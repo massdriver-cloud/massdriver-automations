@@ -155,7 +155,7 @@ docker run -p 8080:8080 \
   -e MASSDRIVER_API_KEY=md_... \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
   -e STATE_DIR=/state \
-  ghcr.io/massdriver-cloud/massdriver-automations:latest run statuspage
+  ghcr.io/massdriver-cloud/massdriver-automations:0.1 run statuspage
 ```
 
 The image runs as user `65532`. That user must be able to write to `STATE_DIR` and `output_dir`.
