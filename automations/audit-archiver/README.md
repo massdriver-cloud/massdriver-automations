@@ -14,31 +14,42 @@ event. The retry writes only to the sinks that failed.
 
 ## Configuration
 
-Set at least one of `ARCHIVE_S3_BUCKET`, `SPLUNK_HEC_URL`, and `DD_API_KEY`.
+| Variable | |
+|---|---|
+| `MASSDRIVER_SIGNING_SECRET` | Required. The `whsec_` signing secret of the event destination. |
+| `CONFIG_FILE` | The config file. Default: `/etc/massdriver-automations/config.yaml`. |
+| `AWS_REGION` | The region of the bucket, when `s3.region` is not set. |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | The S3 credentials. The sink also reads the other standard AWS sources: a profile, web identity (IRSA, EKS Pod Identity), or the instance or task role. |
+| `SPLUNK_HEC_TOKEN` | The HEC token, or the variable that `splunk.token_env` names. |
+| `DD_API_KEY` | The Datadog API key, or the variable that `datadog.api_key_env` names. |
 
-| Variable | Default | |
+`PORT`, `LOG_FORMAT`, and `LOG_LEVEL` are in the [common settings](../../README.md#common-settings).
+
+The config file is YAML. [`config.example.yaml`](config.example.yaml) has every key, with comments. An unknown key stops the automation at start.
+
+| Key | Default | |
 |---|---|---|
-| `MASSDRIVER_SIGNING_SECRET` | | Required. The `whsec_` signing secret of the event destination. |
-| `ARCHIVE_S3_BUCKET` | | The bucket. Setting it turns on the S3 sink. |
-| `ARCHIVE_S3_PREFIX` | `events` | The first part of each key. |
-| `ARCHIVE_S3_ENDPOINT` | | The URL of an S3-compatible store, such as MinIO or Cloudflare R2. The sink then uses path-style URLs. |
-| `ARCHIVE_S3_OBJECT_LOCK_MODE` | | `GOVERNANCE` or `COMPLIANCE`. Each object gets this retention mode. The bucket must have Object Lock turned on. |
-| `ARCHIVE_S3_OBJECT_LOCK_DAYS` | | The number of days to retain each object, counted from when the sink writes it. Set it with `ARCHIVE_S3_OBJECT_LOCK_MODE`. |
-| `AWS_REGION` | | Required for S3. The region of the bucket. Use `auto` for Cloudflare R2. |
-| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | | The S3 credentials. The sink also reads the other standard AWS sources: a profile, web identity (IRSA, EKS Pod Identity), or the instance role. |
-| `SPLUNK_HEC_URL` | | The base URL of the HTTP Event Collector, such as `https://splunk.example.com:8088`. Setting it turns on the Splunk sink. |
-| `SPLUNK_HEC_TOKEN` | | Required with `SPLUNK_HEC_URL`. The HEC token. |
-| `SPLUNK_INDEX` | | The index. When empty, Splunk uses the default index of the token. |
-| `SPLUNK_SOURCE` | `massdriver` | |
-| `SPLUNK_SOURCETYPE` | `massdriver:cloudevent` | |
-| `DD_API_KEY` | | A Datadog API key. Setting it turns on the Datadog sink. |
-| `DD_SITE` | `datadoghq.com` | Your Datadog site, such as `datadoghq.eu` or `us5.datadoghq.com`. |
-| `DD_LOGS_URL` | `https://http-intake.logs.<DD_SITE>` | The intake URL, for a proxy. |
-| `DD_SERVICE` | `massdriver` | |
-| `DD_TAGS` | | Tags for each log, such as `env:prod,team:platform`. |
-| `PORT` | `8080` | |
+| `s3` | | Turns on the S3 sink. |
+| `s3.bucket` | | Required with `s3`. |
+| `s3.region` | `AWS_REGION` | The region of the bucket. Use `auto` for Cloudflare R2. |
+| `s3.prefix` | `events` | The first part of each key. |
+| `s3.endpoint` | | The URL of an S3-compatible store, such as MinIO or Cloudflare R2. The sink then uses path-style URLs. |
+| `s3.object_lock.mode` | | `GOVERNANCE` or `COMPLIANCE`. Each object gets this retention mode. The bucket must have Object Lock turned on. |
+| `s3.object_lock.days` | | Required with `object_lock`. Days to retain each object, counted from when the sink writes it. |
+| `splunk` | | Turns on the Splunk sink. |
+| `splunk.url` | | Required with `splunk`. The base URL of the HTTP Event Collector, such as `https://splunk.example.com:8088`. |
+| `splunk.token_env` | `SPLUNK_HEC_TOKEN` | The variable that holds the HEC token. |
+| `splunk.index` | | Empty uses the default index of the token. |
+| `splunk.source` | `massdriver` | |
+| `splunk.sourcetype` | `massdriver:cloudevent` | |
+| `datadog` | | Turns on the Datadog sink. |
+| `datadog.site` | `datadoghq.com` | Your Datadog site, such as `datadoghq.eu` or `us5.datadoghq.com`. |
+| `datadog.url` | `https://http-intake.logs.<site>` | The intake URL, for a proxy. |
+| `datadog.api_key_env` | `DD_API_KEY` | The variable that holds the API key. |
+| `datadog.service` | `massdriver` | |
+| `datadog.tags` | | Tags for each log, such as `[env:prod, team:platform]`. |
 
-The S3 credentials need `s3:PutObject` on the bucket. With Object Lock, they also need `s3:PutObjectRetention`.
+Set at least one of `s3`, `splunk`, and `datadog`. The S3 credentials need `s3:PutObject` on the bucket. With Object Lock, they also need `s3:PutObjectRetention`.
 
 ## Event destination
 
@@ -60,12 +71,10 @@ The destination receives events that occur after you create it. To archive older
 
 ```bash
 docker run -p 8080:8080 \
+  -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:ro" \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
-  -e ARCHIVE_S3_BUCKET=acme-massdriver-audit \
-  -e AWS_REGION=us-east-1 \
   -e AWS_ACCESS_KEY_ID=... \
   -e AWS_SECRET_ACCESS_KEY=... \
-  -e SPLUNK_HEC_URL=https://splunk.example.com:8088 \
   -e SPLUNK_HEC_TOKEN=... \
   -e DD_API_KEY=... \
   massdrivercloud/massdriver-automations:latest run audit-archiver

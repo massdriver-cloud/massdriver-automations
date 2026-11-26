@@ -2,7 +2,7 @@
 
 A public status site for your Massdriver environments. It needs no login.
 
-At startup, the service reads `statuspage.yaml`. Then it loads each configured environment from the Massdriver
+At startup, the service reads its config file. Then it loads each configured environment from the Massdriver
 API: its instances, their status, their alarms with the current state of each alarm, and the latest deployment
 of each instance. After that, events keep the site current. Each event renders the site again at once.
 
@@ -49,22 +49,23 @@ are not downtime.
 
 ## Configuration
 
-| Variable | Default | |
-|---|---|---|
-| `MASSDRIVER_ORGANIZATION_ID` | | Required. Your organization's identifier. |
-| `MASSDRIVER_API_KEY` | | Required. An `md_` access token of a service account. |
-| `MASSDRIVER_SIGNING_SECRET` | | Required. The `whsec_` signing secret of the event destination. |
-| `MASSDRIVER_URL` | `https://api.massdriver.cloud` | The URL of your Massdriver installation. |
-| `STATUSPAGE_CONFIG` | `./statuspage.yaml` | The path of the config file. |
-| `STATE_DIR` | | A directory for incident and uptime history (`statuspage.json`). |
-| `OUTPUT_DIR` | | A directory to write the static site to after each change. |
-| `PORT` | `8080` | |
+| Variable | |
+|---|---|
+| `MASSDRIVER_SIGNING_SECRET` | Required. The `whsec_` signing secret of the event destination. |
+| `MASSDRIVER_ORGANIZATION_ID` | Required. Your organization's identifier. |
+| `MASSDRIVER_API_KEY` | Required. An `md_` access token of a service account. |
+| `MASSDRIVER_URL` | The URL of your Massdriver installation. Default: `https://api.massdriver.cloud`. |
+| `CONFIG_FILE` | The config file. Default: `/etc/massdriver-automations/config.yaml`. |
+| `STATE_DIR` | A directory for incident and uptime history (`statuspage.json`). |
+
+`PORT`, `LOG_FORMAT`, and `LOG_LEVEL` are in the [common settings](../../README.md#common-settings).
 
 The service account needs view access to the projects of the configured environments.
 
-### statuspage.yaml
+### Config file
 
-[`statuspage.example.yaml`](statuspage.example.yaml) shows every setting. The smallest config is:
+The config file is YAML. [`config.example.yaml`](config.example.yaml) has every key, with comments. An unknown key
+stops the automation at start. The smallest config is:
 
 ```yaml
 pages:
@@ -84,6 +85,7 @@ pages:
 | `site.template` | | A Go `html/template` file that replaces the built-in page. The path is relative to the config file. |
 | `site.show_alarm_details` | `false` | Adds alarm names and provider messages to incident updates. |
 | `site.footer_links` | | A list of `title` and `url`. |
+| `output_dir` | | A directory that gets the static site after each change. |
 | `history_days` | `90` | Days of uptime bars and incident history, from 1 to 365. |
 | `deploys_as_maintenance` | `true` | Shows a running deployment as maintenance. Each environment can override it. |
 | `min_duration` | `0s` | How long an alarm must fire before it counts, such as `2m`. |
@@ -117,7 +119,7 @@ Times in the config are RFC 3339, such as `2026-12-06T10:00:00Z`.
 | `/api/status.json` | Status, components, uptime, incidents, and scheduled maintenance of every page. |
 | `POST /hooks/massdriver` | Events from Massdriver. |
 
-`OUTPUT_DIR` gets the same files at the same paths, such as `index.html`, `acme/index.html`, and
+`output_dir` gets the same files at the same paths, such as `index.html`, `acme/index.html`, and
 `api/status.json`. Links are relative, so you can sync the directory to S3 or GitHub Pages.
 
 ## Event destination
@@ -147,17 +149,16 @@ Copy the signing secret from the destination into `MASSDRIVER_SIGNING_SECRET`.
 
 ```bash
 docker run -p 8080:8080 \
+  -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:ro" \
+  -v "$PWD/state:/state" \
   -e MASSDRIVER_ORGANIZATION_ID=acme \
   -e MASSDRIVER_API_KEY=md_... \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
-  -e STATUSPAGE_CONFIG=/config/statuspage.yaml \
   -e STATE_DIR=/state \
-  -v "$PWD/statuspage.yaml:/config/statuspage.yaml:ro" \
-  -v "$PWD/state:/state" \
   massdrivercloud/massdriver-automations:latest run statuspage
 ```
 
-The image runs as user `65532`. That user must be able to write to `STATE_DIR` and `OUTPUT_DIR`.
+The image runs as user `65532`. That user must be able to write to `STATE_DIR` and `output_dir`.
 
 ## Limits
 
@@ -171,4 +172,4 @@ The image runs as user `65532`. That user must be able to write to `STATE_DIR` a
   has a fixed list of values, so declare each `status_title` value on the attribute first.
 - Massdriver has no event for the end of an environment deployment. Each instance deployment is shown on its own.
 - A deployment shows as maintenance only while it runs. Queued and proposed deployments do not.
-- `OUTPUT_DIR` does not delete files of a page that you remove from the config.
+- `output_dir` does not delete files of a page that you remove from the config.

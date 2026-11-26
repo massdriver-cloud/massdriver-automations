@@ -84,9 +84,9 @@ once, when the request arrives: `createDeployment`, `approveDeployment`, `reject
 
 To stop one of these, abort it in Massdriver.
 
-## Windows file
+## Windows
 
-YAML or JSON. `timezone` applies to every window that does not set its own. The default is `UTC`. `actions` and
+The windows are in the config file, YAML or JSON. `timezone` applies to every window that does not set its own. The default is `UTC`. `actions` and
 `exempt_groups` at the top apply to every window. A window's `actions` replace the top-level actions. A window's
 `exempt_groups` add to the top-level exempt groups.
 
@@ -121,6 +121,7 @@ windows:
 | `match` | The policy's conditions. Each key is an attribute. Each value is a string, a list of strings, or `"*"` for any value. Empty denies the actions everywhere. |
 | `actions` | The actions to deny. The default is `instance:deploy`, `instance:decommission`, `environment:deploy`, and `environment:decommission`. |
 | `exempt_groups` | Names of the groups that the window does not freeze. A name must equal the group's name exactly. |
+| `slack.channel` | The channel for this window's announcements. The default is the top-level `slack.channel`. |
 | `timezone` | An IANA time zone, such as `America/New_York`. |
 | `weekly` | A list of ranges, each `from` and `to` as `<day> HH:MM`. A range whose `to` is earlier in the week than its `from` continues into the next week. |
 | `from`, `to` | A fixed range: `YYYY-MM-DD`, `YYYY-MM-DD HH:MM` in the window's time zone, or RFC 3339. `to` is not included. |
@@ -154,8 +155,8 @@ Anyone with the token can lift a freeze. Keep it with the people who can approve
 
 ## Slack
 
-When `SLACK_WEBHOOK_URL` is set, freeze-guard posts to that Slack incoming webhook when a window starts, ends, or
-is lifted:
+With `SLACK_BOT_TOKEN` and a `slack.channel`, or with `SLACK_WEBHOOK_URL`, freeze-guard posts when a window
+starts, ends, or is lifted:
 
 ```
 Freeze window "weekend" started. Denied environment:decommission, environment:deploy, instance:decommission, instance:deploy where md-environment is prod.
@@ -173,17 +174,29 @@ Freeze window "weekend" lifted until 2026-12-04 17:00 EST. Removed its deny poli
 
 ## Configuration
 
-| Variable | Default | |
+| Variable | |
+|---|---|
+| `MASSDRIVER_SIGNING_SECRET` | Required. The `whsec_` signing secret of the event destination. |
+| `MASSDRIVER_ORGANIZATION_ID` | Required. Your organization's identifier. |
+| `MASSDRIVER_API_KEY` | Required. An `md_` access token of a service account. |
+| `MASSDRIVER_URL` | The URL of your Massdriver installation. Default: `https://api.massdriver.cloud`. |
+| `CONFIG_FILE` | The config file. Default: `/etc/massdriver-automations/config.yaml`. |
+| `SLACK_BOT_TOKEN` | The bot token of the [Slack app](../../README.md#slack). Posts to the channels in the config. |
+| `SLACK_WEBHOOK_URL` | An incoming webhook, when there is no Slack app. Posts every message to its one channel. |
+| `STATE_DIR` | A directory that survives restarts. Without it, freeze-guard finds its policies by exact match at each start, and a restart loses lifts. |
+| `FREEZE_ADMIN_TOKEN` | Turns on `POST /freeze/lift`. |
+
+`PORT`, `LOG_FORMAT`, and `LOG_LEVEL` are in the [common settings](../../README.md#common-settings).
+
+The config file is YAML. [`config.example.yaml`](config.example.yaml) has every key, with comments. An unknown key stops the automation at start.
+
+| Key | Default | |
 |---|---|---|
-| `MASSDRIVER_ORGANIZATION_ID` | | Required. Your organization's identifier. |
-| `MASSDRIVER_API_KEY` | | Required. An `md_` access token of a service account. |
-| `MASSDRIVER_SIGNING_SECRET` | | Required. The `whsec_` signing secret of the event destination. |
-| `MASSDRIVER_URL` | `https://api.massdriver.cloud` | The URL of your Massdriver installation. |
-| `FREEZE_WINDOWS_FILE` | | Required. The path of the windows file. |
-| `STATE_DIR` | | A directory that survives restarts. Without it, freeze-guard finds its policies by exact match at each start, and a restart loses lifts. |
-| `FREEZE_ADMIN_TOKEN` | | Turns on `POST /freeze/lift`. |
-| `SLACK_WEBHOOK_URL` | | A Slack incoming webhook URL. |
-| `PORT` | `8080` | |
+| `timezone` | `UTC` | The timezone of the windows that do not set their own. |
+| `actions` | the deployment actions | The actions that every window denies, unless it sets its own. |
+| `exempt_groups` | | Groups that no window freezes. |
+| `slack.channel` | | The channel for announcements, with `SLACK_BOT_TOKEN`. |
+| `windows` | | The [windows](#windows). Without any, freeze-guard adds no policies and removes the ones it made. |
 
 ### Service account
 
@@ -222,19 +235,18 @@ Copy the signing secret from the destination's **Overview** tab into `MASSDRIVER
 
 ```bash
 docker run -p 8080:8080 \
-  -v "$PWD/windows.yaml:/etc/freeze-guard/windows.yaml:ro" \
+  -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:ro" \
   -v freeze-guard-state:/var/lib/freeze-guard \
-  -e FREEZE_WINDOWS_FILE=/etc/freeze-guard/windows.yaml \
   -e STATE_DIR=/var/lib/freeze-guard \
   -e MASSDRIVER_ORGANIZATION_ID=acme \
   -e MASSDRIVER_API_KEY=md_... \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
   -e FREEZE_ADMIN_TOKEN=... \
-  -e SLACK_WEBHOOK_URL=https://hooks.slack.com/services/... \
+  -e SLACK_BOT_TOKEN=xoxb-... \
   massdrivercloud/massdriver-automations:latest run freeze-guard
 ```
 
-The windows file is read at start. Restart the service after you change it. When you remove or rename a window,
+The config file is read at start. Restart the service after you change it. When you remove or rename a window,
 freeze-guard deletes the policies that it created for the old window.
 
 ## Limits

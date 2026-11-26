@@ -11,23 +11,34 @@ When a new bundle version is published, post it to Slack, Microsoft Teams, or bo
 An instance is listed only when it is `PROVISIONED` or `FAILED`. An instance can upgrade when its
 `availableUpgrade` is the new version.
 
-Development versions, such as `1.3.1-dev.20261124T055403Z`, are skipped. Set `INCLUDE_DEVELOPMENT=true` to post
+Development versions, such as `1.3.1-dev.20261124T055403Z`, are skipped. Set `include_development: true` to post
 them.
 
 ## Configuration
 
-| Variable | Default | |
-|---|---|---|
-| `MASSDRIVER_ORGANIZATION_ID` | | Required. Your organization's identifier. |
-| `MASSDRIVER_API_KEY` | | Required. An `md_` access token of a service account. |
-| `MASSDRIVER_SIGNING_SECRET` | | Required. The `whsec_` signing secret of the event destination. |
-| `SLACK_WEBHOOK_URL` | | A Slack [incoming webhook](https://api.slack.com/messaging/webhooks) URL. |
-| `TEAMS_WEBHOOK_URL` | | A Microsoft Teams Workflows webhook URL, from the "Post to a channel when a webhook request is received" template. |
-| `INCLUDE_DEVELOPMENT` | `false` | `true` posts development versions too. |
-| `MASSDRIVER_URL` | `https://api.massdriver.cloud` | The URL of your Massdriver installation. |
-| `PORT` | `8080` | |
+| Variable | |
+|---|---|
+| `MASSDRIVER_SIGNING_SECRET` | Required. The `whsec_` signing secret of the event destination. |
+| `MASSDRIVER_ORGANIZATION_ID` | Required. Your organization's identifier. |
+| `MASSDRIVER_API_KEY` | Required. An `md_` access token of a service account. |
+| `MASSDRIVER_URL` | The URL of your Massdriver installation. Default: `https://api.massdriver.cloud`. |
+| `CONFIG_FILE` | The config file. Default: `/etc/massdriver-automations/config.yaml`. |
+| `SLACK_BOT_TOKEN` | The bot token of the [Slack app](../../README.md#slack). Posts to the channels in the config. |
+| `SLACK_WEBHOOK_URL` | An incoming webhook, when there is no Slack app. Posts every message to its one channel. |
+| `TEAMS_WEBHOOK_URL` | A Microsoft Teams Workflows webhook URL, from the "Post to a channel when a webhook request is received" template, or the variable that `teams.webhook_url_env` names. Required with `teams.enabled`. |
 
-Set `SLACK_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL`, or both.
+`PORT`, `LOG_FORMAT`, and `LOG_LEVEL` are in the [common settings](../../README.md#common-settings).
+
+The config file is YAML. [`config.example.yaml`](config.example.yaml) has every key, with comments. An unknown key stops the automation at start.
+
+| Key | Default | |
+|---|---|---|
+| `include_development` | `false` | Post development versions too. |
+| `slack.channel` | | The channel for release notes, with `SLACK_BOT_TOKEN`. |
+| `teams.enabled` | `false` | Post to Microsoft Teams. |
+| `teams.webhook_url_env` | `TEAMS_WEBHOOK_URL` | The variable that holds the Teams webhook URL. |
+
+Post to Slack (`SLACK_BOT_TOKEN` and `slack.channel`, or `SLACK_WEBHOOK_URL`), to Teams, or to both. With neither, the automation does not start.
 
 The service account needs `repo:view` on the bundle repositories, and view access to the projects whose
 instances you want listed. Instances in projects it cannot view are left out.
@@ -51,10 +62,11 @@ Copy the signing secret from the destination into `MASSDRIVER_SIGNING_SECRET`.
 
 ```bash
 docker run -p 8080:8080 \
+  -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:ro" \
   -e MASSDRIVER_ORGANIZATION_ID=acme \
   -e MASSDRIVER_API_KEY=md_... \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
-  -e SLACK_WEBHOOK_URL=https://hooks.slack.com/services/... \
+  -e SLACK_BOT_TOKEN=xoxb-... \
   massdrivercloud/massdriver-automations:latest run release-notes
 ```
 

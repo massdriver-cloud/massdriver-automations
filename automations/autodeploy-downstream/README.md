@@ -21,22 +21,25 @@ the graph one level at a time.
 
 ## Configuration
 
-| Variable | Default | |
+| Variable | |
+|---|---|
+| `MASSDRIVER_SIGNING_SECRET` | Required. The `whsec_` signing secret of the event destination. |
+| `MASSDRIVER_ORGANIZATION_ID` | Required. Your organization's identifier. |
+| `MASSDRIVER_API_KEY` | Required. An `md_` access token of a service account. |
+| `MASSDRIVER_URL` | The URL of your Massdriver installation. Default: `https://api.massdriver.cloud`. |
+| `CONFIG_FILE` | The config file. Default: `/etc/massdriver-automations/config.yaml`. |
+
+`PORT`, `LOG_FORMAT`, and `LOG_LEVEL` are in the [common settings](../../README.md#common-settings).
+
+The config file is YAML. [`config.example.yaml`](config.example.yaml) has every key, with comments. An unknown key stops the automation at start.
+
+| Key | Default | |
 |---|---|---|
-| `MASSDRIVER_ORGANIZATION_ID` | | Required. Your organization's identifier. |
-| `MASSDRIVER_API_KEY` | | Required. An `md_` access token of a service account. |
-| `MASSDRIVER_SIGNING_SECRET` | | Required. The `whsec_` signing secret of the event destination. |
-| `MASSDRIVER_URL` | `https://api.massdriver.cloud` | The URL of your Massdriver installation. |
-| `AUTODEPLOY_CONFIG` | | The path of a [rules file](#rules). |
-| `AUTO_DEPLOY_ATTR_KEY` | `autodeploy` | The attribute key that opts an instance in, without a rules file. |
-| `AUTO_DEPLOY_ATTR_VALUE` | `true` | The attribute value that opts an instance in, without a rules file. |
-| `PORT` | `8080` | |
+| `rules` | one rule, `autodeploy=true` | The [rules](#rules) that select downstream instances. |
 
-Set `AUTODEPLOY_CONFIG` or the two `AUTO_DEPLOY_ATTR_*` variables, not both. With both set, the automation does not
-start. Without a rules file, the two variables make one rule, named `<key>=<value>`, with the action `deploy`.
+Without a config file, or with no rules, one rule named `autodeploy=true` deploys the downstream instances whose attribute `autodeploy` is `true`.
 
-The service account needs `instance:deploy` on the downstream instances of `deploy` rules, `instance:propose` on the
-downstream instances of `propose` rules, and view access to their projects.
+The service account needs `instance:deploy` on the downstream instances of `deploy` rules, `instance:propose` on the downstream instances of `propose` rules, and view access to their projects.
 
 ## Rules
 
@@ -74,7 +77,7 @@ The deployment message names the rule:
 Auto-deploy (rule staging-cascade): upstream api-staging-db completed deployment 6f1c...
 ```
 
-An unknown field, an empty `rules` list, or a rule without `downstream` stops the automation at start.
+An unknown field, a rule without `name` or `downstream`, or two rules with one name stops the automation at start.
 
 ### Declare the attributes
 
@@ -114,6 +117,7 @@ Copy the signing secret from the destination's **Overview** tab into `MASSDRIVER
 
 ```bash
 docker run -p 8080:8080 \
+  -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:ro" \
   -e MASSDRIVER_ORGANIZATION_ID=acme \
   -e MASSDRIVER_API_KEY=md_... \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \

@@ -12,28 +12,31 @@ example `Rejected by Sam Lee in Massdriver`, and the buttons go away.
 
 ## Slack app
 
-1. Create a Slack app. Add the bot scopes `chat:write` and `chat:write.public`.
-2. Under **Interactivity & Shortcuts**, turn on interactivity and set the request URL to
-   `https://<host>/slack/interactions`.
-3. Install the app in your workspace. Copy the bot token (`xoxb-...`) into `SLACK_BOT_TOKEN`, and the signing
-   secret from **Basic Information** into `SLACK_SIGNING_SECRET`.
-
-Without `chat:write.public`, invite the app to each channel.
+Use the [Slack app](../../README.md#slack) of the repository. Set its interactivity request URL to
+`https://<host>/slack/interactions`. proposal-chatops needs the bot token: a webhook cannot update a message or
+receive a click.
 
 ## Configuration
 
-| Variable | Default | |
+| Variable | |
+|---|---|
+| `MASSDRIVER_SIGNING_SECRET` | Required. The `whsec_` signing secret of the event destination. |
+| `MASSDRIVER_ORGANIZATION_ID` | Required. Your organization's identifier. |
+| `MASSDRIVER_API_KEY` | Required. An `md_` access token of a service account. |
+| `MASSDRIVER_URL` | The URL of your Massdriver installation. Default: `https://api.massdriver.cloud`. |
+| `CONFIG_FILE` | The config file. Default: `/etc/massdriver-automations/config.yaml`. |
+| `SLACK_BOT_TOKEN` | Required. The bot token of the Slack app. |
+| `SLACK_SIGNING_SECRET` | Required. The signing secret of the Slack app. Clicks without a valid signature get `401`. |
+
+`PORT`, `LOG_FORMAT`, and `LOG_LEVEL` are in the [common settings](../../README.md#common-settings).
+
+The config file is YAML. [`config.example.yaml`](config.example.yaml) has every key, with comments. An unknown key stops the automation at start.
+
+| Key | Default | |
 |---|---|---|
-| `MASSDRIVER_ORGANIZATION_ID` | | Required. Your organization's identifier. |
-| `MASSDRIVER_API_KEY` | | Required. An `md_` access token of a service account. |
-| `MASSDRIVER_SIGNING_SECRET` | | Required. The `whsec_` signing secret of the event destination. |
-| `MASSDRIVER_URL` | `https://api.massdriver.cloud` | The URL of your Massdriver installation. |
-| `SLACK_BOT_TOKEN` | | Required. The bot token of the Slack app. |
-| `SLACK_SIGNING_SECRET` | | Required. The signing secret of the Slack app. |
-| `SLACK_CHANNEL` | | Required. The channel name or ID for proposals. |
-| `SLACK_CHANNEL_ATTR_KEY` | | An attribute key. When the instance has this attribute, its value names the channel instead of `SLACK_CHANNEL`. |
-| `SLACK_ALLOWED_USERS` | | Comma-separated Slack user IDs that can click the buttons. Empty allows everybody in the channel. |
-| `PORT` | `8080` | |
+| `slack.channel` | | Required. The channel name or ID for proposals. |
+| `slack.channel_attribute` | | An attribute key. When the instance has this attribute, its value names the channel instead of `slack.channel`. |
+| `slack.allowed_users` | | Slack user IDs that can click the buttons. Empty allows everybody in the channel. |
 
 The service account needs `instance:deploy` on the instances. Massdriver gates approval and rejection with that
 permission.
@@ -63,12 +66,12 @@ Copy the signing secret from the destination's **Overview** tab into `MASSDRIVER
 
 ```bash
 docker run -p 8080:8080 \
+  -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:ro" \
   -e MASSDRIVER_ORGANIZATION_ID=acme \
   -e MASSDRIVER_API_KEY=md_... \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
   -e SLACK_BOT_TOKEN=xoxb-... \
   -e SLACK_SIGNING_SECRET=... \
-  -e SLACK_CHANNEL='#deploys' \
   massdrivercloud/massdriver-automations:latest run proposal-chatops
 ```
 
@@ -85,4 +88,4 @@ Massdriver and Slack must both reach the service: `/hooks/massdriver` and `/slac
 - Massdriver sends events in any order. When the approval or rejection arrives before the proposal, the message is
   posted already decided, without buttons.
 - When Slack refuses a message, the automation responds `500`, and Massdriver sends the event again.
-- Anybody who can click in the channel can approve, unless `SLACK_ALLOWED_USERS` is set.
+- Anybody who can click in the channel can approve, unless `slack.allowed_users` is set.

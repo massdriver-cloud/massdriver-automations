@@ -19,7 +19,7 @@ For each Massdriver deployment, the automation creates one GitHub deployment and
 
 `PLAN` deployments are skipped.
 
-- The GitHub environment is the Massdriver environment, such as `prod`. Set `GITHUB_ENVIRONMENT_NAME` to
+- The GitHub environment is the Massdriver environment, such as `prod`. Set `github.environment_name` to
   `project-environment` to use `api-prod` instead.
 - The ref is the value of the `github_ref` attribute. Without it, the ref is the default branch of the repository.
 - The GitHub deployment has the task `massdriver` and a payload with `massdriver_deployment_id`, `instance`,
@@ -30,18 +30,26 @@ For each Massdriver deployment, the automation creates one GitHub deployment and
 
 ## Configuration
 
-| Variable | Default | |
-|---|---|---|
-| `MASSDRIVER_SIGNING_SECRET` | | Required. The `whsec_` signing secret of the event destination. |
-| `GITHUB_TOKEN` | | Required. A GitHub token with the `Deployments: write` and `Metadata: read` repository permissions (fine-grained), or the `repo_deployment` scope (classic). |
-| `GITHUB_API_URL` | `https://api.github.com` | For GitHub Enterprise Server, `https://<host>/api/v3`. |
-| `MASSDRIVER_APP_URL` | `https://app.massdriver.cloud` | The URL of the Massdriver UI, for the status links. |
-| `GITHUB_REPO_ATTR_KEY` | `github_repo` | The attribute that names the repository. |
-| `GITHUB_REF_ATTR_KEY` | `github_ref` | The attribute that names the ref. |
-| `GITHUB_ENVIRONMENT_NAME` | `environment` | `environment` or `project-environment`. |
-| `PORT` | `8080` | |
+| Variable | |
+|---|---|
+| `MASSDRIVER_SIGNING_SECRET` | Required. The `whsec_` signing secret of the event destination. |
+| `CONFIG_FILE` | The config file. Default: `/etc/massdriver-automations/config.yaml`. |
+| `GITHUB_TOKEN` | Required, or the variable that `github.token_env` names. A GitHub token with the `Deployments: write` and `Metadata: read` repository permissions (fine-grained), or the `repo_deployment` scope (classic). |
 
-The automation does not call the Massdriver API.
+`PORT`, `LOG_FORMAT`, and `LOG_LEVEL` are in the [common settings](../../README.md#common-settings).
+
+The config file is YAML. [`config.example.yaml`](config.example.yaml) has every key, with comments. An unknown key stops the automation at start.
+
+| Key | Default | |
+|---|---|---|
+| `github.api_url` | `https://api.github.com` | For GitHub Enterprise Server, `https://<host>/api/v3`. |
+| `github.token_env` | `GITHUB_TOKEN` | The variable that holds the GitHub token. |
+| `github.repo_attribute` | `github_repo` | The attribute that names the repository. |
+| `github.ref_attribute` | `github_ref` | The attribute that names the ref. |
+| `github.environment_name` | `environment` | `environment` or `project-environment`. |
+| `massdriver.app_url` | `https://app.massdriver.cloud` | The Massdriver UI, for the status links. |
+
+Every key is optional. The automation does not call the Massdriver API.
 
 ## Event destination
 
@@ -56,7 +64,7 @@ mass event destination create \
   --condition '.data.metadata.deployment_action != "PLAN" and (.data.attributes.github_repo // "") != ""'
 ```
 
-If you change `GITHUB_REPO_ATTR_KEY`, change `github_repo` in the condition too.
+If you change `github.repo_attribute`, change `github_repo` in the condition too.
 
 Copy the signing secret from the destination into `MASSDRIVER_SIGNING_SECRET`.
 
@@ -64,6 +72,7 @@ Copy the signing secret from the destination into `MASSDRIVER_SIGNING_SECRET`.
 
 ```bash
 docker run -p 8080:8080 \
+  -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:ro" \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
   -e GITHUB_TOKEN=github_pat_... \
   massdrivercloud/massdriver-automations:latest run github-deployments
@@ -80,5 +89,5 @@ docker run -p 8080:8080 \
 - Custom attribute keys allow only letters, digits, and underscores, so the keys use underscores. A custom attribute has a fixed list of values. Add each repository and ref to that list.
 - GitHub marks older successful deployments in the same environment as inactive. Two components that use one
   repository and one environment replace each other's active deployment. Use separate repositories, or set
-  `GITHUB_ENVIRONMENT_NAME=project-environment` when the components are in different projects.
+  `github.environment_name: project-environment` when the components are in different projects.
 - Authentication is by token. GitHub App authentication is not supported.

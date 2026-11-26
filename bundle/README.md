@@ -4,7 +4,7 @@ Runs the [automations](../README.md) on a Kubernetes cluster. Turn on any set of
 the bundle creates:
 
 - a Deployment with one replica, running `massdrivercloud/massdriver-automations:<tag> run <name>`
-- a Secret with its environment variables, and a ConfigMap with its YAML configuration file, if it has one
+- a Secret with its environment variables, and a ConfigMap with its config file
 - a Service and an Ingress for the host `<name>.<domain>`
 - a Massdriver event destination that sends events to `https://<name>.<domain>/hooks/massdriver`, with the event
   types, attributes, and condition from the automation's README
@@ -53,6 +53,23 @@ because each host serves one automation.
 For proposal-chatops, set the Slack app's interactivity request URL to
 `https://proposal-chatops.<domain>/slack/interactions`.
 
+## Configuration
+
+Each automation has one **Configuration** parameter: the YAML of its config file, as its README and its
+`config.example.yaml` describe. The default is a small valid config to edit. The bundle writes it to
+`/etc/massdriver-automations/config.yaml`, the default `CONFIG_FILE`, and the automation reads it at start. A change
+restarts the automation. A config that does not decode or validate stops the automation with one `invalid config`
+log record.
+
+A key that names an environment variable for a credential, such as `github.token_env` or `splunk.token_env`, must
+keep its default: the bundle sets only the variables in [Secrets](#secrets).
+
+## Slack
+
+The automations share one Slack app. Set the `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` secrets from it, and set
+`slack.channel` in the config of each automation that posts. Without the app, set the `SLACK_WEBHOOK_URL` secret:
+every automation that posts then sends to the webhook's one channel. See [Slack](../README.md#slack).
+
 ## Service account
 
 The bundle creates event destinations with the `massdriver-service-account` dependency, because a deployment cannot
@@ -83,16 +100,16 @@ Each secret is set on the instance. Set only the secrets of the automations that
 
 | Secret | Automation | Variable |
 |---|---|---|
+| `SLACK_BOT_TOKEN` | bundle-scanner, drift, freeze-guard, proposal-chatops, release-notes, rollback-on-failure | `SLACK_BOT_TOKEN` |
+| `SLACK_SIGNING_SECRET` | proposal-chatops | `SLACK_SIGNING_SECRET` |
+| `SLACK_WEBHOOK_URL` | bundle-scanner, drift, freeze-guard, release-notes, rollback-on-failure | `SLACK_WEBHOOK_URL` |
 | `AUDIT_ARCHIVER_AWS_ACCESS_KEY_ID`, `AUDIT_ARCHIVER_AWS_SECRET_ACCESS_KEY` | audit-archiver | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `AUDIT_ARCHIVER_SPLUNK_HEC_TOKEN` | audit-archiver | `SPLUNK_HEC_TOKEN` |
 | `AUDIT_ARCHIVER_DD_API_KEY` | audit-archiver | `DD_API_KEY` |
-| `BUNDLE_SCANNER_SLACK_WEBHOOK_URL` | bundle-scanner | `SLACK_WEBHOOK_URL` |
-| `DRIFT_SLACK_WEBHOOK_URL`, `DRIFT_RUN_TOKEN` | drift | `SLACK_WEBHOOK_URL`, `DRIFT_RUN_TOKEN` |
-| `FREEZE_GUARD_SLACK_WEBHOOK_URL`, `FREEZE_GUARD_ADMIN_TOKEN` | freeze-guard | `SLACK_WEBHOOK_URL`, `FREEZE_ADMIN_TOKEN` |
+| `DRIFT_RUN_TOKEN` | drift | `DRIFT_RUN_TOKEN` |
+| `FREEZE_GUARD_ADMIN_TOKEN` | freeze-guard | `FREEZE_ADMIN_TOKEN` |
 | `GITHUB_DEPLOYMENTS_TOKEN` | github-deployments | `GITHUB_TOKEN` |
-| `PROPOSAL_CHATOPS_SLACK_BOT_TOKEN`, `PROPOSAL_CHATOPS_SLACK_SIGNING_SECRET` | proposal-chatops | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` |
-| `RELEASE_NOTES_SLACK_WEBHOOK_URL`, `RELEASE_NOTES_TEAMS_WEBHOOK_URL` | release-notes | `SLACK_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL` |
-| `ROLLBACK_ON_FAILURE_SLACK_WEBHOOK_URL` | rollback-on-failure | `SLACK_WEBHOOK_URL` |
+| `RELEASE_NOTES_TEAMS_WEBHOOK_URL` | release-notes | `TEAMS_WEBHOOK_URL` |
 | `ROUTER_ENV` | router | Each key of the JSON object |
 
 ## Event destinations
@@ -102,8 +119,12 @@ the automation's README says to:
 
 - sandbox-on-join: from the `group` of each sandbox rule.
 - statuspage: from the environment `id`s of the configuration.
-- github-deployments: from the repository attribute key.
-- rollback-on-failure: from the opt-in attribute key and value.
+- github-deployments: from `github.repo_attribute`, default `github_repo`.
+- rollback-on-failure: from `attribute.key` and `attribute.value`, default `autorollback` = `true`. The destination
+  sends failed deployments and completed rollbacks.
+
+autodeploy-downstream's destination sends every completed `PROVISION`; the automation applies the `upstream`
+attributes of its rules itself.
 
 The router destination sends the event types of every route in its configuration, with no attributes and no
 condition. Each route filters with its own `match` and `when`.
@@ -119,6 +140,7 @@ because their events can have no attributes. release-notes always filters on `md
 - router runs the `<tag>-scripts` image when a route has an `exec` step or **Scripts** has a file. That image has
   `sh`, `jq`, `curl`, and `python3`. For other tools, build an image from it, push it with the same `-scripts`
   tag to your own repository, and set **Image > Repository**, which every automation uses.
-- audit-archiver reads S3 credentials from the secrets. It does not set up IRSA or EKS Pod Identity.
+- audit-archiver reads S3 credentials from the secrets. It does not set up IRSA or EKS Pod Identity. Set
+  `s3.region` in its config.
 - Resource requests and limits are fixed: 25m CPU and 64Mi memory, up to 500m and 256Mi, and for bundle-scanner
   250m and 512Mi, up to 2 CPUs and 2Gi.

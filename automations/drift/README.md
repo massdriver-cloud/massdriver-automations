@@ -53,23 +53,26 @@ proposal stays open and the alert says to approve it in Massdriver.
 
 ## Configuration
 
-| Variable | Default | |
-|---|---|---|
-| `MASSDRIVER_ORGANIZATION_ID` | | Required. Your organization's identifier. |
-| `MASSDRIVER_API_KEY` | | Required. An `md_` access token of a service account. |
-| `MASSDRIVER_SIGNING_SECRET` | | Required. The `whsec_` signing secret of the event destination. |
-| `MASSDRIVER_URL` | `https://api.massdriver.cloud` | The URL of your Massdriver installation. |
-| `MASSDRIVER_APP_URL` | `https://app.massdriver.cloud` | The URL of the Massdriver UI, for the plan links. |
-| `DRIFT_CONFIG` | `./drift.yaml` | The checks. |
-| `SLACK_WEBHOOK_URL` | | A Slack incoming webhook. Without one, alerts go to the logs only. |
-| `DRIFT_RUN_TOKEN` | | Enables `POST /drift/run`. Callers send it as `Authorization: Bearer <token>`. |
-| `STATE_DIR` | | A directory for the plans in progress and the queues (`drift.json`). |
-| `PORT` | `8080` | |
+| Variable | |
+|---|---|
+| `MASSDRIVER_SIGNING_SECRET` | Required. The `whsec_` signing secret of the event destination. |
+| `MASSDRIVER_ORGANIZATION_ID` | Required. Your organization's identifier. |
+| `MASSDRIVER_API_KEY` | Required. An `md_` access token of a service account. |
+| `MASSDRIVER_URL` | The URL of your Massdriver installation. Default: `https://api.massdriver.cloud`. |
+| `CONFIG_FILE` | The config file. Default: `/etc/massdriver-automations/config.yaml`. |
+| `SLACK_BOT_TOKEN` | The bot token of the [Slack app](../../README.md#slack). Posts to the channels in the config. |
+| `SLACK_WEBHOOK_URL` | An incoming webhook, when there is no Slack app. Posts every message to its one channel. |
+| `DRIFT_RUN_TOKEN` | Turns on `POST /drift/run`. Callers send it as `Authorization: Bearer <token>`. |
+| `STATE_DIR` | A directory for the plans in progress and the queues (`drift.json`). |
 
-### drift.yaml
+`PORT`, `LOG_FORMAT`, and `LOG_LEVEL` are in the [common settings](../../README.md#common-settings).
+
+The config file is YAML. [`config.example.yaml`](config.example.yaml) has every key, with comments. An unknown key stops the automation at start.
 
 | Key | Default | |
 |---|---|---|
+| `slack.channel` | | The channel for alerts, with `SLACK_BOT_TOKEN`. Without a channel or a webhook, alerts go to the logs only. |
+| `massdriver.app_url` | `https://app.massdriver.cloud` | The Massdriver UI, for the plan links. |
 | `checks[].name` | | Required. Unique. |
 | `checks[].schedule` | | A cron expression (5 fields, or `@daily`, `@every 6h`). Without one, the check runs only from `POST /drift/run`. |
 | `checks[].timezone` | `UTC` | The timezone of `schedule`. |
@@ -77,14 +80,14 @@ proposal stays open and the alert says to approve it in Massdriver.
 | `checks[].mode` | `detect` | `detect`, `resolve`, or `propose`. |
 | `checks[].resolve_with` | `deployed` | `deployed` or `saved`. |
 | `checks[].max_concurrent` | `5` | Plans running at once for the check. |
-| `checks[].slack_webhook_url` | `SLACK_WEBHOOK_URL` | A Slack incoming webhook for this check. |
+| `checks[].slack.channel` | `slack.channel` | The channel for this check's alerts. |
 | `checks[].notify_clean` | `false` | Post clean results. |
 | `checks[].summary` | `false` | Post one line of totals when a run finishes. |
 | `checks[].patterns.clean` | `No changes\.` | A Go regular expression that marks a step with no changes. |
 | `checks[].patterns.drift` | `Plan: \d+ to \w+(?:, \d+ to \w+)*` | A Go regular expression that marks a step with changes. Each `<n> to <verb>` in the match is counted, so `import` and `forget` count too. |
 | `checks[].patterns.resource` | `(?m)^\s*# \S+.* (?:will be\|must be) .*$` | A Go regular expression for the changed resource lines in the alert. |
 
-[drift.example.yaml](drift.example.yaml) has every key.
+With `resolve` or `propose`, the alert names the drift, and a reply in its thread says what drift did about it: the deployment it created, or why it did not. With only a webhook, the reply is a message of its own.
 
 ### Run a check now
 
@@ -126,15 +129,14 @@ Copy the signing secret from the destination's **Overview** tab into `MASSDRIVER
 
 ```bash
 docker run -p 8080:8080 \
+  -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:ro" \
+  -v "$PWD/state:/state" \
   -e MASSDRIVER_ORGANIZATION_ID=acme \
   -e MASSDRIVER_API_KEY=md_... \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
-  -e SLACK_WEBHOOK_URL=https://hooks.slack.com/services/... \
+  -e SLACK_BOT_TOKEN=xoxb-... \
   -e DRIFT_RUN_TOKEN=... \
-  -e DRIFT_CONFIG=/config/drift.yaml \
   -e STATE_DIR=/state \
-  -v "$PWD/drift.yaml:/config/drift.yaml:ro" \
-  -v "$PWD/state:/state" \
   massdrivercloud/massdriver-automations:latest run drift
 ```
 

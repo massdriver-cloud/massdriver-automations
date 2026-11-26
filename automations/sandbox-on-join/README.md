@@ -31,30 +31,30 @@ Service accounts that join a group are ignored.
 
 ## Configuration
 
-| Variable | Default | |
+| Variable | |
+|---|---|
+| `MASSDRIVER_SIGNING_SECRET` | Required. The `whsec_` signing secret of the event destination. |
+| `MASSDRIVER_ORGANIZATION_ID` | Required. Your organization's identifier. |
+| `MASSDRIVER_API_KEY` | Required. An `md_` access token of a service account. |
+| `MASSDRIVER_URL` | The URL of your Massdriver installation. Default: `https://api.massdriver.cloud`. |
+| `CONFIG_FILE` | The config file. Default: `/etc/massdriver-automations/config.yaml`. |
+
+`PORT`, `LOG_FORMAT`, and `LOG_LEVEL` are in the [common settings](../../README.md#common-settings).
+
+The config file is YAML. [`config.example.yaml`](config.example.yaml) has every key, with comments. An unknown key stops the automation at start.
+
+| Key | Default | |
 |---|---|---|
-| `MASSDRIVER_ORGANIZATION_ID` | | Required. Your organization's identifier. |
-| `MASSDRIVER_API_KEY` | | Required. An `md_` access token of a service account. |
-| `MASSDRIVER_SIGNING_SECRET` | | Required. The `whsec_` signing secret of the event destination. |
-| `MASSDRIVER_URL` | `https://api.massdriver.cloud` | The URL of your Massdriver installation. |
-| `SANDBOX_CONFIG` | `/config/sandboxes.yaml` | Path of the sandbox rules. |
-| `PORT` | `8080` | |
+| `sandboxes[].group` | | Required. The group name, as shown in Massdriver. |
+| `sandboxes[].project` | | Required. The project of the template environment. Forks go into the same project. |
+| `sandboxes[].environment` | | Required. The template environment. |
+| `sandboxes[].deploy` | `false` | Deploy the fork after it is created. |
+| `sandboxes[].deleteAfterDecommission` | `false` | Delete the fork after its decommission completes. |
+| `sandboxes[].copyEnvironmentDefaults` | `false` | Copy the template's environment defaults. |
+| `sandboxes[].copySecrets` | `false` | Copy the secrets of the template's instances. |
+| `sandboxes[].copyRemoteReferences` | `false` | Copy the template's remote references. |
 
-`sandboxes.yaml`:
-
-```yaml
-sandboxes:
-  - group: Developers          # group name, as shown in Massdriver
-    project: api               # project of the template environment
-    environment: staging       # template environment; forks go into the same project
-    deploy: true               # deploy the fork after it is created
-    deleteAfterDecommission: true
-    copyEnvironmentDefaults: true
-    copySecrets: false
-    copyRemoteReferences: false
-```
-
-Every key except `group`, `project`, and `environment` defaults to `false`. A group can have more than one rule.
+At least one rule is required. A group can have more than one rule.
 
 The service account needs:
 
@@ -90,7 +90,7 @@ Copy the signing secret from the destination into `MASSDRIVER_SIGNING_SECRET`.
 
 ```bash
 docker run -p 8080:8080 \
-  -v "$PWD/sandboxes.yaml:/config/sandboxes.yaml:ro" \
+  -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:ro" \
   -e MASSDRIVER_ORGANIZATION_ID=acme \
   -e MASSDRIVER_API_KEY=md_... \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \

@@ -8,11 +8,15 @@ All automations ship in one image. Run one automation per container:
 
 ```bash
 docker run -p 8080:8080 \
+  -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:ro" \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
   massdrivercloud/massdriver-automations:latest run autodeploy-downstream
 ```
 
 `AUTOMATION=<name>` works in place of `run <name>`. `list` prints every automation.
+
+Environment variables hold credentials and deployment wiring only. Everything else is in one YAML config file for
+each automation. Each automation has a commented `config.example.yaml`.
 
 | Automation | Events | Does |
 |---|---|---|
@@ -29,8 +33,8 @@ docker run -p 8080:8080 \
 | [sandbox-on-join](automations/sandbox-on-join) | `group_membership.*`, `deployment.completed` | Forks a sandbox environment for each new group member, and removes it when they leave. |
 | [statuspage](automations/statuspage) | `alarm.*`, `alarm_state.created`, `deployment.*`, `instance.*` | Serves a public status page from alarms, instances, and deployments. |
 
-Each automation's README has its settings and the `mass event destination create` command that sends it only
-the events it uses.
+Each automation's README has its config, its environment variables, and the `mass event destination create`
+command that sends it only the events it uses.
 
 ## Deploy
 
@@ -49,11 +53,22 @@ Two Massdriver bundles run any set of the automations, with one event destinatio
 | `MASSDRIVER_ORGANIZATION_ID` | | Your organization's identifier. Required by automations that call the API. |
 | `MASSDRIVER_API_KEY` | | An `md_` access token of a service account. Required by automations that call the API. |
 | `MASSDRIVER_URL` | `https://api.massdriver.cloud` | The URL of your Massdriver installation. |
+| `CONFIG_FILE` | `/etc/massdriver-automations/config.yaml` | The config file of the automation. |
 | `PORT` | `8080` | |
 | `LOG_FORMAT` | `auto` | `auto`, `json`, or `text`. `auto` writes colored text when stderr is a terminal and JSON otherwise, such as in a container or a pipe. `text` always writes colored text. Set `NO_COLOR` to any value to turn off the colors (see [no-color.org](https://no-color.org)). |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
 
 Every automation receives events on `POST /hooks/massdriver` and answers health checks on `GET /healthz`.
+
+### Config file
+
+The config file is YAML. The automation reads it once, at start. A key that the automation does not know, a value
+of the wrong type, or a value that does not validate stops the automation with one `invalid config` log record,
+which names the file, the line or the key, and the problem, never the value. An automation whose config needs no
+setting starts without the file.
+
+A setting that needs a credential names the environment variable that holds it, such as `token_env:
+GITHUB_TOKEN`. A config file never holds a credential.
 
 ### Logs
 
@@ -71,6 +86,41 @@ The same record as text. In color, the level and the `status` value are green, a
 22:05:42.539 INF request automation=router version=v1.4.0 method=POST path=/hooks/massdriver status=204 duration_ms=10.42 bytes=0 event_id=evt-local-1 event_type=deployment.completed
 ```
 
+## Slack
+
+Create one Slack app for all of the automations:
+
+1. Create a Slack app from scratch at [api.slack.com/apps](https://api.slack.com/apps).
+2. Under **OAuth & Permissions**, add the bot scopes `chat:write` and `chat:write.public`. Without
+   `chat:write.public`, invite the app to each channel that it posts to.
+3. For proposal-chatops, under **Interactivity & Shortcuts**, turn on interactivity and set the request URL to
+   `https://<proposal-chatops host>/slack/interactions`.
+4. Install the app in your workspace. Set the bot token (`xoxb-...`) as `SLACK_BOT_TOKEN` and the signing secret
+   from **Basic Information** as `SLACK_SIGNING_SECRET`, for every automation that posts.
+
+Each automation posts to the channel in its config, `slack.channel`, and some accept a channel for each check,
+window, or instance. A channel is a name, such as `#infra`, or a channel ID. Without a channel, an automation
+does not post to Slack. drift and rollback-on-failure reply in the thread of an alert with its outcome.
+
+| Automation | Posts | Channel settings |
+|---|---|---|
+| bundle-scanner | Scan results | `slack.channel` |
+| drift | Drift alerts, the outcome of each resolution in the alert's thread, and run totals | `slack.channel`, `checks[].slack.channel` |
+| freeze-guard | Window starts, ends, and lifts | `slack.channel`, `windows[].slack.channel` |
+| proposal-chatops | Proposals with Approve and Reject buttons | `slack.channel`, `slack.channel_attribute` |
+| release-notes | New bundle versions | `slack.channel` |
+| rollback-on-failure | Rollback notices, and the result of each rollback in the notice's thread | `slack.channel` |
+
+### Webhook
+
+For a workspace without the app, set `SLACK_WEBHOOK_URL` to an
+[incoming webhook](https://api.slack.com/messaging/webhooks). Every message goes to the webhook's one channel, and
+the channels in the config do nothing; an automation logs one `slack channels ignored` warning at start when its
+config names any. A webhook cannot reply in a thread, so a reply is a message of its own. proposal-chatops needs the
+app: a webhook cannot update a message or receive a click. When both are set, the bot token is used.
+
+Errors and logs never hold the bot token or the webhook URL.
+
 ## Run locally
 
 Run an automation on your computer, and give Massdriver a public URL with a tunnel.
@@ -83,6 +133,7 @@ From a clone of this repository:
 export MASSDRIVER_ORGANIZATION_ID=acme
 export MASSDRIVER_API_KEY=md_...
 export MASSDRIVER_SIGNING_SECRET=whsec_...   # set after step 3; any whsec_ value works until then
+export CONFIG_FILE=automations/autodeploy-downstream/config.example.yaml
 go run ./cmd/massdriver-automations run autodeploy-downstream
 ```
 
@@ -90,6 +141,7 @@ Or with Docker:
 
 ```bash
 docker run --rm -p 8080:8080 \
+  -v "$PWD/automations/autodeploy-downstream/config.example.yaml:/etc/massdriver-automations/config.yaml:ro" \
   -e MASSDRIVER_ORGANIZATION_ID -e MASSDRIVER_API_KEY -e MASSDRIVER_SIGNING_SECRET \
   massdrivercloud/massdriver-automations:latest run autodeploy-downstream
 ```
@@ -191,6 +243,11 @@ type Automation interface {
   respond `500`, so Massdriver sends the event again. Massdriver waits 10 seconds for a response, so start long
   work in a goroutine.
 - Implement `Routes(mux *http.ServeMux)` to serve more routes, such as a callback from Slack or a web page.
+- Read settings with `automation.LoadConfig(&cfg)`. It decodes the file at `CONFIG_FILE` and refuses unknown keys.
+  Give the config a `Validate() error` method to check it and fill its defaults. Read only credentials and
+  deployment wiring from the environment.
+- `pkg/slack` posts to Slack with the bot token or the webhook. Give the config a `slack` section of type
+  `slack.Config`.
 - `pkg/massdriver` calls the V2 GraphQL API. Put each operation in a `.graphql` file under `queries/` and load it
   with `//go:embed`.
 - Export a `Definition` and add it to [`automations/registry.go`](automations/registry.go).
@@ -198,4 +255,4 @@ type Automation interface {
 
 [`autodeploy-downstream`](automations/autodeploy-downstream) is a short, complete example.
 
-`pkg/automation` and `pkg/massdriver` are importable, so you can also build automations in your own repository.
+`pkg/automation`, `pkg/massdriver`, and `pkg/slack` are importable, so you can also build automations in your own repository.

@@ -29,17 +29,28 @@ roll back. The attribute applies to the instances of the component in every envi
 
 ## Configuration
 
-| Variable | Default | |
+| Variable | |
+|---|---|
+| `MASSDRIVER_SIGNING_SECRET` | Required. The `whsec_` signing secret of the event destination. |
+| `MASSDRIVER_ORGANIZATION_ID` | Required. Your organization's identifier. |
+| `MASSDRIVER_API_KEY` | Required. An `md_` access token of a service account. |
+| `MASSDRIVER_URL` | The URL of your Massdriver installation. Default: `https://api.massdriver.cloud`. |
+| `CONFIG_FILE` | The config file. Default: `/etc/massdriver-automations/config.yaml`. |
+| `SLACK_BOT_TOKEN` | The bot token of the [Slack app](../../README.md#slack). Posts to the channels in the config. |
+| `SLACK_WEBHOOK_URL` | An incoming webhook, when there is no Slack app. Posts every message to its one channel. |
+
+`PORT`, `LOG_FORMAT`, and `LOG_LEVEL` are in the [common settings](../../README.md#common-settings).
+
+The config file is YAML. [`config.example.yaml`](config.example.yaml) has every key, with comments. An unknown key stops the automation at start.
+
+| Key | Default | |
 |---|---|---|
-| `MASSDRIVER_ORGANIZATION_ID` | | Required. Your organization's identifier. |
-| `MASSDRIVER_API_KEY` | | Required. An `md_` access token of a service account. |
-| `MASSDRIVER_SIGNING_SECRET` | | Required. The `whsec_` signing secret of the event destination. |
-| `MASSDRIVER_URL` | `https://api.massdriver.cloud` | The URL of your Massdriver installation. |
-| `MASSDRIVER_APP_URL` | `https://app.massdriver.cloud` | The URL of the Massdriver UI, for the links in notices. |
-| `AUTO_ROLLBACK_ATTR_KEY` | `autorollback` | The attribute key that opts an instance in. |
-| `AUTO_ROLLBACK_ATTR_VALUE` | `true` | The attribute value that opts an instance in. |
-| `SLACK_WEBHOOK_URL` | | A Slack incoming webhook. Empty sends notices to the logs only. |
-| `PORT` | `8080` | |
+| `attribute.key` | `autorollback` | The attribute key that opts an instance in. |
+| `attribute.value` | `true` | The attribute value that opts an instance in. |
+| `slack.channel` | | The channel for notices, with `SLACK_BOT_TOKEN`. Without a channel or a webhook, notices go to the logs only. |
+| `massdriver.app_url` | `https://app.massdriver.cloud` | The Massdriver UI, for the links in notices. |
+
+With the bot token, the result of each rollback, completed or failed, is a reply in the thread of its notice.
 
 The service account needs these permissions on the opted-in instances:
 
@@ -56,12 +67,14 @@ mass event destination create \
   --name rollback-on-failure \
   --url https://rollback.example.com/hooks/massdriver \
   --event-type deployment.failed \
-  --condition '.data.metadata.deployment_action == "PROVISION" and .data.attributes["autorollback"] == "true"'
+  --event-type deployment.completed \
+  --condition '.data.metadata.deployment_action == "PROVISION" and .data.attributes["autorollback"] == "true" and (.type == "deployment.failed" or ((.data.entity.message // "") | startswith("Rollback to deployment ")))'
 ```
 
-The condition drops failed `PLAN` and `DECOMMISSION` deployments, and instances that did not opt in, so
-Massdriver marks them `SKIPPED` and does not send them. If you change `AUTO_ROLLBACK_ATTR_KEY` or
-`AUTO_ROLLBACK_ATTR_VALUE`, change the condition to match. To act on one environment only, add
+The condition drops `PLAN` and `DECOMMISSION` deployments, instances that did not opt in, and completed
+deployments that are not rollbacks, so Massdriver marks them `SKIPPED` and does not send them. A completed rollback
+is the reply in its notice's thread. If you change `attribute.key` or `attribute.value`, change the condition to
+match. To act on one environment only, add
 `--attribute md-environment=prod`.
 
 Copy the signing secret from the destination's **Overview** tab into `MASSDRIVER_SIGNING_SECRET`.
@@ -70,10 +83,11 @@ Copy the signing secret from the destination's **Overview** tab into `MASSDRIVER
 
 ```bash
 docker run -p 8080:8080 \
+  -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:ro" \
   -e MASSDRIVER_ORGANIZATION_ID=acme \
   -e MASSDRIVER_API_KEY=md_... \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
-  -e SLACK_WEBHOOK_URL=https://hooks.slack.com/services/... \
+  -e SLACK_BOT_TOKEN=xoxb-... \
   massdrivercloud/massdriver-automations:latest run rollback-on-failure
 ```
 

@@ -4,7 +4,7 @@ Runs HTTP requests, commands, and Massdriver API calls when an event matches a r
 type, attributes, and an optional expression, and runs a list of steps in order. Use it for small reactions that
 need no code: page someone, post a message, call a cleanup endpoint, run a script, or plan an instance.
 
-## Configuration file
+## Routes
 
 ```yaml
 engine: jq                      # or go; one engine for the whole file
@@ -33,7 +33,7 @@ routes:
 | `routes[].timeout` | The time for all steps of the route. Default `8s`, which is also the largest value for a sync route. Default `1m` for an async route. |
 | `routes[].do` | Required. The steps. Each step has exactly one of `http`, `exec`, and `massdriver`. |
 
-The router reads the file at start. It does not start when the file has an unknown field, a route without events or
+The router reads the config file at start. It does not start when the file has no routes, an unknown field, a route without events or
 steps, a sync route with a timeout over `8s`, or an expression that does not compile.
 
 More than one route can match an event. Each matching route runs.
@@ -302,16 +302,29 @@ routes:
 
 ## Configuration
 
-| Variable | Default | |
-|---|---|---|
-| `MASSDRIVER_SIGNING_SECRET` | | Required. The `whsec_` signing secret of the event destination. |
-| `ROUTER_CONFIG` | `/etc/router/config.yaml` | The configuration file. |
-| `MASSDRIVER_ORGANIZATION_ID`, `MASSDRIVER_API_KEY` | | Required when a route has a `massdriver` step. |
-| `MASSDRIVER_URL` | `https://api.massdriver.cloud` | |
-| `PORT` | `8080` | |
+| Variable | |
+|---|---|
+| `MASSDRIVER_SIGNING_SECRET` | Required. The `whsec_` signing secret of the event destination. |
+| `CONFIG_FILE` | The config file. Default: `/etc/massdriver-automations/config.yaml`. |
+| `MASSDRIVER_ORGANIZATION_ID`, `MASSDRIVER_API_KEY` | Required when a route has a `massdriver` step. |
+| `MASSDRIVER_URL` | The URL of your Massdriver installation. Default: `https://api.massdriver.cloud`. |
+| Others | The credentials that routes read with `env`, such as `PAGERDUTY_ROUTING_KEY`. |
 
-Set the credentials that routes read with `env`, such as `PAGERDUTY_ROUTING_KEY`, as environment variables of the
-container.
+`PORT`, `LOG_FORMAT`, and `LOG_LEVEL` are in the [common settings](../../README.md#common-settings).
+
+The config file is YAML. [`config.example.yaml`](config.example.yaml) has every key, with comments. An unknown key stops the automation at start.
+
+| Key | Default | |
+|---|---|---|
+| `engine` | `jq` | `jq` or `go`. |
+| `routes` | | Required. See [Routes](#routes). |
+
+### Logs
+
+The output of each step, the HTTP response or the command output, is logged at `debug` only. A failed step logs
+its HTTP status or exit status at `error`, with the last 512 bytes of its output. Scripts and the services they
+call must not print secrets. Errors in jq and Go template expressions name the expression's field, not the
+values it read.
 
 ## Event destination
 
@@ -337,34 +350,16 @@ Copy the signing secret from the destination's **Overview** tab into `MASSDRIVER
 
 ```bash
 docker run -p 8080:8080 \
+  -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:ro" \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
-  -e ROUTER_CONFIG=/config/config.yaml \
   -e PAGERDUTY_ROUTING_KEY=... \
-  -v "$PWD/config.yaml:/config/config.yaml:ro" \
   massdrivercloud/massdriver-automations:latest run router
 ```
-
-### The `-scripts` image
-
-`massdrivercloud/massdriver-automations:<tag>-scripts` has the same binary on Alpine Linux with `sh`, `jq`, `curl`,
-and `python3`. It runs as user `65532` and runs `router` by default. Use it for `exec` steps:
-
-```bash
-docker run -p 8080:8080 \
-  -e MASSDRIVER_SIGNING_SECRET=whsec_... \
-  -e ROUTER_CONFIG=/config/config.yaml \
-  -v "$PWD/config.yaml:/config/config.yaml:ro" \
-  -v "$PWD/scripts:/scripts:ro" \
-  massdrivercloud/massdriver-automations:latest-scripts
-```
-
-Each script must be executable and start with a `#!` line, such as `#!/usr/bin/env python3`. For other tools, build
-your own image `FROM massdrivercloud/massdriver-automations:<tag>-scripts`.
 
 ## Limits
 
 - The logs show the result of a failed step: the HTTP status and response, the command output, or the GraphQL
-  `data`, up to 4 KiB. With `LOG_LEVEL=debug`, they show the result of every step.
+  `data`, up to 4 KiB. With `LOG_LEVEL=debug`, they show the full output of every step.
 - The async queue holds 100 events, in memory. When it is full, the router responds `500`, and Massdriver sends the
   event again later. A restart loses the queue.
 - The router remembers the routes that ran for each event id for one hour, in memory. Run one replica.

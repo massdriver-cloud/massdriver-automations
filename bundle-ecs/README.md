@@ -5,7 +5,7 @@ destinations as the [Kubernetes bundle](../bundle). Turn on any set of automatio
 bundle creates:
 
 - an ECS service with one Fargate task (ARM64), running `massdrivercloud/massdriver-automations:<tag> run <name>`
-- a task definition with two containers: `files`, which writes the YAML configuration and the router **Scripts** to
+- a task definition with two containers: `files`, which writes the config file and the router **Scripts** to
   task volumes and exits, and the automation, which starts after `files` succeeds
 - a Secrets Manager secret with the automation's secret environment variables
 - a CloudWatch log group
@@ -92,6 +92,23 @@ that freeze-guard created, and incident and uptime history. Each one gets an acc
 system, with the root directory `/<name>` and the user `65532`. EFS grows with the data, so there is no size
 setting. Decommissioning the instance deletes the file system and the state.
 
+## Configuration
+
+Each automation has one **Configuration** parameter: the YAML of its config file, as its README and its
+`config.example.yaml` describe. The default is a small valid config to edit. The bundle writes it to
+`/etc/massdriver-automations/config.yaml`, the default `CONFIG_FILE`, and the automation reads it at start. A change
+restarts the automation. A config that does not decode or validate stops the automation with one `invalid config`
+log record.
+
+A key that names an environment variable for a credential, such as `github.token_env` or `splunk.token_env`, must
+keep its default: the bundle sets only the variables in [Secrets](#secrets).
+
+## Slack
+
+The automations share one Slack app. Set the `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` secrets from it, and set
+`slack.channel` in the config of each automation that posts. Without the app, set the `SLACK_WEBHOOK_URL` secret:
+every automation that posts then sends to the webhook's one channel. See [Slack](../README.md#slack).
+
 ## Service account
 
 The bundle creates event destinations with the `massdriver-service-account` dependency, because a deployment cannot
@@ -130,9 +147,9 @@ The roles that the bundle creates get only these permissions:
 |---|---|
 | Task execution role, one for each automation | `logs:CreateLogStream` and `logs:PutLogEvents` on its log group, `secretsmanager:GetSecretValue` on its secret, and `kms:Decrypt` on the instance's key. When **Image > Repository** is an ECR repository, also `ecr:GetAuthorizationToken`, and pull on that repository. |
 | Task role of drift, freeze-guard, and statuspage | `elasticfilesystem:ClientMount` and `elasticfilesystem:ClientWrite` through its access point. |
-| Task role of audit-archiver | `s3:PutObject` on `<bucket>/<prefix>/*`, and `s3:PutObjectRetention` with an Object Lock mode. |
+| Task role of audit-archiver | `s3:PutObject` on `<bucket>/<prefix>/*`, and `s3:PutObjectRetention` with `s3.object_lock`. |
 
-audit-archiver uses the task role when **S3 bucket** is set, **S3 endpoint** is empty, and the
+audit-archiver uses the task role when its config sets `s3.bucket` and no `s3.endpoint`, and the
 `AUDIT_ARCHIVER_AWS_ACCESS_KEY_ID` secret is not set. With the secrets, it uses the keys. If the bucket uses SSE-KMS
 with a customer managed key, allow the task role `kms:GenerateDataKey` in that key's policy.
 
@@ -142,16 +159,16 @@ Each secret is set on the instance. Set only the secrets of the automations that
 
 | Secret | Automation | Variable |
 |---|---|---|
+| `SLACK_BOT_TOKEN` | bundle-scanner, drift, freeze-guard, proposal-chatops, release-notes, rollback-on-failure | `SLACK_BOT_TOKEN` |
+| `SLACK_SIGNING_SECRET` | proposal-chatops | `SLACK_SIGNING_SECRET` |
+| `SLACK_WEBHOOK_URL` | bundle-scanner, drift, freeze-guard, release-notes, rollback-on-failure | `SLACK_WEBHOOK_URL` |
 | `AUDIT_ARCHIVER_AWS_ACCESS_KEY_ID`, `AUDIT_ARCHIVER_AWS_SECRET_ACCESS_KEY` | audit-archiver | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `AUDIT_ARCHIVER_SPLUNK_HEC_TOKEN` | audit-archiver | `SPLUNK_HEC_TOKEN` |
 | `AUDIT_ARCHIVER_DD_API_KEY` | audit-archiver | `DD_API_KEY` |
-| `BUNDLE_SCANNER_SLACK_WEBHOOK_URL` | bundle-scanner | `SLACK_WEBHOOK_URL` |
-| `DRIFT_SLACK_WEBHOOK_URL`, `DRIFT_RUN_TOKEN` | drift | `SLACK_WEBHOOK_URL`, `DRIFT_RUN_TOKEN` |
-| `FREEZE_GUARD_SLACK_WEBHOOK_URL`, `FREEZE_GUARD_ADMIN_TOKEN` | freeze-guard | `SLACK_WEBHOOK_URL`, `FREEZE_ADMIN_TOKEN` |
+| `DRIFT_RUN_TOKEN` | drift | `DRIFT_RUN_TOKEN` |
+| `FREEZE_GUARD_ADMIN_TOKEN` | freeze-guard | `FREEZE_ADMIN_TOKEN` |
 | `GITHUB_DEPLOYMENTS_TOKEN` | github-deployments | `GITHUB_TOKEN` |
-| `PROPOSAL_CHATOPS_SLACK_BOT_TOKEN`, `PROPOSAL_CHATOPS_SLACK_SIGNING_SECRET` | proposal-chatops | `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET` |
-| `RELEASE_NOTES_SLACK_WEBHOOK_URL`, `RELEASE_NOTES_TEAMS_WEBHOOK_URL` | release-notes | `SLACK_WEBHOOK_URL`, `TEAMS_WEBHOOK_URL` |
-| `ROLLBACK_ON_FAILURE_SLACK_WEBHOOK_URL` | rollback-on-failure | `SLACK_WEBHOOK_URL` |
+| `RELEASE_NOTES_TEAMS_WEBHOOK_URL` | release-notes | `TEAMS_WEBHOOK_URL` |
 | `ROUTER_ENV` | router | Each key of the JSON object |
 
 ## Event destinations
@@ -161,8 +178,12 @@ the automation's README says to:
 
 - sandbox-on-join: from the `group` of each sandbox rule.
 - statuspage: from the environment `id`s of the configuration.
-- github-deployments: from the repository attribute key.
-- rollback-on-failure: from the opt-in attribute key and value.
+- github-deployments: from `github.repo_attribute`, default `github_repo`.
+- rollback-on-failure: from `attribute.key` and `attribute.value`, default `autorollback` = `true`. The destination
+  sends failed deployments and completed rollbacks.
+
+autodeploy-downstream's destination sends every completed `PROVISION`; the automation applies the `upstream`
+attributes of its rules itself.
 
 The router destination sends the event types of every route in its configuration, with no attributes and no
 condition. Each route filters with its own `match` and `when`.
