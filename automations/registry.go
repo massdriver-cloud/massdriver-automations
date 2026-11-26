@@ -5,6 +5,7 @@ import (
 	auditarchiver "github.com/massdriver-cloud/massdriver-automations/automations/audit-archiver"
 	autodeploydownstream "github.com/massdriver-cloud/massdriver-automations/automations/autodeploy-downstream"
 	bundlescanner "github.com/massdriver-cloud/massdriver-automations/automations/bundle-scanner"
+	costexplorer "github.com/massdriver-cloud/massdriver-automations/automations/cost-explorer"
 	"github.com/massdriver-cloud/massdriver-automations/automations/drift"
 	freezeguard "github.com/massdriver-cloud/massdriver-automations/automations/freeze-guard"
 	githubdeployments "github.com/massdriver-cloud/massdriver-automations/automations/github-deployments"
@@ -22,6 +23,7 @@ var All = []automation.Definition{
 	auditarchiver.Definition,
 	autodeploydownstream.Definition,
 	bundlescanner.Definition,
+	costexplorer.Definition,
 	drift.Definition,
 	freezeguard.Definition,
 	githubdeployments.Definition,

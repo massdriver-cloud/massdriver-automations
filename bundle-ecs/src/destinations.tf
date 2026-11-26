@@ -29,6 +29,10 @@ resource "massdriver_event_destination" "main" {
       error_message = "proposal-chatops needs the SLACK_BOT_TOKEN and SLACK_SIGNING_SECRET secrets."
     }
     precondition {
+      condition     = each.key != "cost-explorer" || try(local.configs["cost-explorer"].public, false) == true || lookup(local.secrets, "COST_EXPLORER_PASSWORD", "") != ""
+      error_message = "cost-explorer needs the COST_EXPLORER_PASSWORD secret, or Public turned on."
+    }
+    precondition {
       condition     = each.key != "router" || length(local.router_event_types) > 0
       error_message = "router needs at least one route with events."
     }

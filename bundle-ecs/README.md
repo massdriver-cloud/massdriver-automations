@@ -22,9 +22,11 @@ bundle creates:
 
 The instance also gets one KMS key for the secrets, the logs, and the state, one security group for the tasks, and,
 when an automation keeps state, an EFS file system with a mount target in each Availability Zone of the subnets.
-When statuspage runs, the bundle produces a `status_page` resource of the example type
-[status-page](../examples/resource-types/status-page): the site's URL, its `status.json` URL, and the URL, feed,
-and badge of each page. Publish that type to your organization before you publish the bundle.
+The bundle produces one `automations` resource of the example type
+[automation-server](../examples/resource-types/automation-server) when any automation is on. It lists each
+automation that is on: its URL, the ID, event types, attributes, and condition of its event destination, and the
+URLs that people use, such as the status page, the cost dashboard, and the Slack interactivity URL. It holds no
+credentials. Publish that type to your organization before you publish the bundle.
 
 ## Requirements
 
@@ -56,6 +58,7 @@ Set **Ingress > Domain**, such as `automations.acme.com`, or leave it empty to u
 | audit-archiver | `audit-archiver.<domain>` | `/hooks/massdriver` |
 | autodeploy-downstream | `autodeploy-downstream.<domain>` | `/hooks/massdriver` |
 | bundle-scanner | `bundle-scanner.<domain>` | `/hooks/massdriver` |
+| cost-explorer | **Cost explorer > Host**, or `cost-explorer.<domain>` | every path |
 | drift | `drift.<domain>` | `/hooks/massdriver`, and `/drift/run` to start checks from outside AWS |
 | freeze-guard | `freeze-guard.<domain>` | `/hooks/massdriver`, and `/freeze/lift` to lift a freeze from outside AWS |
 | github-deployments | `github-deployments.<domain>` | `/hooks/massdriver` |
@@ -135,6 +138,7 @@ turn on:
 | audit-archiver | None. |
 | autodeploy-downstream | `instance:deploy` on the downstream instances, `instance:propose` on those of `propose` rules, and `project:view` on their projects. |
 | bundle-scanner | `repo:view` and `repo:pull` on the bundle repos. With a result attribute key, also `repo:update`. |
+| cost-explorer | `project:view` on the projects whose costs it shows. |
 | drift | `project:view` and `instance:plan` on the matched instances. Mode `resolve` also needs `instance:deploy`, and `instance:propose` with `resolve_with: deployed`. Mode `propose` needs `instance:propose`. |
 | freeze-guard | `organization:manageGroups`, to create and delete group policies. Any member of the organization can list groups and their policies. |
 | github-deployments | None. |
@@ -177,6 +181,7 @@ Each secret is set on the instance. Set only the secrets of the automations that
 | `AUDIT_ARCHIVER_AWS_ACCESS_KEY_ID`, `AUDIT_ARCHIVER_AWS_SECRET_ACCESS_KEY` | audit-archiver | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | `AUDIT_ARCHIVER_SPLUNK_HEC_TOKEN` | audit-archiver | `SPLUNK_HEC_TOKEN` |
 | `AUDIT_ARCHIVER_DD_API_KEY` | audit-archiver | `DD_API_KEY` |
+| `COST_EXPLORER_PASSWORD` | cost-explorer | `COST_EXPLORER_PASSWORD` |
 | `DRIFT_RUN_TOKEN` | drift | `DRIFT_RUN_TOKEN` |
 | `FREEZE_GUARD_ADMIN_TOKEN` | freeze-guard | `FREEZE_ADMIN_TOKEN` |
 | `GITHUB_DEPLOYMENTS_TOKEN` | github-deployments | `GITHUB_TOKEN` |

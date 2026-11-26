@@ -222,6 +222,36 @@ def automations(k8s):
             "scanners": {"ui:widget": "checkboxes", "ui:options": {"inline": True}}},
     )
 
+    # ---------------------------------------------------------------- cost-explorer
+    extra = {"host": s("Host", "The host of the dashboard, such as `costs.acme.com`. Empty uses "
+                       "`cost-explorer.<domain>`.")}
+    if k8s:
+        extra["storage_size_gi"] = storage("History storage (GiB)", "The volume for the daily cost history.")
+    out["cost-explorer"] = dict(
+        title="Cost explorer",
+        description="Serves a dashboard of the cloud costs of every instance. Group and filter by any instance "
+                    "attribute, and see the daily trend. Set the `COST_EXPLORER_PASSWORD` secret, or make it "
+                    "public.",
+        config=obj("Dashboard", {
+            "title": s("Title", default="Cloud costs"),
+            "dimensions": arr("Dimensions", s("Attribute", examples=["team"]),
+                              "Instance attributes to group and filter by, in this order. `bundle` is the bundle "
+                              "name. Only these attributes reach the browser.", uniqueItems=True, minItems=1,
+                              default=["md-project", "md-environment", "md-component", "bundle"]),
+            "refresh": s("Refresh", "How often to read the costs. A completed provision or decommission also "
+                         "reads them.", default="1h", **DURATION),
+            "history_days": i("History (days)", "Days of daily cost history to keep.", default=90, minimum=1,
+                              maximum=731),
+            "public": b("Public", "Serves the dashboard without a password. Costs can reveal what you run."),
+            "username": s("Username", "The basic auth user. The `COST_EXPLORER_PASSWORD` secret is the "
+                          "password.", default="massdriver"),
+            "massdriver": massdriver_ui(),
+        }),
+        extra=extra,
+        ui={"ui:order": ["title", "dimensions", "refresh", "history_days", "public", "username", "massdriver"],
+            "dimensions": TAG},
+    )
+
     # ---------------------------------------------------------------- drift
     check = obj("Check", {
         "name": s("Name", "Unique. Alerts and `POST /drift/run?check=<name>` use it.",

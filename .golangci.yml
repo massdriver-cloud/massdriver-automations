@@ -17,7 +17,7 @@ linters:
       - path: _test\.go
         linters: [errcheck, errorlint, gosec, revive]
       # State and output paths come from the operator's config file.
-      - path: automations/statuspage/state\.go
+      - path: automations/(statuspage/state|cost-explorer/history)\.go
         linters: [gosec]
         text: G703
 

@@ -1,0 +1,18 @@
+query CostExplorerInstances($org: ID!, $cursor: Cursor) {
+  instances(organizationId: $org, cursor: $cursor) {
+    cursor { next }
+    items {
+      id
+      name
+      status
+      effectiveAttributes
+      bundle { name }
+      cost {
+        lastDay { amount currency }
+        dailyAverage { amount currency }
+        lastMonth { amount currency }
+        monthlyAverage { amount currency }
+      }
+    }
+  }
+}

@@ -69,6 +69,23 @@ variable "bundle_scanner" {
     }))
   })
 }
+variable "cost_explorer" {
+  type = object({
+    enabled = bool
+    config = optional(object({
+      dimensions   = optional(list(string))
+      history_days = optional(number)
+      massdriver = optional(object({
+        app_url = optional(string)
+      }))
+      public   = optional(bool)
+      refresh  = optional(string)
+      title    = optional(string)
+      username = optional(string)
+    }))
+    host = optional(string)
+  })
+}
 variable "drift" {
   type = object({
     enabled    = bool

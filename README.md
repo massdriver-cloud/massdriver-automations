@@ -51,6 +51,7 @@ flowchart LR
 | [github-deployments](automations/github-deployments) | `deployment.*` | Shows Massdriver deployments as GitHub Deployments. |
 | [release-notes](automations/release-notes) | `repo.published` | Posts new bundle versions, and the instances that can upgrade, to Slack and Teams. |
 | [bundle-scanner](automations/bundle-scanner) | `repo.published` | Scans each new bundle version with Trivy and Checkov. Uses the `-scanner` image tag. |
+| [cost-explorer](automations/cost-explorer) | `deployment.completed` | Serves a dashboard of instance costs that you can group, filter, and chart over time. |
 | [sandbox-on-join](automations/sandbox-on-join) | `group_membership.*`, `deployment.completed` | Forks a sandbox environment for each new group member, and removes it when they leave. |
 | [statuspage](automations/statuspage) | `alarm.*`, `alarm_state.created`, `deployment.*`, `instance.*` | Serves a public status page from alarms, instances, and deployments. |
 | [audit-archiver](automations/audit-archiver) | every event | Archives every event, unchanged, in S3, Splunk, Datadog, or on disk. |
@@ -90,8 +91,9 @@ Two Massdriver bundles run any set of the automations, and create one event dest
 | [massdriver-automations](bundle) | A Kubernetes cluster, with an ingress controller. |
 | [massdriver-automations-ecs](bundle-ecs) | Amazon ECS with Fargate, behind an Application Load Balancer. Its cluster type is an example in [examples/resource-types/aws-ecs-cluster](examples/resource-types/aws-ecs-cluster). |
 
-When statuspage runs, both bundles produce a resource of the example type
-[status-page](examples/resource-types/status-page), so other bundles can link to the page.
+Each bundle produces one resource of the example type
+[automation-server](examples/resource-types/automation-server): the automations that are on, their event
+destinations, and URLs such as the status page and the cost dashboard.
 
 Each bundle creates its event destinations with a `massdriver-service-account` dependency. Before you publish a
 bundle, install the official resource types from

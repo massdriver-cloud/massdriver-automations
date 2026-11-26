@@ -71,6 +71,7 @@ locals {
       ]
     }
     bundle-scanner = try(var.bundle_scanner.config, null)
+    cost-explorer  = try(var.cost_explorer.config, null)
     drift = local.drift_form == null ? null : merge(local.drift_form, {
       checks = [
         for c in coalesce(local.drift_form.checks, []) : merge(c, {
@@ -139,15 +140,8 @@ locals {
   statuspage_output_dir = try(trimsuffix(coalesce(local.statuspage_config.output_dir), "/"), "")
   statuspage_site       = var.statuspage.enabled && local.statuspage_output_dir != ""
 
-  # statuspage makes a slug from the title of a page without one.
-  statuspage_pages = [
-    for p in try(local.statuspage_config.pages, []) : {
-      title = p.title
-      slug  = coalesce(try(p.slug, null), trim(replace(lower(p.title), "/[^a-z0-9]+/", "-"), "-"))
-    }
-  ]
-
-  statuspage_host = coalesce(var.statuspage.host, "statuspage.${local.domain}")
+  cost_explorer_host = coalesce(var.cost_explorer.host, "cost-explorer.${local.domain}")
+  statuspage_host    = coalesce(var.statuspage.host, "statuspage.${local.domain}")
 
   audit_archiver_static_keys = lookup(local.secrets, "AUDIT_ARCHIVER_AWS_ACCESS_KEY_ID", "") != ""
   # An S3-compatible store or static keys need no IAM; otherwise the task role writes to the bucket.
@@ -205,6 +199,23 @@ locals {
       event_types = ["repo.published"]
       attributes  = coalesce(var.bundle_scanner.attributes, {})
       condition   = ".data.entity.artifact_type == \"application/vnd.massdriver.bundle.v1+json\""
+    }
+
+    cost-explorer = {
+      enabled = var.cost_explorer.enabled
+      image   = local.image
+      host    = local.cost_explorer_host
+      files   = { (local.config_file) = local.config_files["cost-explorer"] }
+      state   = true
+      env = merge(local.massdriver_env, {
+        STATE_DIR = local.state_dir
+      })
+      secrets = merge(local.massdriver_secrets, {
+        COST_EXPLORER_PASSWORD = lookup(local.secrets, "COST_EXPLORER_PASSWORD", "")
+      })
+      event_types = ["deployment.completed"]
+      attributes  = {}
+      condition   = ".data.metadata.deployment_action == \"PROVISION\" or .data.metadata.deployment_action == \"DECOMMISSION\""
     }
 
     drift = {

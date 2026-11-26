@@ -17,6 +17,7 @@ params:
     - audit_archiver
     - autodeploy_downstream
     - bundle_scanner
+    - cost_explorer
     - drift
     - freeze_guard
     - github_deployments
@@ -459,6 +460,94 @@ params:
             required:
             - config
             - attributes
+    cost_explorer:
+      type: object
+      title: Cost explorer
+      description: Serves a dashboard of the cloud costs of every instance. Group and filter by any instance attribute, and
+        see the daily trend. Set the `COST_EXPLORER_PASSWORD` secret, or make it public. [Docs](https://github.com/massdriver-cloud/massdriver-automations/tree/main/automations/cost-explorer)
+      required:
+      - enabled
+      properties:
+        enabled:
+          type: boolean
+          title: Run cost-explorer
+          default: false
+      dependencies:
+        enabled:
+          oneOf:
+          - properties:
+              enabled:
+                const: false
+          - properties:
+              enabled:
+                const: true
+              config:
+                type: object
+                title: Dashboard
+                properties:
+                  title:
+                    type: string
+                    title: Title
+                    default: Cloud costs
+                  dimensions:
+                    type: array
+                    title: Dimensions
+                    description: Instance attributes to group and filter by, in this order. `bundle` is the bundle name. Only
+                      these attributes reach the browser.
+                    items:
+                      type: string
+                      title: Attribute
+                      examples:
+                      - team
+                    uniqueItems: true
+                    minItems: 1
+                    default:
+                    - md-project
+                    - md-environment
+                    - md-component
+                    - bundle
+                  refresh:
+                    type: string
+                    title: Refresh
+                    description: How often to read the costs. A completed provision or decommission also reads them.
+                    default: 1h
+                    pattern: ^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$
+                    message:
+                      pattern: Must be a duration, such as 90s, 10m, or 1h30m.
+                  history_days:
+                    type: integer
+                    title: History (days)
+                    description: Days of daily cost history to keep.
+                    default: 90
+                    minimum: 1
+                    maximum: 731
+                  public:
+                    type: boolean
+                    title: Public
+                    description: Serves the dashboard without a password. Costs can reveal what you run.
+                    default: false
+                  username:
+                    type: string
+                    title: Username
+                    description: The basic auth user. The `COST_EXPLORER_PASSWORD` secret is the password.
+                    default: massdriver
+                  massdriver:
+                    type: object
+                    title: Massdriver UI
+                    properties:
+                      app_url:
+                        type: string
+                        title: App URL
+                        description: The Massdriver UI, for the links in messages. Empty uses https://app.massdriver.cloud.
+                        pattern: ^https?://[^\s]+$
+                        message:
+                          pattern: Must be a URL.
+              host:
+                type: string
+                title: Host
+                description: The host of the dashboard, such as `costs.acme.com`. Empty uses `cost-explorer.<domain>`.
+            required:
+            - config
     drift:
       type: object
       title: Drift detection
@@ -1582,8 +1671,8 @@ dependencies:
     required: true
 
 resources:
-  status_page:
-    resource_type: status-page
+  automations:
+    resource_type: automation-server
     required: false
 
 app:
@@ -1609,6 +1698,11 @@ app:
       title: audit-archiver Splunk HEC token
     AUDIT_ARCHIVER_DD_API_KEY:
       title: audit-archiver Datadog API key
+    COST_EXPLORER_PASSWORD:
+      title: cost-explorer password
+      description: >-
+        The basic auth password of the cost dashboard. The user is the `username` in its settings, `massdriver` by
+        default.
     DRIFT_RUN_TOKEN:
       title: drift run token
       description: >-
@@ -1641,6 +1735,7 @@ ui:
     - audit_archiver
     - autodeploy_downstream
     - bundle_scanner
+    - cost_explorer
     - drift
     - freeze_guard
     - github_deployments
@@ -1723,6 +1818,21 @@ ui:
     attributes:
       ui:options:
         addButtonText: Add attribute
+  cost_explorer:
+    ui:order:
+    - enabled
+    - '*'
+    config:
+      ui:order:
+      - title
+      - dimensions
+      - refresh
+      - history_days
+      - public
+      - username
+      - massdriver
+      dimensions:
+        ui:field: tagInput
   drift:
     ui:order:
     - enabled

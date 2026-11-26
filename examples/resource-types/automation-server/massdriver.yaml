@@ -1,0 +1,114 @@
+name: automation-server
+version: 0.1.0
+label: Automation Server
+icon: https://raw.githubusercontent.com/massdriver-cloud/massdriver-automations/main/examples/resource-types/automation-server/icon.svg
+
+ui:
+  connectionOrientation: link
+
+schema:
+  title: Automation Server
+  description: >-
+    The Massdriver automations that one deployment runs: where each one is served, the event destination that
+    feeds it, and the URLs that people and other services use, such as a status page or a Slack callback.
+  type: object
+  additionalProperties: false
+  required:
+    - automations
+  examples:
+    - automations:
+        - name: statuspage
+          url: https://status.acme.com
+          destination:
+            id: 4f9b2c1e-8d3a-4c6e-9f1b-2a7d5e8c0b13
+            name: acme-automations-statuspage
+            event_types: [alarm.*, deployment.completed, instance.*]
+            attributes: {}
+          endpoints:
+            - name: Status page
+              url: https://status.acme.com/
+            - name: Status JSON
+              url: https://status.acme.com/api/status.json
+        - name: proposal-chatops
+          url: https://proposal-chatops.automations.acme.com
+          destination:
+            id: 0c7e2a9d-1b4f-4e8a-a3d6-5f9b8c2e1d47
+            name: acme-automations-proposal-chatops
+            event_types: [deployment.proposed, deployment.approved, deployment.rejected]
+            attributes:
+              md-environment: prod
+          endpoints:
+            - name: Slack interactivity URL
+              url: https://proposal-chatops.automations.acme.com/slack/interactions
+  properties:
+    automations:
+      title: Automations
+      description: The automations that are turned on.
+      type: array
+      items:
+        type: object
+        additionalProperties: false
+        required:
+          - name
+          - url
+          - destination
+          - endpoints
+        properties:
+          name:
+            title: Automation
+            description: The automation, such as `drift` or `statuspage`.
+            type: string
+            pattern: ^[a-z][a-z0-9-]*$
+          url:
+            title: URL
+            description: Where the automation is served.
+            type: string
+            pattern: ^https?://[^\s/]+$
+          destination:
+            title: Event destination
+            description: The Massdriver event destination that sends the automation its events.
+            type: object
+            additionalProperties: false
+            required:
+              - id
+              - name
+              - event_types
+              - attributes
+            properties:
+              id:
+                title: ID
+                type: string
+              name:
+                title: Name
+                type: string
+              event_types:
+                title: Event types
+                type: array
+                items:
+                  type: string
+              attributes:
+                title: Attributes
+                type: object
+                additionalProperties:
+                  type: string
+              condition:
+                title: Condition
+                type: string
+          endpoints:
+            title: Endpoints
+            description: URLs that people or other services use, such as a status page, a dashboard, or a callback.
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required:
+                - name
+                - url
+              properties:
+                name:
+                  title: Name
+                  type: string
+                url:
+                  title: URL
+                  type: string
+                  pattern: ^https?://\S+$

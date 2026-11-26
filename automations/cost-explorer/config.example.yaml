@@ -1,0 +1,26 @@
+# cost-explorer config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+# Every key is optional. The dashboard needs COST_EXPLORER_PASSWORD unless public is true.
+
+# The dashboard's title. Default: Cloud costs.
+title: Acme cloud costs
+
+# Instance attributes to group and filter by, in this order. "bundle" is the bundle name. Only these attributes
+# reach the browser. Default: md-project, md-environment, md-component, bundle.
+dimensions: [md-project, md-environment, md-component, bundle, team, cost_center]
+
+# How often to read the costs of every instance. A completed provision or decommission also reads them, 30
+# seconds later. At least 1m. Default: 1h.
+refresh: 1h
+
+# Days of daily cost history to keep, from 1 to 731. Needs STATE_DIR. Default: 90.
+history_days: 90
+
+# Serve the dashboard without a password. Default: false.
+public: false
+
+# The basic auth user. The password is COST_EXPLORER_PASSWORD. Default: massdriver.
+username: massdriver
+
+massdriver:
+  # The Massdriver UI, for the instance links. Default: https://app.massdriver.cloud.
+  app_url: https://app.massdriver.cloud

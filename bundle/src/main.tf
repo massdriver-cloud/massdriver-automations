@@ -67,6 +67,7 @@ locals {
       ]
     }
     bundle-scanner = try(var.bundle_scanner.config, null)
+    cost-explorer  = try(var.cost_explorer.config, null)
     drift = local.drift_form == null ? null : merge(local.drift_form, {
       checks = [
         for c in coalesce(local.drift_form.checks, []) : merge(c, {
@@ -135,15 +136,8 @@ locals {
   statuspage_output_dir = try(trimsuffix(coalesce(local.statuspage_config.output_dir), "/"), "")
   statuspage_site       = var.statuspage.enabled && local.statuspage_output_dir != ""
 
-  # statuspage makes a slug from the title of a page without one.
-  statuspage_pages = [
-    for p in try(local.statuspage_config.pages, []) : {
-      title = p.title
-      slug  = coalesce(try(p.slug, null), trim(replace(lower(p.title), "/[^a-z0-9]+/", "-"), "-"))
-    }
-  ]
-
-  statuspage_host = coalesce(var.statuspage.host, "statuspage.${var.ingress.domain}")
+  cost_explorer_host = coalesce(var.cost_explorer.host, "cost-explorer.${var.ingress.domain}")
+  statuspage_host    = coalesce(var.statuspage.host, "statuspage.${var.ingress.domain}")
 
   ingress_class   = try(coalesce(var.ingress.class_name), null)
   cluster_issuer  = try(coalesce(var.ingress.cluster_issuer), "")
@@ -191,6 +185,21 @@ locals {
       event_types = ["repo.published"]
       attributes  = coalesce(var.bundle_scanner.attributes, {})
       condition   = ".data.entity.artifact_type == \"application/vnd.massdriver.bundle.v1+json\""
+    }
+
+    cost-explorer = {
+      enabled    = var.cost_explorer.enabled
+      image      = local.image
+      host       = local.cost_explorer_host
+      files      = { (local.config_file) = local.config_files["cost-explorer"] }
+      state_size = coalesce(var.cost_explorer.storage_size_gi, 1)
+      env = merge(local.massdriver_env, {
+        STATE_DIR              = local.state_dir
+        COST_EXPLORER_PASSWORD = lookup(local.secrets, "COST_EXPLORER_PASSWORD", "")
+      })
+      event_types = ["deployment.completed"]
+      attributes  = {}
+      condition   = ".data.metadata.deployment_action == \"PROVISION\" or .data.metadata.deployment_action == \"DECOMMISSION\""
     }
 
     drift = {
