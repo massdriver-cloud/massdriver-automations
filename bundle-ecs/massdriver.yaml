@@ -409,7 +409,43 @@ dependencies:
     resource_type: massdriver-service-account
     required: true
 
-resources: {}
+resources:
+  audit_archiver_destination:
+    resource_type: massdriver-event-destination-https
+    required: false
+  autodeploy_downstream_destination:
+    resource_type: massdriver-event-destination-https
+    required: false
+  bundle_scanner_destination:
+    resource_type: massdriver-event-destination-https
+    required: false
+  drift_destination:
+    resource_type: massdriver-event-destination-https
+    required: false
+  freeze_guard_destination:
+    resource_type: massdriver-event-destination-https
+    required: false
+  github_deployments_destination:
+    resource_type: massdriver-event-destination-https
+    required: false
+  proposal_chatops_destination:
+    resource_type: massdriver-event-destination-https
+    required: false
+  release_notes_destination:
+    resource_type: massdriver-event-destination-https
+    required: false
+  rollback_on_failure_destination:
+    resource_type: massdriver-event-destination-https
+    required: false
+  router_destination:
+    resource_type: massdriver-event-destination-https
+    required: false
+  sandbox_on_join_destination:
+    resource_type: massdriver-event-destination-https
+    required: false
+  statuspage_destination:
+    resource_type: massdriver-event-destination-https
+    required: false
 
 app:
   secrets:

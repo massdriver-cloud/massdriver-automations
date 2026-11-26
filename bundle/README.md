@@ -14,21 +14,21 @@ the bundle creates:
 - for router, a ConfigMap with its **Scripts**, mounted as executables in `/scripts`
 
 The signing secret of each event destination goes into the automation's Secret as `MASSDRIVER_SIGNING_SECRET`.
-The bundle produces no resources for other bundles.
+Each enabled automation also produces a
+[`massdriver-event-destination-https`](https://github.com/massdriver-cloud/massdriver-resource-types/tree/main/massdriver-event-destination-https)
+resource, `<automation>_destination` (such as `autodeploy_downstream_destination`), with the destination's ID,
+URL, signing secret, event types, attributes, and condition.
 
 ## Requirements
 
-- The `massdriver-cloud/massdriver` provider 2.7.0 or later. 2.7.0 adds `signing_secret` to
-  `massdriver_event_destination`
-  ([terraform-provider-massdriver#56](https://github.com/massdriver-cloud/terraform-provider-massdriver/pull/56)).
-  The bundle does not deploy until 2.7.0 is published.
+- The resource types `massdriver-service-account` and `massdriver-event-destination-https` installed in your
+  organization from [massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types), and `massdriver-kubernetes-cluster`.
 - A [`massdriver-kubernetes-cluster`](https://github.com/massdriver-cloud/massdriver-resource-types/tree/main/massdriver-kubernetes-cluster) dependency. The bundle deploys
   into the namespace of that resource, or `default` when it has none. It does not create the namespace.
 - An ingress controller, and a wildcard DNS record for `*.<domain>` that points at it.
 - TLS on every host. Massdriver and Slack send requests to `https://` URLs. Set a cert-manager ClusterIssuer, set a
   TLS secret that holds a certificate for `*.<domain>`, or end TLS in front of the ingress controller.
 - A [`massdriver-service-account`](https://github.com/massdriver-cloud/massdriver-resource-types/tree/main/massdriver-service-account) dependency.
-- Both resource types installed in your organization. See [massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types).
 
 ## Ingress host
 

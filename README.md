@@ -81,12 +81,25 @@ build provenance attestation. See [SECURITY.md](SECURITY.md) to verify one.
 
 ## Deploy
 
-Two Massdriver bundles run any set of the automations, and create one event destination for each:
+Two Massdriver bundles run any set of the automations. For each one, they create an event destination and produce a
+`massdriver-event-destination-https` resource that holds it.
 
 | Bundle | Runs on |
 |---|---|
 | [massdriver-automations](bundle) | A Kubernetes cluster, with an ingress controller. |
 | [massdriver-automations-ecs](bundle-ecs) | Amazon ECS with Fargate, behind an Application Load Balancer. Its cluster type is an example in [examples/resource-types/aws-ecs-cluster](examples/resource-types/aws-ecs-cluster). |
+
+Before you publish a bundle, install the official resource types from
+[massdriver-resource-types](https://github.com/massdriver-cloud/massdriver-resource-types) in your organization:
+
+```bash
+git clone https://github.com/massdriver-cloud/massdriver-resource-types.git
+cd massdriver-resource-types
+for type in massdriver-service-account massdriver-kubernetes-cluster massdriver-event-destination-https; do
+  mass resource-type create "$type"
+  mass resource-type publish "$type"
+done
+```
 
 ## Common settings
 
