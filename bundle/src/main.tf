@@ -133,6 +133,14 @@ locals {
   statuspage_output_dir = try(trimsuffix(coalesce(local.statuspage_config.output_dir), "/"), "")
   statuspage_site       = var.statuspage.enabled && local.statuspage_output_dir != ""
 
+  # statuspage makes a slug from the title of a page without one.
+  statuspage_pages = [
+    for p in try(local.statuspage_config.pages, []) : {
+      title = p.title
+      slug  = coalesce(try(p.slug, null), trim(replace(lower(p.title), "/[^a-z0-9]+/", "-"), "-"))
+    }
+  ]
+
   statuspage_host = coalesce(var.statuspage.host, "statuspage.${var.ingress.domain}")
 
   ingress_class   = try(coalesce(var.ingress.class_name), null)

@@ -22,7 +22,9 @@ bundle creates:
 
 The instance also gets one KMS key for the secrets, the logs, and the state, one security group for the tasks, and,
 when an automation keeps state, an EFS file system with a mount target in each Availability Zone of the subnets.
-The bundle produces no resources for other bundles.
+When statuspage runs, the bundle produces a `status_page` resource of the example type
+[status-page](../examples/resource-types/status-page): the site's URL, its `status.json` URL, and the URL, feed,
+and badge of each page. Publish that type to your organization before you publish the bundle.
 
 ## Requirements
 

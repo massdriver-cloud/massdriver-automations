@@ -14,7 +14,9 @@ the bundle creates:
 - for router, a ConfigMap with its **Scripts**, mounted as executables in `/scripts`
 
 The signing secret of each event destination goes into the automation's Secret as `MASSDRIVER_SIGNING_SECRET`.
-The bundle produces no resources for other bundles.
+When statuspage runs, the bundle produces a `status_page` resource of the example type
+[status-page](../examples/resource-types/status-page): the site's URL, its `status.json` URL, and the URL, feed,
+and badge of each page. Publish that type to your organization before you publish the bundle.
 
 ## Requirements
 

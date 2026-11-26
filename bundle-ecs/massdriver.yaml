@@ -1577,7 +1577,10 @@ dependencies:
     resource_type: massdriver-service-account
     required: true
 
-resources: {}
+resources:
+  status_page:
+    resource_type: status-page
+    required: false
 
 app:
   secrets:
