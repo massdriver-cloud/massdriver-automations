@@ -87,13 +87,13 @@ The default image has no shell and no tools. Use the [`-scripts` image](#the--sc
 ```yaml
 - massdriver:
     query: |
-      mutation PlanInstance($org: ID!, $id: ID!, $input: CreateDeploymentInput!) {
-        createDeployment(organizationId: $org, id: $id, input: $input) {
+      mutation PlanProposal($org: ID!, $id: UUID!) {
+        planDeployment(organizationId: $org, id: $id) {
           successful
           messages { field message }
         }
       }
-    variables: '{id: .data.entity.identifier, input: {action: "PLAN", params: (.data.entity.params | tojson)}}'
+    variables: '{id: .data.entity.id}'
 ```
 
 Runs one operation against the [V2 GraphQL API](https://docs.massdriver.cloud) as the service account of
@@ -266,38 +266,31 @@ routes:
             }
 ```
 
-### Plan an instance when its version changes
+### Plan each proposed production deployment
 
-`instance.updated` is sent when an instance's version or release strategy changes. This route plans the instance
-with its current params. The service account needs `instance:plan` on the instance.
+When a deployment to a production instance is proposed, this route plans it with `planDeployment`, so the reviewer
+sees the changes before approving it. The plan uses the params of the proposed deployment and changes nothing. The
+service account needs `instance:plan` on the instance.
 
 ```yaml
 routes:
-  - name: plan-on-version-change
-    events: [instance.updated]
+  - name: plan-proposed-deployments
+    events: [deployment.proposed]
     match:
-      md-environment: staging
-    when: '.data.entity.params != null'
+      md-environment: prod
+    when: '.data.metadata.deployment_action == "PROVISION"'
     timeout: 5s
     do:
       - massdriver:
           query: |
-            mutation PlanInstance($org: ID!, $id: ID!, $input: CreateDeploymentInput!) {
-              createDeployment(organizationId: $org, id: $id, input: $input) {
+            mutation PlanProposal($org: ID!, $id: UUID!) {
+              planDeployment(organizationId: $org, id: $id) {
                 successful
                 messages { field message }
                 result { id status }
               }
             }
-          variables: |
-            {
-              id: .data.entity.identifier,
-              input: {
-                action: "PLAN",
-                params: (.data.entity.params | tojson),
-                message: "Plan after \(.data.entity.version) was set"
-              }
-            }
+          variables: '{id: .data.entity.id}'
 ```
 
 ## Configuration

@@ -1,0 +1,18 @@
+routes:
+  - name: plan-proposed-deployments
+    events: [deployment.proposed]
+    match:
+      md-environment: prod
+    when: '.data.metadata.deployment_action == "PROVISION"'
+    timeout: 5s
+    do:
+      - massdriver:
+          query: |
+            mutation PlanProposal($org: ID!, $id: UUID!) {
+              planDeployment(organizationId: $org, id: $id) {
+                successful
+                messages { field message }
+                result { id status }
+              }
+            }
+          variables: '{id: .data.entity.id}'

@@ -51,20 +51,20 @@ routes:
       # The program and its arguments, each text with \(expr). No shell runs it. Needs the -scripts image.
       - exec: [/scripts/purge-bucket.py, '\(.data.entity.identifier)']
 
-  - name: plan-on-version-change
-    events: [instance.updated]
+  - name: plan-proposed-deployments
+    events: [deployment.proposed]
     match:
-      md-environment: staging
-    when: '.data.entity.params != null'
+      md-environment: prod
+    when: '.data.metadata.deployment_action == "PROVISION"'
     do:
       # One operation against the Massdriver V2 GraphQL API, as the service account of MASSDRIVER_API_KEY.
       - massdriver:
           query: |
-            mutation PlanInstance($org: ID!, $id: ID!, $input: CreateDeploymentInput!) {
-              createDeployment(organizationId: $org, id: $id, input: $input) {
+            mutation PlanProposal($org: ID!, $id: UUID!) {
+              planDeployment(organizationId: $org, id: $id) {
                 successful
                 messages { field message }
               }
             }
           # An expression that outputs the variables. $org defaults to MASSDRIVER_ORGANIZATION_ID.
-          variables: '{id: .data.entity.identifier, input: {action: "PLAN", params: (.data.entity.params | tojson)}}'
+          variables: '{id: .data.entity.id}'
