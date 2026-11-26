@@ -9,7 +9,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}"
 
 FROM aquasec/trivy:0.76.2 AS trivy
 
-FROM bridgecrew/checkov:3.4.3
+FROM bridgecrew/checkov:3.4.6
 COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
 COPY --from=build /massdriver-automations /massdriver-automations
 RUN useradd --uid 65532 --create-home --home-dir /home/scanner scanner
