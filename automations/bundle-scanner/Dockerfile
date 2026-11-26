@@ -7,7 +7,7 @@ COPY . .
 ARG VERSION=dev
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /massdriver-automations ./cmd/massdriver-automations
 
-FROM aquasec/trivy:0.76.1 AS trivy
+FROM aquasec/trivy:0.76.2 AS trivy
 
 FROM bridgecrew/checkov:3.4.3
 COPY --from=trivy /usr/local/bin/trivy /usr/local/bin/trivy
