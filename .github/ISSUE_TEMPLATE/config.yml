@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/massdriver-cloud/massdriver-automations/security/advisories/new
+    about: Report vulnerabilities privately, not in an issue.
+  - name: Massdriver documentation
+    url: https://docs.massdriver.cloud
+    about: Event destinations, the API, and the platform.

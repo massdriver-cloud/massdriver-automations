@@ -1,0 +1,24 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      opentelemetry:
+        patterns: ['go.opentelemetry.io/*']
+      aws:
+        patterns: ['github.com/aws/*']
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /automations/bundle-scanner
+      - /automations/router
+    schedule:
+      interval: weekly

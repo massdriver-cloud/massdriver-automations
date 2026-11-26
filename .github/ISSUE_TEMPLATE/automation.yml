@@ -1,0 +1,17 @@
+name: Automation idea
+description: A new automation, or a new feature of one.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What should happen, and when
+      description: The events that start it and what it does.
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Config
+      description: The settings you expect to need.
+      render: yaml
