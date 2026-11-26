@@ -117,9 +117,9 @@ The traces have these spans:
 
 The span of an event continues the trace in the event's `traceparent` and `tracestate` attributes (the
 [CloudEvents distributed tracing extension](https://github.com/cloudevents/spec/blob/main/cloudevents/extensions/distributed-tracing.md)),
-then in a `traceparent` header, and otherwise starts a trace. Massdriver does not send these yet
-([massdriver#3807](https://github.com/massdriver-cloud/massdriver/issues/3807)). Each outgoing request sends a
-`traceparent` header. Work that an automation starts after it responds, from `context.WithoutCancel(ctx)`, stays in
+then in a `traceparent` header, and otherwise starts a trace. Massdriver sends both, so an automation's spans join
+the trace of the work that caused the event. Each outgoing request sends a `traceparent` header. The Massdriver API
+does not join that trace: it starts its own trace with a link to the calling span. Work that an automation starts after it responds, from `context.WithoutCancel(ctx)`, stays in
 the trace of its event.
 
 While a span is active, log records also have `trace_id` and `span_id`.
