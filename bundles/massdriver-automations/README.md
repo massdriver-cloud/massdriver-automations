@@ -1,6 +1,6 @@
 # massdriver-automations bundle
 
-Runs the [automations](../README.md) on a Kubernetes cluster. Turn on any set of them. For each enabled automation,
+Runs the [automations](../../README.md) on a Kubernetes cluster. Turn on any set of them. For each enabled automation,
 the bundle creates:
 
 - a Deployment with one replica, running `ghcr.io/massdriver-cloud/massdriver-automations:<tag> run <name>`
@@ -15,7 +15,7 @@ the bundle creates:
 
 The signing secret of each event destination goes into the automation's Secret as `MASSDRIVER_SIGNING_SECRET`.
 The bundle produces one `automations` resource of the example type
-[automation-server](../examples/resource-types/automation-server) when any automation is on. It lists each
+[automation-server](../../examples/resource-types/automation-server) when any automation is on. It lists each
 automation that is on: its URL, the ID, event types, attributes, and condition of its event destination, and the
 URLs that people use, such as the status page, the cost dashboard, and the Slack interactivity URL. It holds no
 credentials. Publish that type to your organization before you publish the bundle.
@@ -75,7 +75,7 @@ Credentials are not settings. The bundle sets them from [Secrets](#secrets).
 
 The automations share one Slack app. Set the `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` secrets from it, and set
 **Slack > Channel** for each automation that posts. Without the app, set the `SLACK_WEBHOOK_URL` secret:
-every automation that posts then sends to the webhook's one channel. See [Slack](../README.md#slack).
+every automation that posts then sends to the webhook's one channel. See [Slack](../../README.md#slack).
 
 ## Service account
 
@@ -126,7 +126,7 @@ Each secret is set on the instance. Set only the secrets of the automations that
 
 Set **Tracing > OTLP endpoint** to send the traces of every automation to an OpenTelemetry collector over
 OTLP/HTTP. Each automation gets it as `OTEL_EXPORTER_OTLP_ENDPOINT`, and the `OTEL_EXPORTER_OTLP_HEADERS` secret as
-`OTEL_EXPORTER_OTLP_HEADERS`. See [Tracing](../README.md#tracing).
+`OTEL_EXPORTER_OTLP_HEADERS`. See [Tracing](../../README.md#tracing).
 
 ## Event destinations
 

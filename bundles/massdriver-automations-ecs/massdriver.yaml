@@ -1,8 +1,8 @@
-name: massdriver-automations
+name: massdriver-automations-ecs
 description: >-
-  Runs Massdriver automations on a Kubernetes cluster. Each enabled automation gets a Deployment, a Service, an
-  Ingress host, and an event destination that sends it only the events it uses.
-source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundle
+  Runs Massdriver automations on Amazon ECS with Fargate. Each enabled automation gets an ECS service, a host on the
+  cluster's load balancer, and an event destination that sends it only the events it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/massdriver-automations-ecs
 version: 0.1.0
 
 steps:
@@ -13,6 +13,7 @@ params:
   required:
     - image
     - ingress
+    - logs
     - audit_archiver
     - autodeploy_downstream
     - bundle_scanner
@@ -53,34 +54,37 @@ params:
       type: object
       title: Ingress
       required:
-        - domain
+        - dns_records
       properties:
         domain:
           type: string
           title: Domain
           description: >-
             Each automation is served at `<automation>.<domain>`, such as `freeze-guard.automations.acme.com`.
-            Point a wildcard DNS record for `*.<domain>` at the ingress controller. Massdriver sends events to
-            `https://<automation>.<domain>/hooks/massdriver`.
+            Empty uses the base domain of the cluster's hosted zone. The load balancer's HTTPS listener needs a
+            certificate for `*.<domain>`. Massdriver sends events to `https://<automation>.<domain>/hooks/massdriver`.
           pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
           message:
             pattern: Must be a lowercase DNS name with at least one dot, such as automations.acme.com.
-        class_name:
-          type: string
-          title: Ingress class
-          description: The IngressClass to use. Leave empty to use the default class of the cluster.
-        cluster_issuer:
-          type: string
-          title: cert-manager ClusterIssuer
+        dns_records:
+          type: boolean
+          title: Create DNS records
           description: >-
-            Issues a certificate for each host with cert-manager. Leave empty when TLS ends in front of the
-            ingress controller, or when you set a TLS secret.
-        tls_secret_name:
-          type: string
-          title: TLS secret
-          description: >-
-            A Secret in the namespace that holds a certificate for `*.<domain>`. Ignored when a ClusterIssuer is
-            set.
+            Creates a CNAME record to the load balancer for each host in the cluster's hosted zone. Hosts outside
+            the zone get no record.
+          default: true
+    logs:
+      type: object
+      title: Logs
+      required:
+        - retention_days
+      properties:
+        retention_days:
+          type: integer
+          title: Retention (days)
+          description: Days that CloudWatch Logs keeps the logs of each automation.
+          default: 90
+          enum: [1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653]
 
     audit_archiver:
       type: object
@@ -110,7 +114,8 @@ params:
                   s3:
                     type: object
                     title: S3
-                    description: S3 or an S3-compatible store. Credentials come from the AWS secrets.
+                    description: S3 or an S3-compatible store. Credentials come from the AWS secrets, or the task role when
+                      they are empty.
                     required:
                     - enabled
                     properties:
@@ -541,17 +546,8 @@ params:
                 type: string
                 title: Host
                 description: The host of the dashboard, such as `costs.acme.com`. Empty uses `cost-explorer.<domain>`.
-              storage_size_gi:
-                type: integer
-                title: History storage (GiB)
-                description: The volume for the daily cost history.
-                default: 1
-                minimum: 1
-                maximum: 10
-                $md.immutable: true
             required:
             - config
-            - storage_size_gi
     drift:
       type: object
       title: Drift detection
@@ -719,14 +715,6 @@ params:
                         pattern: ^https?://[^\s]+$
                         message:
                           pattern: Must be a URL.
-              storage_size_gi:
-                type: integer
-                title: State storage (GiB)
-                description: The volume for the plans in progress and the queues.
-                default: 1
-                minimum: 1
-                maximum: 10
-                $md.immutable: true
               attributes:
                 type: object
                 title: Event attributes
@@ -737,7 +725,6 @@ params:
                   type: string
             required:
             - config
-            - storage_size_gi
             - attributes
     freeze_guard:
       type: object
@@ -927,17 +914,8 @@ params:
                               message:
                                 pattern: 'Must be a channel name, such as #infra, or a channel ID.'
                     default: []
-              storage_size_gi:
-                type: integer
-                title: State storage (GiB)
-                description: The volume for the ids of the policies that freeze-guard created, and the lifts.
-                default: 1
-                minimum: 1
-                maximum: 10
-                $md.immutable: true
             required:
             - config
-            - storage_size_gi
     github_deployments:
       type: object
       title: GitHub Deployments
@@ -1655,23 +1633,6 @@ params:
                 type: string
                 title: Host
                 description: The public host of the status page, such as `status.acme.com`. Empty uses `statuspage.<domain>`.
-              storage_size_gi:
-                type: integer
-                title: History storage (GiB)
-                description: The volume for incident and uptime history.
-                default: 1
-                minimum: 1
-                maximum: 10
-                $md.immutable: true
-              output_size_gi:
-                type: integer
-                title: Site storage (GiB)
-                description: The volume mounted at the output directory, when it is set. Other pods on the same node can mount
-                  its claim, `<instance>-statuspage-site`, to serve or copy the files.
-                default: 1
-                minimum: 1
-                maximum: 10
-                $md.immutable: true
               attributes:
                 type: object
                 title: Event attributes
@@ -1682,8 +1643,6 @@ params:
                   type: string
             required:
             - config
-            - storage_size_gi
-            - output_size_gi
             - attributes
 
     otel:
@@ -1701,8 +1660,11 @@ params:
             automation sends spans to `<endpoint>/v1/traces`.
 
 dependencies:
-  kubernetes_cluster:
-    resource_type: massdriver-kubernetes-cluster
+  aws_authentication:
+    resource_type: aws-iam-role
+    required: true
+  ecs_cluster:
+    resource_type: aws-ecs-cluster
     required: true
   service_account:
     resource_type: massdriver-service-account
@@ -1769,6 +1731,7 @@ ui:
   ui:order:
     - image
     - ingress
+    - logs
     - audit_archiver
     - autodeploy_downstream
     - bundle_scanner
@@ -1787,7 +1750,9 @@ ui:
   image:
     ui:order: [repository, tag]
   ingress:
-    ui:order: [domain, class_name, cluster_issuer, tls_secret_name]
+    ui:order: [domain, dns_records]
+  logs:
+    ui:order: [retention_days]
   audit_archiver:
     ui:order:
     - enabled

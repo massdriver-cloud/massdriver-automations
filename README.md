@@ -88,8 +88,8 @@ Two Massdriver bundles run any set of the automations, and create one event dest
 
 | Bundle | Runs on |
 |---|---|
-| [massdriver-automations](bundle) | A Kubernetes cluster, with an ingress controller. |
-| [massdriver-automations-ecs](bundle-ecs) | Amazon ECS with Fargate, behind an Application Load Balancer. Its cluster type is an example in [examples/resource-types/aws-ecs-cluster](examples/resource-types/aws-ecs-cluster). |
+| [massdriver-automations](bundles/massdriver-automations) | A Kubernetes cluster, with an ingress controller. |
+| [massdriver-automations-ecs](bundles/massdriver-automations-ecs) | Amazon ECS with Fargate, behind an Application Load Balancer. Its cluster type is an example in [examples/resource-types/aws-ecs-cluster](examples/resource-types/aws-ecs-cluster). |
 
 Each bundle produces one resource of the example type
 [automation-server](examples/resource-types/automation-server): the automations that are on, their event

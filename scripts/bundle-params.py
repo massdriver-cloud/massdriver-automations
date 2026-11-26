@@ -668,5 +668,5 @@ def splice(path, k8s):
 
 
 if __name__ == "__main__":
-    splice(f"{REPO}/bundle/massdriver.yaml", True)
-    splice(f"{REPO}/bundle-ecs/massdriver.yaml", False)
+    splice(f"{REPO}/bundles/massdriver-automations/massdriver.yaml", True)
+    splice(f"{REPO}/bundles/massdriver-automations-ecs/massdriver.yaml", False)

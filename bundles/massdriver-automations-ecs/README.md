@@ -1,7 +1,7 @@
 # massdriver-automations-ecs bundle
 
-Runs the [automations](../README.md) on Amazon ECS with Fargate. It has the same settings, secrets, and event
-destinations as the [Kubernetes bundle](../bundle). Turn on any set of automations. For each enabled automation, the
+Runs the [automations](../../README.md) on Amazon ECS with Fargate. It has the same settings, secrets, and event
+destinations as the [Kubernetes bundle](../massdriver-automations). Turn on any set of automations. For each enabled automation, the
 bundle creates:
 
 - an ECS service with one Fargate task (ARM64), running `ghcr.io/massdriver-cloud/massdriver-automations:<tag> run <name>`
@@ -23,7 +23,7 @@ bundle creates:
 The instance also gets one KMS key for the secrets, the logs, and the state, one security group for the tasks, and,
 when an automation keeps state, an EFS file system with a mount target in each Availability Zone of the subnets.
 The bundle produces one `automations` resource of the example type
-[automation-server](../examples/resource-types/automation-server) when any automation is on. It lists each
+[automation-server](../../examples/resource-types/automation-server) when any automation is on. It lists each
 automation that is on: its URL, the ID, event types, attributes, and condition of its event destination, and the
 URLs that people use, such as the status page, the cost dashboard, and the Slack interactivity URL. It holds no
 credentials. Publish that type to your organization before you publish the bundle.
@@ -35,7 +35,7 @@ credentials. Publish that type to your organization before you publish the bundl
 - An `aws-iam-role` dependency with `arn` and `token_level`. The provider assumes the role with the deployment's
   Massdriver identity token of that level, so the role's trust policy must accept it.
 - An `aws-ecs-cluster` dependency. This type is an example in
-  [examples/resource-types/aws-ecs-cluster](../examples/resource-types/aws-ecs-cluster). Publish it, or a copy that
+  [examples/resource-types/aws-ecs-cluster](../../examples/resource-types/aws-ecs-cluster). Publish it, or a copy that
   you change, to your organization.
 - A [`massdriver-service-account`](https://github.com/massdriver-cloud/massdriver-resource-types/tree/main/massdriver-service-account)
   dependency.
@@ -122,7 +122,7 @@ Credentials are not settings. The bundle sets them from [Secrets](#secrets).
 
 The automations share one Slack app. Set the `SLACK_BOT_TOKEN` and `SLACK_SIGNING_SECRET` secrets from it, and set
 **Slack > Channel** for each automation that posts. Without the app, set the `SLACK_WEBHOOK_URL` secret:
-every automation that posts then sends to the webhook's one channel. See [Slack](../README.md#slack).
+every automation that posts then sends to the webhook's one channel. See [Slack](../../README.md#slack).
 
 ## Service account
 
@@ -193,7 +193,7 @@ Each secret is set on the instance. Set only the secrets of the automations that
 
 Set **Tracing > OTLP endpoint** to send the traces of every automation to an OpenTelemetry collector over
 OTLP/HTTP. Each automation gets it as `OTEL_EXPORTER_OTLP_ENDPOINT`, and the `OTEL_EXPORTER_OTLP_HEADERS` secret as
-`OTEL_EXPORTER_OTLP_HEADERS`. See [Tracing](../README.md#tracing).
+`OTEL_EXPORTER_OTLP_HEADERS`. See [Tracing](../../README.md#tracing).
 
 ## Event destinations
 

@@ -23,7 +23,7 @@ To run an automation against a real organization, see [Run locally](README.md#ru
 4. Add `config.example.yaml` with a comment on every key. The tests load each example, so it must stay valid.
 5. Add a `README.md` with what it does, its config, its environment variables, the
    `mass event destination create` command, and a `docker run` line.
-6. Add the automation to the table in the top-level README and to both bundles (`bundle/`, `bundle-ecs/`). Its
+6. Add the automation to the table in the top-level README and to both bundles in `bundles/`. Its
    settings form comes from `scripts/bundle-params.py`: add it there and run the script, which rewrites both
    `massdriver.yaml` files. Then run `mass bundle build` in each bundle.
 7. Test it with `automation.Handler` and `automation.SignRequest` against `httptest` fakes. No test calls a real
