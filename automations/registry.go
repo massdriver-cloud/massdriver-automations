@@ -2,17 +2,17 @@
 package automations
 
 import (
-	"github.com/massdriver-cloud/massdriver-automations/automations/audit-archiver"
-	"github.com/massdriver-cloud/massdriver-automations/automations/autodeploy-downstream"
-	"github.com/massdriver-cloud/massdriver-automations/automations/bundle-scanner"
+	auditarchiver "github.com/massdriver-cloud/massdriver-automations/automations/audit-archiver"
+	autodeploydownstream "github.com/massdriver-cloud/massdriver-automations/automations/autodeploy-downstream"
+	bundlescanner "github.com/massdriver-cloud/massdriver-automations/automations/bundle-scanner"
 	"github.com/massdriver-cloud/massdriver-automations/automations/drift"
-	"github.com/massdriver-cloud/massdriver-automations/automations/freeze-guard"
-	"github.com/massdriver-cloud/massdriver-automations/automations/github-deployments"
-	"github.com/massdriver-cloud/massdriver-automations/automations/proposal-chatops"
-	"github.com/massdriver-cloud/massdriver-automations/automations/release-notes"
-	"github.com/massdriver-cloud/massdriver-automations/automations/rollback-on-failure"
+	freezeguard "github.com/massdriver-cloud/massdriver-automations/automations/freeze-guard"
+	githubdeployments "github.com/massdriver-cloud/massdriver-automations/automations/github-deployments"
+	proposalchatops "github.com/massdriver-cloud/massdriver-automations/automations/proposal-chatops"
+	releasenotes "github.com/massdriver-cloud/massdriver-automations/automations/release-notes"
+	rollbackonfailure "github.com/massdriver-cloud/massdriver-automations/automations/rollback-on-failure"
 	"github.com/massdriver-cloud/massdriver-automations/automations/router"
-	"github.com/massdriver-cloud/massdriver-automations/automations/sandbox-on-join"
+	sandboxonjoin "github.com/massdriver-cloud/massdriver-automations/automations/sandbox-on-join"
 	"github.com/massdriver-cloud/massdriver-automations/automations/statuspage"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 )

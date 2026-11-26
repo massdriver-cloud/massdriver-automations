@@ -61,7 +61,8 @@ type GitHubConfig struct {
 
 // DefaultConfig uses github.com and the github_repo and github_ref attributes.
 func DefaultConfig() Config {
-	return Config{GitHub: GitHubConfig{
+	// TokenEnv names the variable that holds the token.
+	return Config{GitHub: GitHubConfig{ //nolint:gosec
 		APIURL:          "https://api.github.com",
 		TokenEnv:        "GITHUB_TOKEN",
 		RepoAttribute:   "github_repo",

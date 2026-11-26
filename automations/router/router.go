@@ -264,7 +264,8 @@ func runExec(ctx context.Context, s *Step, in input) (string, error) {
 		}
 		args[i] = a
 	}
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+	// Running the command that the route configures is what an exec step does.
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...) //nolint:gosec
 	cmd.Env = commandEnv(in.ev)
 	cmd.Stdin = bytes.NewReader(in.ev.Raw)
 	cmd.WaitDelay = 5 * time.Second

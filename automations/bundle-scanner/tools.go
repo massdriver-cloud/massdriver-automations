@@ -54,7 +54,8 @@ var tools = map[string]Tool{
 }
 
 func (t Tool) run(ctx context.Context, dir string) ([]finding, error) {
-	cmd := exec.CommandContext(ctx, t.Bin, t.Args...)
+	// Bin and Args come from the fixed tool list above.
+	cmd := exec.CommandContext(ctx, t.Bin, t.Args...) //nolint:gosec
 	cmd.Dir = dir
 	cmd.WaitDelay = 10 * time.Second
 	var stdout, stderr bytes.Buffer
@@ -68,7 +69,7 @@ func (t Tool) run(ctx context.Context, dir string) ([]finding, error) {
 	}
 	findings, err := t.Parse(stdout.Bytes())
 	if err != nil {
-		return nil, fmt.Errorf("%v: %s", errors.Join(runErr, err), tail(stderr.String(), 500))
+		return nil, fmt.Errorf("%w: %s", errors.Join(runErr, err), tail(stderr.String(), 500))
 	}
 	return findings, nil
 }

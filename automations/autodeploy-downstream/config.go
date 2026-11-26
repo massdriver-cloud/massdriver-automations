@@ -27,6 +27,7 @@ type Rule struct {
 // Values reads a YAML scalar or a list of scalars. Unquoted true and 1 read as the strings "true" and "1".
 type Values []string
 
+// UnmarshalYAML reads a scalar or a sequence of scalars.
 func (v *Values) UnmarshalYAML(n *yaml.Node) error {
 	switch n.Kind {
 	case yaml.ScalarNode:

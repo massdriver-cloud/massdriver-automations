@@ -58,12 +58,12 @@ func saveState(dir string, s state) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return err
 	}
 	path := filepath.Join(dir, stateFile)
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)

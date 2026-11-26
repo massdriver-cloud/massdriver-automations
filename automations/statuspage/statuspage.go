@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+
 	// Timezones must resolve in a distroless image, which has no zoneinfo files.
 	_ "time/tzdata"
 
@@ -472,7 +473,8 @@ func (s *StatusPage) serve(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("cache-control", "no-cache")
 		_, _ = w.Write(f.Body)
 	case isDir:
-		http.Redirect(w, r, "/"+path+"/", http.StatusMovedPermanently)
+		// path names a page that this automation rendered, so the redirect stays on this site.
+		http.Redirect(w, r, "/"+path+"/", http.StatusMovedPermanently) //nolint:gosec
 	default:
 		http.NotFound(w, r)
 	}

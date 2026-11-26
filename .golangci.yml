@@ -1,0 +1,27 @@
+version: "2"
+
+linters:
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - revive
+    - unconvert
+    - usestdlibvars
+  exclusions:
+    presets:
+      - std-error-handling
+      - common-false-positives
+    rules:
+      - path: _test\.go
+        linters: [errcheck, errorlint, gosec, revive]
+      # State and output paths come from the operator's config file.
+      - path: automations/statuspage/state\.go
+        linters: [gosec]
+        text: G703
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

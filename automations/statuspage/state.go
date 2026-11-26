@@ -439,12 +439,13 @@ func saveHistory(dir string, h history) error {
 	return writeAtomic(filepath.Join(dir, stateFile), b)
 }
 
+// writeAtomic writes world-readable files: a web server that runs as another user serves output_dir.
 func writeAtomic(path string, b []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec
 		return err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	if err := os.WriteFile(tmp, b, 0o644); err != nil { //nolint:gosec
 		return err
 	}
 	return os.Rename(tmp, path)

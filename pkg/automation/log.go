@@ -62,7 +62,7 @@ const (
 )
 
 func newTextLogger(w io.Writer, lvl slog.Level) *slog.Logger {
-	return slog.New(tint.NewHandler(w, &tint.Options{
+	return slog.New(tint.NewTextHandler(w, &tint.Options{
 		Level:      lvl,
 		TimeFormat: "15:04:05.000",
 		NoColor:    os.Getenv("NO_COLOR") != "",

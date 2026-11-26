@@ -119,7 +119,7 @@ func withRecovery(next http.Handler) http.Handler {
 				return
 			}
 			// net/http uses this panic to abort a response on purpose, and suppresses its log.
-			if v == http.ErrAbortHandler {
+			if err, ok := v.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 				panic(v)
 			}
 			log := Logger(r.Context())

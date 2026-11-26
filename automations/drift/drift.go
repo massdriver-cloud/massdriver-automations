@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+
 	// Check timezones must resolve in a distroless image, which has no zoneinfo files.
 	_ "time/tzdata"
 

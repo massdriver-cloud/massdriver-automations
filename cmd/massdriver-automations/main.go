@@ -38,7 +38,7 @@ func main() {
 		for _, d := range automations.All {
 			fmt.Fprintf(w, "%s\t%s\t%s\n", d.Name, strings.Join(d.Events, ","), d.Description)
 		}
-		w.Flush()
+		_ = w.Flush()
 	case len(args) == 2 && args[0] == "run":
 		os.Exit(run(args[1]))
 	default:

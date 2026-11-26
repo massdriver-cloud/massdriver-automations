@@ -122,8 +122,8 @@ func (c *Client) send(ctx context.Context, hc *http.Client, req *http.Request, b
 			return nil, fmt.Errorf("graphql: HTTP %d: %s", resp.StatusCode, b)
 		}
 		if resp != nil {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+			_, _ = io.Copy(io.Discard, resp.Body)
+			_ = resp.Body.Close()
 		}
 		select {
 		case <-ctx.Done():

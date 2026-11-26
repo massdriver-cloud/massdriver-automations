@@ -73,7 +73,7 @@ func TestAPICallFromBackgroundWorkIsAChildSpanOfTheWebhook(t *testing.T) {
 	}
 	a := map[attribute.Key]string{}
 	for _, kv := range client.Attributes {
-		a[kv.Key] = kv.Value.Emit()
+		a[kv.Key] = kv.Value.String()
 	}
 	for k, v := range map[attribute.Key]string{
 		"url.full": api.URL, "graphql.operation.type": "query", "graphql.operation.name": "Groups",

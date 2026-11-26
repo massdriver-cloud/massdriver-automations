@@ -199,7 +199,7 @@ func (s *StatusPage) pageView(pages []pageState, idx int, r root, now time.Time)
 		Site: siteView{
 			Title:       s.cfg.Site.Title,
 			Logo:        s.cfg.Site.Logo,
-			Accent:      template.CSS(s.cfg.Site.AccentColor),
+			Accent:      template.CSS(s.cfg.Site.AccentColor), //nolint:gosec // Validate allows only a hex color.
 			Timezone:    s.cfg.Site.Timezone,
 			FooterLinks: s.cfg.Site.FooterLinks,
 		},

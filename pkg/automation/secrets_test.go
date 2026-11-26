@@ -164,11 +164,11 @@ func TestLogsAndSpansNeverHoldSecrets(t *testing.T) {
 		}
 		logs += "\n" + s.Name + " " + s.Status.Description
 		for _, kv := range s.Attributes {
-			logs += " " + string(kv.Key) + "=" + kv.Value.Emit()
+			logs += " " + string(kv.Key) + "=" + kv.Value.String()
 		}
 		for _, e := range s.Events {
 			for _, kv := range e.Attributes {
-				logs += " " + string(kv.Key) + "=" + kv.Value.Emit()
+				logs += " " + string(kv.Key) + "=" + kv.Value.String()
 			}
 		}
 	}

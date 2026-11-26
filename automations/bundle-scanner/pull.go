@@ -61,10 +61,10 @@ func (s *Scanner) pull(ctx context.Context, repo, version, dir string) error {
 		}
 
 		path := filepath.Join(dir, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return err
 		}
-		if err := os.WriteFile(path, data, 0o644); err != nil {
+		if err := os.WriteFile(path, data, 0o600); err != nil {
 			return err
 		}
 	}

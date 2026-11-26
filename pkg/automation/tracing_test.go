@@ -88,7 +88,7 @@ func TestWebhookSpanContinuesTheEventTrace(t *testing.T) {
 		"http.response.status_code": attribute.IntValue(204),
 	} {
 		if a[k] != want {
-			t.Errorf("%s = %v, want %v", k, a[k].Emit(), want.Emit())
+			t.Errorf("%s = %v, want %v", k, a[k].String(), want.String())
 		}
 	}
 }
@@ -136,7 +136,7 @@ func TestWebhookSpanRecordsTheHandlerError(t *testing.T) {
 		t.Fatalf("events = %v, want one exception", span.Events)
 	}
 	if got := attrs(span)["http.response.status_code"]; got != attribute.IntValue(500) {
-		t.Errorf("status code = %v", got.Emit())
+		t.Errorf("status code = %v", got.String())
 	}
 }
 

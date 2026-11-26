@@ -290,7 +290,6 @@ func NewS3Sink(cfg S3Config, awsCfg aws.Config) *S3Sink {
 	return &S3Sink{cfg: cfg, client: client, now: time.Now}
 }
 
-// Name is "s3".
 // DiskSink writes each event to a file.
 type DiskSink struct {
 	dir string
@@ -314,7 +313,7 @@ func (d *DiskSink) Write(_ context.Context, ev automation.Event) error {
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(ev.Raw); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
@@ -323,6 +322,7 @@ func (d *DiskSink) Write(_ context.Context, ev automation.Event) error {
 	return os.Rename(tmp.Name(), filepath.Join(dir, fmt.Sprintf("%s-%s.json", t.Format(keyTime), filepath.Base(ev.ID))))
 }
 
+// Name names the sink in logs.
 func (s *S3Sink) Name() string { return "s3" }
 
 // The key depends only on the event, so a redelivered event lands on the same object.
