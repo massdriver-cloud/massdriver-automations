@@ -1,0 +1,54 @@
+# Steps write to /dev/tty: the router keeps a command's own output for its
+# debug logs, and these are for the person watching.
+engine: jq
+routes:
+  - name: deploy-failed
+    events: [deployment.failed]
+    do:
+      - exec:
+          - /bin/sh
+          - -c
+          - printf '\033[31m✗ %s\033[0m\n' "$1" >/dev/tty
+          - sh
+          - '\(.data.attributes["md-instance"] // .data.entity.instance_id) \(.data.entity.action | ascii_downcase) failed\(if .data.entity.deployed_by_name then " (\(.data.entity.deployed_by_name))" else "" end)'
+
+  - name: deploy-completed
+    events: [deployment.completed]
+    when: '.data.entity.action != "PLAN"'
+    do:
+      - exec:
+          - /bin/sh
+          - -c
+          - printf '\033[32m✓ %s\033[0m\n' "$1" >/dev/tty
+          - sh
+          - '\(.data.attributes["md-instance"] // .data.entity.instance_id) \(.data.entity.action | ascii_downcase)ed by \(.data.entity.deployed_by_name // "Massdriver")\(if .data.entity.message then ": \(.data.entity.message)" else "" end)'
+
+  - name: proposal
+    events: [deployment.proposed]
+    do:
+      - exec:
+          - /bin/sh
+          - -c
+          - printf '\033[33m? %s\033[0m\n' "$1" >/dev/tty
+          - sh
+          - '\(.data.entity.deployed_by_name) proposes to \(.data.entity.action | ascii_downcase) \(.data.attributes["md-instance"] // .data.entity.instance_id // "an instance"): \(.data.entity.message // "no message")'
+
+  - name: alarm
+    events: [alarm_state.created]
+    do:
+      - exec:
+          - /bin/sh
+          - -c
+          - printf '\033[35m! %s\033[0m\n' "$1" >/dev/tty
+          - sh
+          - '\(.data.entity.alarm_name) is \((.data.entity.notification.Message // "{}") | fromjson | .NewStateValue // "updated"): \(.data.entity.message // "")'
+
+  - name: membership
+    events: [group_membership.added, group_membership.removed]
+    do:
+      - exec:
+          - /bin/sh
+          - -c
+          - printf '\033[36m%s\033[0m\n' "$1" >/dev/tty
+          - sh
+          - '\(if .type == "group_membership.added" then "+" else "-" end) \(.data.entity.account_name // .data.entity.account_email // .data.entity.service_account_name) \(if .type == "group_membership.added" then "joined" else "left" end) \(.data.entity.group_name)'

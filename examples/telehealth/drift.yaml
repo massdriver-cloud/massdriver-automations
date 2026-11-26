@@ -1,0 +1,21 @@
+checks:
+  # Prod should only change through reviewed deploys, so drift there becomes a
+  # proposal that restores what was last deployed, for a person to approve.
+  - name: prod-nightly
+    schedule: "0 6 * * *"
+    timezone: America/Los_Angeles
+    match:
+      md-environment: prod
+    mode: propose
+    resolve_with: deployed
+    max_concurrent: 3
+    summary: true
+
+  # Dev drifts all the time while people experiment; check it when asked.
+  - name: dev
+    match:
+      md-environment: dev
+    mode: detect
+    max_concurrent: 3
+    notify_clean: true
+    summary: true

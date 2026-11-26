@@ -1,0 +1,25 @@
+# Each person who joins a Tendwell team gets an environment of their own in the
+# Developer Sandboxes project, forked from its empty template. Leaving the team
+# decommissions and deletes it.
+sandboxes:
+  - group: Patient Experience
+    project: sandboxes
+    environment: template
+    deleteAfterDecommission: true
+    # The AWS credential, so whatever they add can deploy.
+    copyEnvironmentDefaults: true
+  - group: Clinical
+    project: sandboxes
+    environment: template
+    deleteAfterDecommission: true
+    copyEnvironmentDefaults: true
+  - group: Revenue
+    project: sandboxes
+    environment: template
+    deleteAfterDecommission: true
+    copyEnvironmentDefaults: true
+  - group: Platform Engineering
+    project: sandboxes
+    environment: template
+    deleteAfterDecommission: true
+    copyEnvironmentDefaults: true

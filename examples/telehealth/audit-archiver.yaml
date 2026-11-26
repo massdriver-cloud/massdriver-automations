@@ -1,0 +1,4 @@
+# Every event Massdriver records for Tendwell, one JSON file each, under
+# audit-log/YYYY/MM/DD/HH/, relative to the directory the automation runs in.
+disk:
+  dir: audit-log

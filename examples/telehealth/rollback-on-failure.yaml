@@ -1,0 +1,6 @@
+# The apps opt in with autorollback=true on their components.
+# A failed deploy of one goes back to its last good one, so a bad image doesn't
+# leave Booking, Charting or Claims down while someone looks into it.
+attribute:
+  key: autorollback
+  value: "true"

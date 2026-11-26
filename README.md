@@ -59,6 +59,8 @@ flowchart LR
 Each automation's README has its config, its environment variables, and the `mass event destination create`
 command that sends it only the events it uses.
 
+For a full set of configs for one company, see the [telehealth example](examples/telehealth).
+
 ## Quick start
 
 ```bash

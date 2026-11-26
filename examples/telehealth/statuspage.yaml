@@ -1,0 +1,64 @@
+site:
+  title: Tendwell Health Status
+  timezone: America/Los_Angeles
+
+history_days: 30
+deploys_as_maintenance: true
+# Short enough that the reminders dead-letter alarm shows up while you watch.
+min_duration: 1m
+
+pages:
+  - title: Development
+    slug: dev
+    description: Tendwell's development environments.
+    environments:
+      - id: visits-dev
+        title: Visits
+        components: &visits
+          - title: Booking
+            description: Patients find an open slot and book a video visit.
+            match: {md-component: app}
+          - title: Booking API
+            match: {md-component: api}
+          - title: Open slots
+            match: {md-component: slots}
+          - title: Visit reminders
+            description: Texts and emails before each visit.
+            match: {md-component: notifier}
+            impact: degraded
+          - title: Reminders queue
+            match: {md-component: reminders}
+            impact: degraded
+      - id: care-dev
+        title: Care
+        components: &care
+          - title: Charting
+            description: Clinicians chart and treat.
+            match: {md-component: app}
+          - title: Charts database
+            match: {md-component: charts}
+            impact: major_outage
+          - title: Sessions
+            match: {md-component: sessions}
+          - title: Documents
+            match: {md-component: documents}
+            impact: partial_outage
+      - id: billing-dev
+        title: Billing
+        components: &billing
+          - title: Claims
+            description: Billing files claims with payers.
+            match: {md-component: app}
+          - title: Claims ledger
+            match: {md-component: ledger}
+            impact: major_outage
+          - title: Claim files
+            match: {md-component: claims}
+
+  - title: Tendwell Health
+    slug: tendwell
+    description: Booking, charting and billing for Tendwell Health.
+    environments:
+      - {id: visits-prod, title: Visits, components: *visits}
+      - {id: care-prod, title: Care, components: *care}
+      - {id: billing-prod, title: Billing, components: *billing}

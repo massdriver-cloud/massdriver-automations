@@ -1,0 +1,18 @@
+# Prod changes wait for business hours on the West Coast, where Tendwell's
+# clinicians and on-call engineers are. Platform Engineering stays exempt so the
+# on-call engineer can still ship a fix overnight.
+timezone: America/Los_Angeles
+exempt_groups: [Platform Engineering]
+
+windows:
+  - name: after-hours
+    match:
+      md-environment: prod
+    weekly:
+      - {from: Mon 17:00, to: Tue 08:00}
+      - {from: Tue 17:00, to: Wed 08:00}
+      - {from: Wed 17:00, to: Thu 08:00}
+      - {from: Thu 17:00, to: Fri 08:00}
+      - {from: Fri 17:00, to: Sat 08:00}
+      - {from: Sat 17:00, to: Sun 08:00}
+      - {from: Sun 17:00, to: Mon 08:00}

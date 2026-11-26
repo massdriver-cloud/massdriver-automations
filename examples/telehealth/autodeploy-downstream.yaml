@@ -1,0 +1,22 @@
+# The apps opt in with autodeploy=true on their components, so
+# they pick up a changed database, queue or bucket without someone redeploying
+# them by hand.
+rules:
+  # Dev follows its dependencies right away.
+  - name: dev-cascade
+    upstream:
+      md-environment: dev
+    downstream:
+      autodeploy: "true"
+      md-environment: dev
+    action: deploy
+
+  # Prod gets a proposal instead, so a second person still approves every
+  # change, the same as a deploy someone starts.
+  - name: prod-review
+    upstream:
+      md-environment: prod
+    downstream:
+      autodeploy: "true"
+      md-environment: prod
+    action: propose
