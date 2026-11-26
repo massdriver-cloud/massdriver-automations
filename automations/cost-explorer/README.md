@@ -75,7 +75,7 @@ docker run -p 8080:8080 \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
   -e COST_EXPLORER_PASSWORD=... \
   -e STATE_DIR=/state \
-  ghcr.io/massdriver-cloud/massdriver-automations:0.1 run cost-explorer
+  ghcr.io/massdriver-cloud/massdriver-automations:0.2 run cost-explorer
 ```
 
 Open `http://localhost:8080` and sign in as `massdriver`.

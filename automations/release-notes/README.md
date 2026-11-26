@@ -67,7 +67,7 @@ docker run -p 8080:8080 \
   -e MASSDRIVER_API_KEY=md_... \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
   -e SLACK_BOT_TOKEN=xoxb-... \
-  ghcr.io/massdriver-cloud/massdriver-automations:0.1 run release-notes
+  ghcr.io/massdriver-cloud/massdriver-automations:0.2 run release-notes
 ```
 
 ## Limits

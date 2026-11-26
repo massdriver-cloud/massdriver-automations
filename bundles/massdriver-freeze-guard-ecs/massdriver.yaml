@@ -30,8 +30,8 @@ params:
         tag:
           type: string
           title: Tag
-          description: The image tag, such as `0.1.0`. Pin a version so that a redeploy runs the same code.
-          default: '0.1'
+          description: The image tag, such as `0.2.0`. Pin a version so that a redeploy runs the same code.
+          default: '0.2'
           pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
           message:
             pattern: Must be a valid image tag.

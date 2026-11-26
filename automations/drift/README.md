@@ -137,7 +137,7 @@ docker run -p 8080:8080 \
   -e SLACK_BOT_TOKEN=xoxb-... \
   -e DRIFT_RUN_TOKEN=... \
   -e STATE_DIR=/state \
-  ghcr.io/massdriver-cloud/massdriver-automations:0.1 run drift
+  ghcr.io/massdriver-cloud/massdriver-automations:0.2 run drift
 ```
 
 The image runs as user `65532`. That user must be able to write to `STATE_DIR`.

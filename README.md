@@ -70,7 +70,7 @@ docker run -p 8080:8080 \
   -e MASSDRIVER_ORGANIZATION_ID=acme \
   -e MASSDRIVER_API_KEY=md_... \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
-  ghcr.io/massdriver-cloud/massdriver-automations:0.1 run autodeploy-downstream
+  ghcr.io/massdriver-cloud/massdriver-automations:0.2 run autodeploy-downstream
 ```
 
 `AUTOMATION=<name>` works in place of `run <name>`, and `list` prints every automation.
@@ -237,7 +237,7 @@ Or with Docker:
 docker run --rm -p 8080:8080 \
   -v "$PWD/automations/autodeploy-downstream/config.example.yaml:/etc/massdriver-automations/config.yaml:ro" \
   -e MASSDRIVER_ORGANIZATION_ID -e MASSDRIVER_API_KEY -e MASSDRIVER_SIGNING_SECRET \
-  ghcr.io/massdriver-cloud/massdriver-automations:0.1 run autodeploy-downstream
+  ghcr.io/massdriver-cloud/massdriver-automations:0.2 run autodeploy-downstream
 ```
 
 The automation listens on port 8080. Set `PORT` to change it.
