@@ -10,7 +10,7 @@ All automations ship in one image. Run one automation per container:
 docker run -p 8080:8080 \
   -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:ro" \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
-  massdrivercloud/massdriver-automations:latest run autodeploy-downstream
+  ghcr.io/massdriver-cloud/massdriver-automations:latest run autodeploy-downstream
 ```
 
 `AUTOMATION=<name>` works in place of `run <name>`. `list` prints every automation.
@@ -143,7 +143,7 @@ Or with Docker:
 docker run --rm -p 8080:8080 \
   -v "$PWD/automations/autodeploy-downstream/config.example.yaml:/etc/massdriver-automations/config.yaml:ro" \
   -e MASSDRIVER_ORGANIZATION_ID -e MASSDRIVER_API_KEY -e MASSDRIVER_SIGNING_SECRET \
-  massdrivercloud/massdriver-automations:latest run autodeploy-downstream
+  ghcr.io/massdriver-cloud/massdriver-automations:latest run autodeploy-downstream
 ```
 
 The automation listens on port 8080. Set `PORT` to change it.

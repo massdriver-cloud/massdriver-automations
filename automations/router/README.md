@@ -353,7 +353,7 @@ docker run -p 8080:8080 \
   -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:ro" \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
   -e PAGERDUTY_ROUTING_KEY=... \
-  massdrivercloud/massdriver-automations:latest run router
+  ghcr.io/massdriver-cloud/massdriver-automations:latest run router
 ```
 
 ## Limits

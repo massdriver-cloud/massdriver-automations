@@ -88,7 +88,7 @@ docker run -p 8080:8080 \
   -e MASSDRIVER_API_KEY=md_... \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
   -e SLACK_BOT_TOKEN=xoxb-... \
-  massdrivercloud/massdriver-automations:latest run rollback-on-failure
+  ghcr.io/massdriver-cloud/massdriver-automations:latest run rollback-on-failure
 ```
 
 ## Limits

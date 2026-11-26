@@ -40,7 +40,7 @@ params:
           description: >-
             The automations image. bundle-scanner uses the same repository with `-scanner` after the tag, and router
             with `-scripts` when it runs commands.
-          default: massdrivercloud/massdriver-automations
+          default: ghcr.io/massdriver-cloud/massdriver-automations
         tag:
           type: string
           title: Tag

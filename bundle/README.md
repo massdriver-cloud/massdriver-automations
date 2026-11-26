@@ -3,7 +3,7 @@
 Runs the [automations](../README.md) on a Kubernetes cluster. Turn on any set of them. For each enabled automation,
 the bundle creates:
 
-- a Deployment with one replica, running `massdrivercloud/massdriver-automations:<tag> run <name>`
+- a Deployment with one replica, running `ghcr.io/massdriver-cloud/massdriver-automations:<tag> run <name>`
 - a Secret with its environment variables, and a ConfigMap with its config file
 - a Service and an Ingress for the host `<name>.<domain>`
 - a Massdriver event destination that sends events to `https://<name>.<domain>/hooks/massdriver`, with the event

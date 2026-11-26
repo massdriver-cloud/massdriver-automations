@@ -243,7 +243,7 @@ docker run -p 8080:8080 \
   -e MASSDRIVER_SIGNING_SECRET=whsec_... \
   -e FREEZE_ADMIN_TOKEN=... \
   -e SLACK_BOT_TOKEN=xoxb-... \
-  massdrivercloud/massdriver-automations:latest run freeze-guard
+  ghcr.io/massdriver-cloud/massdriver-automations:latest run freeze-guard
 ```
 
 The config file is read at start. Restart the service after you change it. When you remove or rename a window,

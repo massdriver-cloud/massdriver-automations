@@ -4,7 +4,7 @@ Runs the [automations](../README.md) on Amazon ECS with Fargate. It has the same
 destinations as the [Kubernetes bundle](../bundle). Turn on any set of automations. For each enabled automation, the
 bundle creates:
 
-- an ECS service with one Fargate task (ARM64), running `massdrivercloud/massdriver-automations:<tag> run <name>`
+- an ECS service with one Fargate task (ARM64), running `ghcr.io/massdriver-cloud/massdriver-automations:<tag> run <name>`
 - a task definition with two containers: `files`, which writes the config file and the router **Scripts** to
   task volumes and exits, and the automation, which starts after `files` succeeds
 - a Secrets Manager secret with the automation's secret environment variables
