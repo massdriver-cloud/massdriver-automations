@@ -19,7 +19,7 @@ locals {
     secrets = merge(local.massdriver_secrets, local.slack_secrets, {
       CHAOS_MONKEY_RUN_TOKEN = lookup(local.secrets, "CHAOS_MONKEY_RUN_TOKEN", "")
     })
-    event_types = ["deployment.completed", "deployment.failed", "deployment.aborted"]
+    event_types = ["deployment.completed", "deployment.failed", "deployment.aborted", "deployment.rejected"]
     attributes  = {}
     condition   = "(.data.entity.message // \"\") | startswith(\"chaos-monkey: \")"
   }

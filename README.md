@@ -51,7 +51,7 @@ flowchart LR
 | [github-deployments](automations/github-deployments) | `deployment.*` | Shows Massdriver deployments as GitHub Deployments. |
 | [release-notes](automations/release-notes) | `repo.published` | Posts new bundle versions, and the instances that can upgrade, to Slack and Teams. |
 | [bundle-scanner](automations/bundle-scanner) | `repo.published` | Scans each new bundle version with Trivy and Checkov. Uses the `-scanner` image tag. |
-| [chaos-monkey](automations/chaos-monkey) | `deployment.completed`, `deployment.failed`, `deployment.aborted` | Sends random presets, merged presets, mutated params, and gibberish to the instances that match its attributes, as proposals, plans, or deployments. |
+| [chaos-monkey](automations/chaos-monkey) | `deployment.completed`, `deployment.failed`, `deployment.aborted`, `deployment.rejected` | Sends random presets, merged presets, mutated params, and gibberish to the instances that match its attributes, as proposals, plans, or deployments. |
 | [cost-explorer](automations/cost-explorer) | `deployment.completed` | Serves a dashboard of instance costs that you can group, filter, and chart over time. |
 | [sandbox-on-join](automations/sandbox-on-join) | `group_membership.*`, `deployment.completed` | Forks a sandbox environment for each new group member, and removes it when they leave. |
 | [statuspage](automations/statuspage) | `alarm.*`, `alarm_state.created`, `deployment.*`, `instance.*` | Serves a public status page from alarms, instances, and deployments. |

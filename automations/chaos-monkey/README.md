@@ -9,8 +9,8 @@ Each run picks one strategy per instance, by weight, from those that fit the ins
 |---|---|
 | `preset` | One preset of the bundle (an entry of its params schema's `examples`), merged over the instance's params. |
 | `merge` | Two or more presets, in random order, merged over each other and the instance's params. Needs two presets. |
-| `mutate` | The instance's params, with random fields set to new values from their schema: another `enum` or `oneOf` value, a number within `minimum` and `maximum`, a flipped boolean, a random string within `minLength` and `maxLength`, or an item added to, removed from, or shuffled in an array. Fields that cannot change any more (`$md.immutable`) stay as they are. |
-| `gibberish` | The instance's params, with up to `gibberish.max_fields` random fields set to values of the wrong type, out of range, very long, or nonsense. |
+| `mutate` | The instance's params, with random fields set to new values from their schema: another `enum` or `oneOf` value, a number within `minimum` and `maximum`, a flipped boolean, a random string within `minLength` and `maxLength`, or an item added to, removed from, or shuffled in an array. Fields that cannot change any more (`$md.immutable`) stay as they are, and integers keep to `multipleOf`. |
+| `gibberish` | The instance's params, with up to `gibberish.max_fields` random fields set to values of the wrong type, out of range, very long, or nonsense. It garbles fields that cannot change any more too. |
 
 Presets merge object by object, and anything else, such as an array, replaces what was there. `mutate` does not
 follow `pattern` or `format`, so some of its values fail validation too.
@@ -23,8 +23,8 @@ The mode says what the deployment is:
 
 When Massdriver rejects the params, the automation posts the validation messages. When it accepts gibberish, the
 post says so. Each deployment's message starts with `chaos-monkey: `, followed by the strategy and what it did,
-such as `chaos-monkey: merge: presets "Small" + "Large"`, and ends with a `signature`, such as `Hey, thanks for monkeyin' around. 🐒🤙🏼🏄‍♂️`. When that deployment completes, fails, or is aborted, the
-automation posts the outcome.
+such as `chaos-monkey: merge: presets "Small" + "Large"`, and ends with a `signature`, such as `Hey, thanks for monkeyin' around. 🐒🤙🏼🏄‍♂️`. When that deployment completes, fails, is aborted, or, as a
+proposal, is rejected, the automation posts the outcome.
 
 The automation skips an instance when a deployment of it is `PENDING`, `APPROVED`, or `RUNNING`, and, in `propose`
 mode, when a proposal of it is waiting. It moves on to the next instance until it has hit `instances` of them or run
@@ -100,6 +100,7 @@ mass event destination create \
   --event-type deployment.completed \
   --event-type deployment.failed \
   --event-type deployment.aborted \
+  --event-type deployment.rejected \
   --condition '(.data.entity.message // "") | startswith("chaos-monkey: ")'
 ```
 

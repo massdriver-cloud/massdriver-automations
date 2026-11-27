@@ -474,3 +474,19 @@ func TestBundleConfigWithNullsLoads(t *testing.T) {
 		t.Errorf("signatures = %q, want none", cfg.signatures)
 	}
 }
+
+func TestRejectedProposalsArePosted(t *testing.T) {
+	e := setup(t, base)
+	event(t, e.h, "e1", "deployment.rejected", MessagePrefix+`preset: preset "Small"`)
+	if texts := e.slack.Texts(); len(texts) != 1 || !strings.Contains(texts[0], ` was rejected: preset: preset "Small"`) {
+		t.Errorf("slack = %q", texts)
+	}
+}
+
+func TestOutcomePutsTheSignatureOnItsOwnLine(t *testing.T) {
+	e := setup(t, strings.Replace(base, "signature: null", "signature: [Ook., Eek.]", 1))
+	event(t, e.h, "e1", "deployment.completed", MessagePrefix+"mutate: changed size Eek.")
+	if texts := e.slack.Texts(); len(texts) != 1 || !strings.HasSuffix(texts[0], ": mutate: changed size\nEek.") {
+		t.Errorf("slack = %q", texts)
+	}
+}
