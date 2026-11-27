@@ -217,6 +217,22 @@ func TestWritesOnlyWhenChangedAndBeforeExpiry(t *testing.T) {
 	}
 }
 
+func TestUnchangedEntryIsRefreshedWhenQueriesTakeLessTime(t *testing.T) {
+	e := setup(t, trafficRules)
+	e.src.values = map[string]float64{"rps": 10, "errors": 0}
+	// The first cycle's queries took 20 seconds; the next ones take 1 second.
+	e.clock = start.Add(20 * time.Second)
+	e.cycle(t)
+	e.clock = start.Add(time.Minute + time.Second)
+	e.cycle(t)
+	e.clock = start.Add(2*time.Minute + time.Second)
+	e.cycle(t)
+	// The entry expires at 3m20s, so the cycle at 2m must write it again.
+	if n := len(e.api.calls()); n != 2 {
+		t.Errorf("writes = %d, want 2", n)
+	}
+}
+
 func TestTTLIsThreeIntervals(t *testing.T) {
 	e := setup(t, trafficRules+"interval: 20s\n")
 	e.src.values = map[string]float64{"rps": 10, "errors": 0}
@@ -386,6 +402,8 @@ rules: [{target: {instance: a, key: "has space"}, value: x}]`,
 rules: [{target: {instance: a, key: k, field: f, format: TEXT}, value: 1}]`,
 		"a query as a whole JSON value": `
 rules: [{target: {instance: a, key: k, format: JSON}, cloudwatch: {alarm: x}}]`,
+		"an object as a TEXT value": `
+rules: [{target: {instance: a, key: k, format: TEXT}, value: {a: 1}}]`,
 		"a string as a whole JSON value": `
 rules: [{target: {instance: a, key: k, format: JSON}, value: x}]`,
 		"two whole values": `

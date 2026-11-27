@@ -6,6 +6,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.48.1
 	github.com/aws/aws-sdk-go-v2/config v1.33.21
 	github.com/aws/aws-sdk-go-v2/credentials v1.21.3
+	github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.76.1
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.116.0
 	github.com/itchyny/gojq v0.12.20
 	github.com/lmittmann/tint v1.2.1
@@ -26,7 +27,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.13 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.13 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.12 // indirect
-	github.com/aws/aws-sdk-go-v2/service/cloudwatch v1.76.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.25 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.11.13 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.12 // indirect

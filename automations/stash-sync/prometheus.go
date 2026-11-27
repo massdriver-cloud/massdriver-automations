@@ -75,7 +75,8 @@ func (p *Prometheus) Query(ctx context.Context, query Query) (float64, error) {
 		return 0, fmt.Errorf("prometheus: HTTP %d", resp.StatusCode)
 	}
 	if body.Status != "success" {
-		return 0, fmt.Errorf("prometheus: HTTP %d: %s: %s", resp.StatusCode, body.ErrorType, body.Error)
+		// The error text can quote the query, which is config, so only its type is returned.
+		return 0, fmt.Errorf("prometheus: HTTP %d: %s", resp.StatusCode, body.ErrorType)
 	}
 
 	var sample []any

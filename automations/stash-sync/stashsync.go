@@ -134,9 +134,9 @@ func (s *Sync) Run(ctx context.Context) {
 // Cycle reads every source, or steps the scenario, and writes the entries that changed. It returns true when a
 // scenario that does not loop has ended.
 func (s *Sync) Cycle(ctx context.Context) bool {
-	ctx, cancel := context.WithTimeout(ctx, max(time.Duration(s.cfg.Interval), queryTimeout+10*time.Second))
-	defer cancel()
 	log := automation.Logger(ctx)
+	// Reads and writes each get their own deadline, so slow queries do not use up the time for writes.
+	budget := max(time.Duration(s.cfg.Interval), queryTimeout+10*time.Second)
 
 	var entries []Entry
 	if s.sim != nil {
@@ -150,10 +150,14 @@ func (s *Sync) Cycle(ctx context.Context) bool {
 		}
 		entries = simEntries
 	} else {
-		entries = readings(ctx, s.cfg.groups, s.sources)
+		rctx, cancel := context.WithTimeout(ctx, budget)
+		entries = readings(rctx, s.cfg.groups, s.sources)
+		cancel()
 	}
 
-	st := s.publisher.publish(ctx, entries)
+	wctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	st := s.publisher.publish(wctx, entries)
 	level := slog.LevelDebug
 	if st.written > 0 || st.failed > 0 || st.invalid > 0 {
 		level = slog.LevelInfo

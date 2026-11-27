@@ -238,6 +238,10 @@ func (c *Config) Validate() error {
 			fail("%s.target.field needs format JSON", at)
 			continue
 		}
+		if format == FormatText && r.Target.Field == "" && r.defaultFormat() == FormatJSON {
+			fail("%s.target: an object value needs format JSON", at)
+			continue
+		}
 		if format == FormatJSON && r.Target.Field == "" && r.defaultFormat() != FormatJSON {
 			fail("%s.target: a JSON entry without a field needs a fixed object value", at)
 			continue

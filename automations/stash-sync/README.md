@@ -20,7 +20,7 @@ In simulate mode, it writes changing values from a scenario, with no cloud acces
 
 - Each cycle, the automation runs every query, builds the value of each entry, and writes the entries whose value
   changed. Several rules can fill the fields of one JSON entry, which is written once.
-- An entry that does not change is written again two intervals after its last write.
+- An entry that does not change is written again in the second cycle after its last write.
 - Every write sets a TTL of three intervals. When the automation stops, its entries expire, and their widgets go
   away.
 - Before it writes an `md/` key, the automation checks the value against the key's JSON Schema from

@@ -34,8 +34,10 @@ func newPublisher(stash Stash, interval time.Duration, now func() time.Time) *pu
 // ttl is three intervals: a sync that stops makes its entries expire after three missed cycles.
 func (p *publisher) ttl() time.Duration { return 3 * p.interval }
 
-// refreshAfter is when an unchanged entry is written again, one interval before it would expire.
-func (p *publisher) refreshAfter() time.Duration { return 2 * p.interval }
+// refreshAfter is when an unchanged entry is written again. Cycles are about one interval apart, and a cycle's
+// write time moves with how long its queries take, so the entry is rewritten on the second cycle after its write
+// even when that cycle's queries are faster.
+func (p *publisher) refreshAfter() time.Duration { return p.interval * 3 / 2 }
 
 type publishStats struct {
 	written, unchanged, invalid, failed int
