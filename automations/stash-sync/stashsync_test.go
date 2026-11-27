@@ -384,6 +384,10 @@ rules: [{target: {key: k}, value: x}]`,
 rules: [{target: {instance: a, key: "has space"}, value: x}]`,
 		"text with a field": `
 rules: [{target: {instance: a, key: k, field: f, format: TEXT}, value: 1}]`,
+		"a query as a whole JSON value": `
+rules: [{target: {instance: a, key: k, format: JSON}, cloudwatch: {alarm: x}}]`,
+		"a string as a whole JSON value": `
+rules: [{target: {instance: a, key: k, format: JSON}, value: x}]`,
 		"two whole values": `
 rules:
   - {target: {instance: a, key: k}, value: x}
