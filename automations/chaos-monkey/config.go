@@ -35,18 +35,19 @@ var statuses = []string{"INITIALIZED", "PROVISIONED", "FAILED", "DECOMMISSIONED"
 
 // Config is the config file of chaos-monkey.
 type Config struct {
-	Slack      slack.Config         `yaml:"slack"`
-	Massdriver massdriver.AppConfig `yaml:"massdriver"`
-	Schedule   string               `yaml:"schedule"`
-	Timezone   string               `yaml:"timezone"`
-	Mode       string               `yaml:"mode"`
-	Match      map[string]Values    `yaml:"match"`
-	Status     []string             `yaml:"status"`
-	Instances  int                  `yaml:"instances"`
-	Strategies map[string]int       `yaml:"strategies"`
-	Mutate     Mutate               `yaml:"mutate"`
-	Gibberish  Gibberish            `yaml:"gibberish"`
-	Seed       *uint64              `yaml:"seed"`
+	Slack      slack.Config             `yaml:"slack"`
+	Massdriver massdriver.AppConfig     `yaml:"massdriver"`
+	Results    massdriver.ResultsConfig `yaml:"results"`
+	Schedule   string                   `yaml:"schedule"`
+	Timezone   string                   `yaml:"timezone"`
+	Mode       string                   `yaml:"mode"`
+	Match      map[string]Values        `yaml:"match"`
+	Status     []string                 `yaml:"status"`
+	Instances  int                      `yaml:"instances"`
+	Strategies map[string]int           `yaml:"strategies"`
+	Mutate     Mutate                   `yaml:"mutate"`
+	Gibberish  Gibberish                `yaml:"gibberish"`
+	Seed       *uint64                  `yaml:"seed"`
 	// Signature is a node, not a string, so that an explicit null, which turns signatures off, differs from no key.
 	Signature yaml.Node `yaml:"signature"`
 

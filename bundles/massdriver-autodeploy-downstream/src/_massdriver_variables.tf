@@ -6,6 +6,9 @@ variable "attributes" {
 }
 variable "config" {
   type = object({
+    results = optional(object({
+      prefix = optional(string)
+    }))
     rules = optional(list(object({
       action     = string
       downstream = map(string)

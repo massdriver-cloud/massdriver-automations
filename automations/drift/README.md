@@ -73,6 +73,7 @@ The config file is YAML. [`config.example.yaml`](config.example.yaml) has every 
 |---|---|---|
 | `slack.channel` | | The channel for alerts, with `SLACK_BOT_TOKEN`. Without a channel or a webhook, alerts go to the logs only. |
 | `massdriver.app_url` | `https://app.massdriver.cloud` | The Massdriver UI, for the plan links. |
+| `results.prefix` | `md/v1` | The start of the [result](#results-in-the-stash) keys. |
 | `checks[].name` | | Required. Unique. |
 | `checks[].schedule` | | A cron expression (5 fields, or `@daily`, `@every 6h`). Without one, the check runs only from `POST /drift/run`. |
 | `checks[].timezone` | `UTC` | The timezone of `schedule`. |
@@ -105,6 +106,19 @@ The response is `202`. A request for a check that does not exist gets `404`.
 | `resolve`, `deployed` | `instance:propose` and `instance:deploy` |
 | `resolve`, `saved` | `instance:deploy` |
 | `propose` | `instance:propose` |
+
+## Results in the stash
+
+When a plan completes, drift writes two JSON entries:
+
+| Key | Stash | Label | Value |
+|---|---|---|---|
+| `md/v1/drift` | The instance | Drift | `{"status": "detected", "resources": 2, "checked_at": "2026-11-27T20:03:24Z"}`. `status` is `none`, `detected`, or `unknown`. `resources` is the sum of the counts in the plan summaries. |
+| `md/v1/changes/drift` | The plan deployment | Changes | `{"tool": "drift", "add": 0, "change": 1, "destroy": 1}`, summed over the bundle's steps. Not written when the result is unknown, because some steps have no count. |
+
+The keys become widgets once the server's widget catalog has them. Until then, the server rejects an `md/` key that is not in the catalog. Set `results.prefix` to a prefix outside `md/`, such as `results/v1`, to see each result as a metadata row with its label meanwhile. A failed write is logged at `debug` and never fails the event, so Massdriver does not send it again.
+
+The service account needs `stash:write` on the instances.
 
 ## Event destination
 

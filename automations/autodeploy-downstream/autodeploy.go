@@ -42,20 +42,21 @@ var Definition = automation.Definition{
 		if err != nil {
 			return nil, err
 		}
-		return New(api, cfg.Rules), nil
+		return New(api, cfg), nil
 	},
 }
 
 // Autodeploy holds the API client and the rules that opt instances in.
 type Autodeploy struct {
-	api   *massdriver.Client
-	rules []Rule
-	run   func(func())
+	api     *massdriver.Client
+	results massdriver.Results
+	rules   []Rule
+	run     func(func())
 }
 
 // New returns the automation.
-func New(api *massdriver.Client, rules []Rule) *Autodeploy {
-	return &Autodeploy{api: api, rules: rules, run: func(f func()) { go f() }}
+func New(api *massdriver.Client, cfg Config) *Autodeploy {
+	return &Autodeploy{api: api, results: massdriver.NewResults(api, cfg.Results), rules: cfg.Rules, run: func(f func()) { go f() }}
 }
 
 // Handle starts the downstream deploys after a completed PROVISION.
@@ -130,6 +131,7 @@ func (a *Autodeploy) deployDownstream(ctx context.Context, rules []Rule, upstrea
 				continue
 			}
 			l.Info("deployment proposed", "deployment_id", id)
+			a.writeStep(ctx, id, fmt.Sprintf("Proposed by rule %s after upstream %s completed deployment %s", rule.Name, upstream, deploymentID))
 			continue
 		}
 		id, err := a.deploy(ctx, createDeploymentMutation, "createDeployment", inst, msg)
@@ -138,7 +140,14 @@ func (a *Autodeploy) deployDownstream(ctx context.Context, rules []Rule, upstrea
 			continue
 		}
 		l.Info("deployment created", "deployment_id", id)
+		a.writeStep(ctx, id, fmt.Sprintf("Deployed by rule %s after upstream %s completed deployment %s", rule.Name, upstream, deploymentID))
 	}
+}
+
+func (a *Autodeploy) writeStep(ctx context.Context, deploymentID, message string) {
+	a.results.Write(ctx, "deployment", deploymentID, "step/autodeploy", "Autodeploy", massdriver.Step{
+		Tool: "autodeploy-downstream", Status: "succeeded", FinishedAt: massdriver.Timestamp(time.Now()), Message: message,
+	})
 }
 
 // An instance is downstream when one of its dependencies resolves to a resource the upstream produces.

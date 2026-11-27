@@ -24,9 +24,10 @@ const DefaultSoak = time.Hour
 
 // Config is the config file of upgrade-train.
 type Config struct {
-	Slack      slack.Config         `yaml:"slack"`
-	Massdriver massdriver.AppConfig `yaml:"massdriver"`
-	Trains     []Train              `yaml:"trains"`
+	Slack      slack.Config             `yaml:"slack"`
+	Massdriver massdriver.AppConfig     `yaml:"massdriver"`
+	Results    massdriver.ResultsConfig `yaml:"results"`
+	Trains     []Train                  `yaml:"trains"`
 }
 
 // Train moves each new version of its bundles through its stages in order.

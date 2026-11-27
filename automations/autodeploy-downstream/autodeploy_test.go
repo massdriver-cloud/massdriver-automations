@@ -65,6 +65,7 @@ type fakeAPI struct {
 	mu       sync.Mutex
 	deployed map[string]map[string]any
 	proposed map[string]map[string]any
+	stash    []map[string]any
 }
 
 func newFakeAPI() *fakeAPI {
@@ -91,6 +92,11 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.proposed[req.Variables["id"].(string)] = req.Variables
 		f.mu.Unlock()
 		data = map[string]any{"proposeDeployment": map[string]any{"successful": true, "messages": []any{}, "result": map[string]any{"id": "proposed-dep"}}}
+	case strings.Contains(req.Query, "mutation SetStashEntry"):
+		f.mu.Lock()
+		f.stash = append(f.stash, req.Variables)
+		f.mu.Unlock()
+		data = map[string]any{"alphaSetStashEntry": map[string]any{"successful": true, "messages": []any{}, "result": map[string]any{"key": req.Variables["key"]}}}
 	case strings.Contains(req.Query, "query ResourceConsumers"):
 		data = map[string]any{"resource": map[string]any{
 			"remoteReferences":    map[string]any{"cursor": map[string]any{"next": nil}, "items": []any{map[string]any{"instance": inst("etl-prod-job", "PROVISIONED", "true", "db-writer")}}},
@@ -137,7 +143,7 @@ func TestDeploysOptedInProvisionedDependents(t *testing.T) {
 	srv := httptest.NewServer(api)
 	defer srv.Close()
 
-	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, configRules(t, ""))
+	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, Config{Rules: configRules(t, "")})
 	a.run = func(f func()) { f() }
 
 	if code := post(t, automation.Handler(a, secret), completedEvent("evt-1", "PROVISION", "api-prod-db"), true); code != http.StatusNoContent {
@@ -159,6 +165,21 @@ func TestDeploysOptedInProvisionedDependents(t *testing.T) {
 			t.Errorf("%s message = %q", id, input["message"])
 		}
 	}
+
+	if len(api.stash) != 3 {
+		t.Fatalf("stash writes = %d, want one per deployment", len(api.stash))
+	}
+	for _, v := range api.stash {
+		scope, _ := json.Marshal(v["scope"])
+		input := v["input"].(map[string]any)
+		var step map[string]any
+		_ = json.Unmarshal([]byte(input["value"].(string)), &step)
+		if string(scope) != `{"deployment":"new-dep"}` || v["key"] != "md/v1/step/autodeploy" || input["label"] != "Autodeploy" ||
+			step["tool"] != "autodeploy-downstream" || step["status"] != "succeeded" ||
+			step["message"] != "Deployed by rule autodeploy=true after upstream api-prod-db completed deployment dep-1" {
+			t.Errorf("stash write = %v", v)
+		}
+	}
 }
 
 func TestIgnoresOtherActionsAndUnsignedRequests(t *testing.T) {
@@ -166,7 +187,7 @@ func TestIgnoresOtherActionsAndUnsignedRequests(t *testing.T) {
 	srv := httptest.NewServer(api)
 	defer srv.Close()
 
-	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, configRules(t, ""))
+	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, Config{Rules: configRules(t, "")})
 	a.run = func(f func()) { f() }
 	h := automation.Handler(a, secret)
 
@@ -189,7 +210,7 @@ func TestRedeliveredEventDeploysOnce(t *testing.T) {
 	srv := httptest.NewServer(api)
 	defer srv.Close()
 
-	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, configRules(t, ""))
+	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, Config{Rules: configRules(t, "")})
 	calls := 0
 	a.run = func(f func()) { calls++; f() }
 	h := automation.Handler(a, secret)
@@ -218,7 +239,7 @@ func runCascade(t *testing.T, rules []Rule, event []byte) *fakeAPI {
 	api := newFakeAPI()
 	srv := httptest.NewServer(api)
 	t.Cleanup(srv.Close)
-	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, rules)
+	a := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, Config{Rules: rules})
 	a.run = func(f func()) { f() }
 	if code := post(t, automation.Handler(a, secret), event, true); code != http.StatusNoContent {
 		t.Fatalf("status = %d", code)

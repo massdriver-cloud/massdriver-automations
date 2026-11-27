@@ -17,3 +17,9 @@ github:
   ref_attribute: github_ref
   # The GitHub environment of a deployment: environment (such as prod) or project-environment (such as api-prod).
   environment_name: environment
+
+results:
+  # The start of the stash keys of the results this automation writes. Default: md/v1. The server rejects an md/
+  # key until its widget catalog has it; a prefix outside md/, such as results/v1, shows each result as a labeled
+  # metadata row until then.
+  prefix: md/v1

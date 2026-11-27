@@ -96,6 +96,14 @@ def massdriver_ui():
         "App URL", "The Massdriver UI, for the links in messages. Empty uses https://app.massdriver.cloud.", **HTTPS)})
 
 
+def results_ui():
+    return obj("Stash results", {"prefix": s(
+        "Key prefix", "The start of the stash keys of the results the automation writes. The server accepts `md/v1` "
+        "keys once its widget catalog has them. Until then, a prefix outside `md/`, such as `results/v1`, shows each "
+        "result as a labeled row.", default="md/v1", pattern=r"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$",
+        message={"pattern": "Must be letters, digits, and `_ . -`, in parts separated by `/`, such as results/v1."})})
+
+
 ATTRIBUTES = string_map(
     "Event attributes",
     "Attribute values that an event's entity must have, such as `md-environment` = `prod`. Empty sends events of "
@@ -197,6 +205,7 @@ def automations(k8s):
                                  default="deploy"),
             }, required=["name", "downstream", "action"]), minItems=1, default=[
                 {"name": "autodeploy", "downstream": {"autodeploy": "true"}, "upstream": {}, "action": "deploy"}]),
+            "results": results_ui(),
         }),
         extra={"attributes": ATTRIBUTES},
         ui={"rules": {"ui:options": {"itemTitle": "{{name}}"},
@@ -264,10 +273,11 @@ def automations(k8s):
             "slack": slack("The channel for what each run sent and how each deployment ended. Empty writes them "
                            "to the logs only."),
             "massdriver": massdriver_ui(),
+            "results": results_ui(),
         }, required=["match", "mode"]),
         extra={},
         ui={"ui:order": ["match", "mode", "schedule", "timezone", "status", "instances", "strategies", "mutate",
-                         "gibberish", "sign_off", "signature", "slack", "massdriver"],
+                         "gibberish", "sign_off", "signature", "slack", "massdriver", "results"],
             "status": {"ui:widget": "checkboxes", "ui:options": {"inline": True}}},
     )
 
@@ -343,9 +353,10 @@ def automations(k8s):
                 {"name": "prod-nightly", "schedule": "0 6 * * *", "timezone": "UTC",
                  "match": {"md-environment": "prod"}, "mode": "detect", "resolve_with": "deployed"}]),
             "massdriver": massdriver_ui(),
+            "results": results_ui(),
         }, required=["checks"]),
         extra=extra,
-        ui={"ui:order": ["slack", "checks", "massdriver"],
+        ui={"ui:order": ["slack", "checks", "massdriver", "results"],
             "checks": {"ui:options": {"itemTitle": "{{name}}"}, "items": {
                 "ui:order": ["name", "match", "schedule", "timezone", "mode", "resolve_with", "slack",
                              "notify_clean", "summary", "max_concurrent", "patterns"],
@@ -425,6 +436,7 @@ def automations(k8s):
                              default="https://api.github.com", **HTTPS),
             }),
             "massdriver": massdriver_ui(),
+            "results": results_ui(),
         }),
         extra={},
         ui={"github": {"ui:order": ["repo_attribute", "ref_attribute", "environment_name", "api_url"]}},
@@ -588,9 +600,10 @@ def automations(k8s):
             "slack": slack("The channel for rollback notices. The result is a reply in the notice's thread. Empty "
                            "posts nothing."),
             "massdriver": massdriver_ui(),
+            "results": results_ui(),
         }, required=["attribute"]),
         extra={"attributes": ATTRIBUTES},
-        ui={"ui:order": ["attribute", "slack", "massdriver"]},
+        ui={"ui:order": ["attribute", "slack", "massdriver", "results"]},
     )
 
     # ---------------------------------------------------------------- router
@@ -853,9 +866,10 @@ def automations(k8s):
                            "only."),
             "trains": arr("Trains", train, minItems=1),
             "massdriver": massdriver_ui(),
+            "results": results_ui(),
         }, required=["trains"]),
         extra=extra,
-        ui={"ui:order": ["slack", "trains", "massdriver"],
+        ui={"ui:order": ["slack", "trains", "massdriver", "results"],
             "trains": {"ui:options": {"itemTitle": "{{name}}"},
                        "items": {"ui:order": ["name", "bundles", "include_development", "stages", "slack"],
                                  "bundles": TAG,

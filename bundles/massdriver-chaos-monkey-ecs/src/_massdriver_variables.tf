@@ -21,6 +21,9 @@ variable "config" {
     mutate = optional(object({
       rate = optional(number)
     }))
+    results = optional(object({
+      prefix = optional(string)
+    }))
     schedule  = optional(string)
     sign_off  = optional(bool)
     signature = optional(string)

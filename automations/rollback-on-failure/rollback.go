@@ -55,9 +55,10 @@ var Definition = automation.Definition{
 
 // Config is the config file of rollback-on-failure.
 type Config struct {
-	Attribute  Attribute            `yaml:"attribute"`
-	Slack      slack.Config         `yaml:"slack"`
-	Massdriver massdriver.AppConfig `yaml:"massdriver"`
+	Attribute  Attribute                `yaml:"attribute"`
+	Slack      slack.Config             `yaml:"slack"`
+	Massdriver massdriver.AppConfig     `yaml:"massdriver"`
+	Results    massdriver.ResultsConfig `yaml:"results"`
 }
 
 // Attribute is the attribute key and value that opt an instance in.
@@ -81,9 +82,10 @@ func (c *Config) Validate() error {
 
 // Rollback holds the API client, the configuration, and the Slack notice of each rollback in progress.
 type Rollback struct {
-	api   *massdriver.Client
-	slack *slack.Client
-	cfg   Config
+	api     *massdriver.Client
+	results massdriver.Results
+	slack   *slack.Client
+	cfg     Config
 
 	mu sync.Mutex
 	// threads holds the notice of each rollback deployment, so its outcome is a reply to that notice.
@@ -97,7 +99,7 @@ type thread struct {
 
 // New returns the automation.
 func New(api *massdriver.Client, sl *slack.Client, cfg Config) *Rollback {
-	return &Rollback{api: api, slack: sl, cfg: cfg, threads: map[string]thread{}}
+	return &Rollback{api: api, results: massdriver.NewResults(api, cfg.Results), slack: sl, cfg: cfg, threads: map[string]thread{}}
 }
 
 type failedDeployment struct {
@@ -197,6 +199,12 @@ func (r *Rollback) Handle(ctx context.Context, ev automation.Event) error {
 		proposalID = id
 	}
 	log = log.With("rollback_deployment_id", proposalID)
+	step := massdriver.Step{
+		Tool:       "rollback-on-failure",
+		Status:     "succeeded",
+		FinishedAt: massdriver.Timestamp(time.Now()),
+		Message:    fmt.Sprintf("Rolls back failed deployment %s to deployment %s (v%s)", failed.ID, target.ID, target.Version),
+	}
 
 	if _, err := r.mutate(ctx, approveDeploymentMutation, "approveDeployment", proposalID); err != nil {
 		var rejected *payloadError
@@ -205,6 +213,8 @@ func (r *Rollback) Handle(ctx context.Context, ev automation.Event) error {
 		}
 		// Separation of duty stops the service account from approving its own proposal. A person approves it.
 		log.Warn("rollback approval refused", "err", err)
+		step.Message += ". Waits for approval."
+		r.results.Write(ctx, "deployment", proposalID, "step/rollback", "Rollback", step)
 		r.notifyRollback(ctx, log, proposalID, fmt.Sprintf("Deployment %s of %s failed. Rollback %s to deployment %s (v%s) waits for approval: %s",
 			r.link(ev, failed.ID, failed.ID), r.link(ev, "", instance), r.link(ev, proposalID, proposalID),
 			r.link(ev, target.ID, target.ID), target.Version, err))
@@ -212,6 +222,7 @@ func (r *Rollback) Handle(ctx context.Context, ev automation.Event) error {
 	}
 
 	log.Info("rollback started")
+	r.results.Write(ctx, "deployment", proposalID, "step/rollback", "Rollback", step)
 	r.notifyRollback(ctx, log, proposalID, fmt.Sprintf("Deployment %s of %s failed. Rollback %s restores deployment %s (v%s).",
 		r.link(ev, failed.ID, failed.ID), r.link(ev, "", instance), r.link(ev, proposalID, proposalID),
 		r.link(ev, target.ID, target.ID), target.Version))

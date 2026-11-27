@@ -6,9 +6,10 @@ locals {
     name  = "github-deployments"
     image = local.image
     files = { (local.config_file) = yamlencode(var.config) }
-    secrets = {
+    env   = local.massdriver_env
+    secrets = merge(local.massdriver_secrets, {
       GITHUB_TOKEN = lookup(local.secrets, "GITHUB_TOKEN", "")
-    }
+    })
     event_types = ["deployment.started", "deployment.completed", "deployment.failed", "deployment.aborted"]
     condition   = ".data.metadata.deployment_action != \"PLAN\" and (.data.attributes[${jsonencode(local.repo_attribute)}] // \"\") != \"\""
   }

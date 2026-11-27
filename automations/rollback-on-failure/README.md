@@ -49,6 +49,7 @@ The config file is YAML. [`config.example.yaml`](config.example.yaml) has every 
 | `attribute.value` | `true` | The attribute value that opts an instance in. |
 | `slack.channel` | | The channel for notices, with `SLACK_BOT_TOKEN`. Without a channel or a webhook, notices go to the logs only. |
 | `massdriver.app_url` | `https://app.massdriver.cloud` | The Massdriver UI, for the links in notices. |
+| `results.prefix` | `md/v1` | The start of the [result](#results-in-the-stash) keys. |
 
 With the bot token, the result of each rollback, completed or failed, is a reply in the thread of its notice.
 
@@ -57,6 +58,18 @@ The service account needs these permissions on the opted-in instances:
 - `instance:propose`, for `rollbackDeployment`
 - `instance:deploy`, for `approveDeployment`
 - `project:view` on their projects, to read the deployment history
+
+## Results in the stash
+
+On each rollback deployment it creates, the automation writes:
+
+| Key | Stash | Label | Value |
+|---|---|---|---|
+| `md/v1/step/rollback` | The rollback deployment | Rollback | `{"tool": "rollback-on-failure", "status": "succeeded", "finished_at": "...", "message": "Rolls back failed deployment <id> to deployment <id> (v1.2.3)"}`. The message says when the rollback waits for approval. |
+
+The keys become widgets once the server's widget catalog has them. Until then, the server rejects an `md/` key that is not in the catalog. Set `results.prefix` to a prefix outside `md/`, such as `results/v1`, to see each result as a metadata row with its label meanwhile. A failed write is logged at `debug` and never fails the event, so Massdriver does not send it again.
+
+The service account needs `stash:write` on the instances.
 
 ## Event destination
 

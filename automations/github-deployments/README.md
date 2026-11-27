@@ -35,6 +35,9 @@ For each Massdriver deployment, the automation creates one GitHub deployment and
 | `MASSDRIVER_SIGNING_SECRET` | Required. The `whsec_` signing secret of the event destination. |
 | `CONFIG_FILE` | The config file. Default: `/etc/massdriver-automations/config.yaml`. |
 | `GITHUB_TOKEN` | Required, or the variable that `github.token_env` names. A GitHub token with the `Deployments: write` and `Metadata: read` repository permissions (fine-grained), or the `repo_deployment` scope (classic). |
+| `MASSDRIVER_API_KEY` | An `md_` access token of a service account. Turns on the [source result](#results-in-the-stash). |
+| `MASSDRIVER_ORGANIZATION_ID` | Your organization's identifier. Required with `MASSDRIVER_API_KEY`. |
+| `MASSDRIVER_URL` | The URL of your Massdriver installation. Default: `https://api.massdriver.cloud`. |
 
 `PORT`, `LOG_FORMAT`, and `LOG_LEVEL` are in the [common settings](../../README.md#common-settings).
 
@@ -48,8 +51,22 @@ The config file is YAML. [`config.example.yaml`](config.example.yaml) has every 
 | `github.ref_attribute` | `github_ref` | The attribute that names the ref. |
 | `github.environment_name` | `environment` | `environment` or `project-environment`. |
 | `massdriver.app_url` | `https://app.massdriver.cloud` | The Massdriver UI, for the status links. |
+| `results.prefix` | `md/v1` | The start of the [result](#results-in-the-stash) keys. |
 
-Every key is optional. The automation does not call the Massdriver API.
+Every key is optional.
+
+## Results in the stash
+
+With `MASSDRIVER_API_KEY` set, the automation writes the commit that GitHub resolved the ref to, for each
+Massdriver deployment:
+
+| Key | Stash | Label | Value |
+|---|---|---|---|
+| `md/v1/source` | The deployment | Source | `{"repo": "acme/api", "ref": "main", "commit": "a41c9e2...", "url": "https://github.com/acme/api/commit/a41c9e2..."}`. `url` is left out when `github.api_url` is neither github.com nor a GitHub Enterprise Server `/api/v3` URL. |
+
+The keys become widgets once the server's widget catalog has them. Until then, the server rejects an `md/` key that is not in the catalog. Set `results.prefix` to a prefix outside `md/`, such as `results/v1`, to see each result as a metadata row with its label meanwhile. A failed write is logged at `debug` and never fails the event, so Massdriver does not send it again.
+
+The service account needs `stash:write` on the instances. Without `MASSDRIVER_API_KEY`, the automation does not call the Massdriver API.
 
 ## Event destination
 

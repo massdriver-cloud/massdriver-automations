@@ -83,6 +83,7 @@ var Definition = automation.Definition{
 // Chaos picks instances and deploys random params to them.
 type Chaos struct {
 	api      *massdriver.Client
+	results  massdriver.Results
 	slack    *slack.Client
 	cfg      *Config
 	runToken string
@@ -103,7 +104,7 @@ func New(api *massdriver.Client, sl *slack.Client, cfg *Config, runToken string)
 		src = rand.NewPCG(rand.Uint64(), rand.Uint64()) //nolint:gosec
 	}
 	return &Chaos{
-		api: api, slack: sl, cfg: cfg, runToken: runToken,
+		api: api, results: massdriver.NewResults(api, cfg.Results), slack: sl, cfg: cfg, runToken: runToken,
 		run:    func(f func()) { go f() },
 		monkey: &monkey{r: rand.New(src), cfg: cfg}, //nolint:gosec
 	}
@@ -309,6 +310,9 @@ func (c *Chaos) strike(ctx context.Context, id, strategy string) (bool, error) {
 	}
 	verb := map[string]string{ModePropose: "proposed", ModePlan: "planned", ModeDeploy: "deployed"}[c.cfg.Mode]
 	log.Info("chaos deployment created", "deployment_id", p.Result.ID, "detail", ms.Detail)
+	c.results.Write(ctx, "deployment", p.Result.ID, "step/chaos-monkey", "Chaos monkey", massdriver.Step{
+		Tool: "chaos-monkey", Status: "succeeded", FinishedAt: massdriver.Timestamp(time.Now()), Message: ms.Strategy + ": " + ms.Detail,
+	})
 	text := fmt.Sprintf("Chaos monkey %s %s with %s: %s. Deployment %s.",
 		verb, link("", inst.ID), ms.Strategy, ms.Detail, link(p.Result.ID, p.Result.ID))
 	if ms.Strategy == StrategyGibberish {

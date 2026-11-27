@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
 )
 
 var secret = []byte("0123456789abcdef0123456789abcdef")
@@ -96,7 +97,7 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		id := f.nextID
 		f.nextID++
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": id})
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "ref": body["ref"], "sha": "a41c9e2"})
 	case strings.HasSuffix(r.URL.Path, "/statuses"):
 		id := strings.Split(r.URL.Path, "/")[5]
 		if r.Method == http.MethodPost {
@@ -149,7 +150,7 @@ func TestStartedThenCompletedCreatesOneDeploymentWithTwoStatuses(t *testing.T) {
 	gh := newFakeGitHub()
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
-	h := automation.Handler(New(testConfig(srv.URL)), secret)
+	h := automation.Handler(New(testConfig(srv.URL), nil), secret)
 
 	if code := post(t, h, "ev-1", deploymentEvent("ev-1", "deployment.started", "PROVISION", nil)); code != http.StatusNoContent {
 		t.Fatalf("started: got %d", code)
@@ -199,7 +200,7 @@ func TestRestartFindsExistingDeploymentByPayload(t *testing.T) {
 	}
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
-	h := automation.Handler(New(testConfig(srv.URL)), secret)
+	h := automation.Handler(New(testConfig(srv.URL), nil), secret)
 
 	post(t, h, "ev-3", deploymentEvent("ev-3", "deployment.failed", "PROVISION", nil))
 
@@ -225,7 +226,7 @@ func TestStartedAfterCompletedDoesNotReopen(t *testing.T) {
 	gh := newFakeGitHub()
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
-	h := automation.Handler(New(testConfig(srv.URL)), secret)
+	h := automation.Handler(New(testConfig(srv.URL), nil), secret)
 
 	post(t, h, "ev-4", deploymentEvent("ev-4", "deployment.completed", "PROVISION", nil))
 	post(t, h, "ev-5", deploymentEvent("ev-5", "deployment.started", "PROVISION", nil))
@@ -243,7 +244,7 @@ func TestRefAttributeProjectEnvironmentNameAndDecommission(t *testing.T) {
 	defer srv.Close()
 	cfg := testConfig(srv.URL)
 	cfg.GitHub.EnvironmentName = "project-environment"
-	h := automation.Handler(New(cfg), secret)
+	h := automation.Handler(New(cfg, nil), secret)
 
 	post(t, h, "ev-6", deploymentEvent("ev-6", "deployment.completed", "DECOMMISSION", map[string]any{"github_ref": "release"}))
 
@@ -270,7 +271,7 @@ func TestIgnoredEvents(t *testing.T) {
 	gh := newFakeGitHub()
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
-	h := automation.Handler(New(testConfig(srv.URL)), secret)
+	h := automation.Handler(New(testConfig(srv.URL), nil), secret)
 
 	cases := map[string][]byte{
 		"ev-7":  deploymentEvent("ev-7", "deployment.completed", "PLAN", nil),
@@ -293,7 +294,7 @@ func TestGitHubErrorAsksForRetry(t *testing.T) {
 	gh.fail = true
 	srv := httptest.NewServer(gh)
 	defer srv.Close()
-	h := automation.Handler(New(testConfig(srv.URL)), secret)
+	h := automation.Handler(New(testConfig(srv.URL), nil), secret)
 
 	body := deploymentEvent("ev-11", "deployment.aborted", "PROVISION", nil)
 	if code := post(t, h, "ev-11", body); code != http.StatusInternalServerError {
@@ -314,7 +315,7 @@ func TestGitHubErrorAsksForRetry(t *testing.T) {
 }
 
 func TestBadSignature(t *testing.T) {
-	h := automation.Handler(New(testConfig("http://unused")), secret)
+	h := automation.Handler(New(testConfig("http://unused"), nil), secret)
 	body := deploymentEvent("ev-12", "deployment.completed", "PROVISION", nil)
 	req := httptest.NewRequest(http.MethodPost, automation.HookPath, strings.NewReader(string(body)))
 	automation.SignRequest(req, secret, "ev-12", body, time.Now())
@@ -382,5 +383,81 @@ func TestExampleConfigLoads(t *testing.T) {
 	}
 	if cfg.GitHub.RepoAttribute != "github_repo" || cfg.Massdriver.URL() != "https://app.massdriver.cloud" {
 		t.Fatalf("config = %+v", cfg)
+	}
+}
+
+// fakeStash records stash writes, and rejects them the way the server rejects a key its widget catalog lacks.
+type fakeStash struct {
+	mu     sync.Mutex
+	writes []map[string]any
+	reject bool
+}
+
+func (f *fakeStash) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Variables map[string]any `json:"variables"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.writes = append(f.writes, req.Variables)
+	if f.reject {
+		_, _ = w.Write([]byte(`{"data":{"alphaSetStashEntry":{"successful":false,"messages":[{"field":"key","message":"is reserved"}]}}}`))
+		return
+	}
+	_, _ = w.Write([]byte(`{"data":{"alphaSetStashEntry":{"successful":true,"messages":[],"result":{"key":"x"}}}}`))
+}
+
+func TestSourceGoesToTheDeploymentStash(t *testing.T) {
+	for _, reject := range []bool{false, true} {
+		gh := newFakeGitHub()
+		srv := httptest.NewServer(gh)
+		defer srv.Close()
+		stash := &fakeStash{reject: reject}
+		md := httptest.NewServer(stash)
+		defer md.Close()
+		g := New(testConfig(srv.URL), &massdriver.Client{Endpoint: md.URL, OrganizationID: "acme", APIKey: "md_test"})
+		// The fake serves /repos at its root. An Enterprise API URL gives the commit a link.
+		g.cfg.GitHub.APIURL = srv.URL + "/api/v3"
+		h := automation.Handler(g, secret)
+
+		if code := post(t, h, "ev-1", deploymentEvent("ev-1", "deployment.started", "PROVISION", nil)); code != http.StatusNoContent {
+			t.Fatalf("reject=%v: started: got %d", reject, code)
+		}
+		if code := post(t, h, "ev-2", deploymentEvent("ev-2", "deployment.completed", "PROVISION", nil)); code != http.StatusNoContent {
+			t.Fatalf("reject=%v: completed: got %d", reject, code)
+		}
+
+		want := []map[string]any{{
+			"org":   "acme",
+			"scope": map[string]any{"deployment": "5c1de0a7-92b4-4f1e-8d3a-6e27c9f0b815"},
+			"key":   "md/v1/source",
+			"input": map[string]any{
+				"format": "JSON",
+				"label":  "Source",
+				"value":  `{"repo":"acme/api","ref":"trunk","commit":"a41c9e2","url":"` + srv.URL + `/acme/api/commit/a41c9e2"}`,
+			},
+		}}
+		stash.mu.Lock()
+		if !reflect.DeepEqual(stash.writes, want) {
+			t.Errorf("reject=%v: stash writes:\n got %+v\nwant %+v", reject, stash.writes, want)
+		}
+		stash.mu.Unlock()
+		if got := len(gh.writes()); got != 3 {
+			t.Errorf("reject=%v: github writes = %d, want 3", reject, got)
+		}
+	}
+}
+
+func TestCommitURL(t *testing.T) {
+	for api, want := range map[string]string{
+		"https://api.github.com":           "https://github.com/acme/api/commit/a41c9e2",
+		"https://ghe.example.com/api/v3":   "https://ghe.example.com/acme/api/commit/a41c9e2",
+		"https://proxy.example.com/github": "",
+	} {
+		g := New(Config{GitHub: GitHubConfig{APIURL: api}}, nil)
+		if got := g.commitURL("acme/api", "a41c9e2"); got != want {
+			t.Errorf("%s: got %q, want %q", api, got, want)
+		}
 	}
 }
