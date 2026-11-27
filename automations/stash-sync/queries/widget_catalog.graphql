@@ -1,0 +1,8 @@
+query WidgetCatalog {
+  alphaWidgetCatalog {
+    key
+    scope
+    format
+    schema
+  }
+}

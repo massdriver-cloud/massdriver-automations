@@ -1,0 +1,112 @@
+# stash-sync config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+# For simulate mode, see examples/tendwell-health.
+
+# sync (default): read the sources in the rules and presets. simulate: write values from a scenario, with no cloud
+# access.
+mode: sync
+# How often to read the sources and write the entries that changed. Each write sets a TTL of three intervals, so
+# the entries of a sync that stops expire. A Go duration. Default: 60s (5s in simulate mode).
+interval: 60s
+
+cloudwatch:
+  # The AWS region of the metrics and alarms. Default: the region of the AWS credential chain (AWS_REGION).
+  region: us-east-1
+
+prometheus:
+  # The base URL of the Prometheus HTTP API. Required for prometheus rules and presets.
+  url: http://prometheus.monitoring:9090
+  # The environment variable with a bearer token. Optional.
+  token_env: PROMETHEUS_TOKEN
+  # A basic auth user, with the password in the environment variable password_env. Optional. Ignored with a token.
+  username: ""
+  password_env: PROMETHEUS_PASSWORD
+  # How long one query can take. Default: 10s.
+  timeout: 10s
+
+# Presets fill a widget key on one instance from a common metric, with no queries to write.
+presets:
+  # md/usage: RDS DatabaseConnections against max.
+  - preset: aws-rds-connections
+    instance: billing-prod-ledger
+    with:
+      db_instance: billing-prod-ledger-pg   # The DBInstanceIdentifier.
+      max: "200"                            # The connection limit, for the bar.
+      label: connections                    # Optional. Default: connections.
+
+  # md/traffic: ALB requests per second, target 5xx count in 5 minutes, and p95 target response time.
+  - preset: aws-alb-traffic
+    instance: billing-prod-app
+    with:
+      load_balancer: app/billing-prod-app/0123456789abcdef           # The LoadBalancer dimension.
+      target_group: targetgroup/billing-prod-app/0123456789abcdef    # Optional. The TargetGroup dimension.
+
+  # md/health: a CloudWatch alarm's state. OK is healthy, INSUFFICIENT_DATA is degraded, and ALARM is down.
+  - preset: aws-alarm-health
+    instance: billing-prod-ledger
+    with:
+      alarm: billing-prod-ledger-cpu
+
+  # md/traffic from Prometheus: request rate, 5xx count in 5 minutes, and p95 latency of an HTTP histogram.
+  - preset: prometheus-traffic
+    instance: billing-prod-claims
+    with:
+      job: claims                                        # Or selector: 'service="claims",namespace="billing"'.
+      requests_metric: http_requests_total               # Optional. A counter with a status code label.
+      code_label: code                                   # Optional. The status code label.
+      duration_metric: http_request_duration_seconds     # Optional. A histogram, without _bucket.
+
+# Rules write any stash entry. Each rule has a target and exactly one of cloudwatch, prometheus, or value.
+rules:
+  # Several rules can fill the fields of one JSON entry. stash-sync writes the whole value once per cycle.
+  - target:
+      # Exactly one of project, environment, component, instance, or deployment (a UUID).
+      instance: billing-prod-claims
+      key: md/usage
+      # A field of a JSON value. Leave it out to write the whole value.
+      field: value
+      # TEXT or JSON. Default: JSON with a field, TEXT without one. md/ keys must match the widget catalog.
+      format: JSON
+      # The entry's name in the Massdriver UI. Optional.
+      label: Queue depth
+    prometheus:
+      # A PromQL expression that returns a scalar or one series.
+      query: sum(claims_queue_depth)
+  - target: {instance: billing-prod-claims, key: md/usage, field: max}
+    # A fixed value: a string, a number, a list, or an object.
+    value: 5000
+
+  # A TEXT entry from a number, with text rules. The first rule whose below is more than the number applies.
+  - target: {instance: billing-prod-app, key: md/health}
+    cloudwatch:
+      namespace: AWS/ApplicationELB
+      metric: UnHealthyHostCount
+      dimensions:
+        LoadBalancer: app/billing-prod-app/0123456789abcdef
+        TargetGroup: targetgroup/billing-prod-app/0123456789abcdef
+      # Average (default), Sum, Minimum, Maximum, SampleCount, or a percentile such as p95.
+      stat: Maximum
+      # Whole minutes. Default: 60s.
+      period: 60s
+    # Used when the query finds no data. Optional: without it, the entry is skipped.
+    default: 0
+    text:
+      - {below: 1, text: healthy}
+      - {below: 2, text: degraded}
+      - {text: down}
+
+  # Any key, with a number scaled into a unit.
+  - target: {environment: billing-prod, key: billing.p99_ms}
+    cloudwatch:
+      namespace: AWS/ApplicationELB
+      metric: TargetResponseTime
+      dimensions: {LoadBalancer: app/billing-prod-app/0123456789abcdef}
+      stat: p99
+    # Multiplies the number. Seconds to milliseconds here.
+    scale: 1000
+
+  # Links in the environment's header.
+  - target: {environment: billing-prod, key: md/links}
+    value:
+      links:
+        - {label: Runbook, url: "https://wiki.example.com/billing/runbook"}
+        - {label: Dashboard, url: "https://grafana.example.com/d/billing"}

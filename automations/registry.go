@@ -16,6 +16,7 @@ import (
 	"github.com/massdriver-cloud/massdriver-automations/automations/router"
 	sandboxonjoin "github.com/massdriver-cloud/massdriver-automations/automations/sandbox-on-join"
 	staleproposals "github.com/massdriver-cloud/massdriver-automations/automations/stale-proposals"
+	stashsync "github.com/massdriver-cloud/massdriver-automations/automations/stash-sync"
 	"github.com/massdriver-cloud/massdriver-automations/automations/statuspage"
 	upgradetrain "github.com/massdriver-cloud/massdriver-automations/automations/upgrade-train"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
@@ -37,6 +38,7 @@ var All = []automation.Definition{
 	router.Definition,
 	sandboxonjoin.Definition,
 	staleproposals.Definition,
+	stashsync.Definition,
 	statuspage.Definition,
 	upgradetrain.Definition,
 }
