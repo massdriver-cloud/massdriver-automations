@@ -25,7 +25,7 @@ prometheus:
 
 # Presets fill a widget key on one instance from a common metric, with no queries to write.
 presets:
-  # md/usage: RDS DatabaseConnections against max.
+  # md/v1/usage: RDS DatabaseConnections against max.
   - preset: aws-rds-connections
     instance: billing-prod-ledger
     with:
@@ -33,20 +33,20 @@ presets:
       max: "200"                            # The connection limit, for the bar.
       label: connections                    # Optional. Default: connections.
 
-  # md/traffic: ALB requests per second, target 5xx count in 5 minutes, and p95 target response time.
+  # md/v1/traffic: ALB requests per second, target 5xx count in 5 minutes, and p95 target response time.
   - preset: aws-alb-traffic
     instance: billing-prod-app
     with:
       load_balancer: app/billing-prod-app/0123456789abcdef           # The LoadBalancer dimension.
       target_group: targetgroup/billing-prod-app/0123456789abcdef    # Optional. The TargetGroup dimension.
 
-  # md/health: a CloudWatch alarm's state. OK is healthy, INSUFFICIENT_DATA is degraded, and ALARM is down.
+  # md/v1/health: a CloudWatch alarm's state. OK is healthy, INSUFFICIENT_DATA is degraded, and ALARM is down.
   - preset: aws-alarm-health
     instance: billing-prod-ledger
     with:
       alarm: billing-prod-ledger-cpu
 
-  # md/traffic from Prometheus: request rate, 5xx count in 5 minutes, and p95 latency of an HTTP histogram.
+  # md/v1/traffic from Prometheus: request rate, 5xx count in 5 minutes, and p95 latency of an HTTP histogram.
   - preset: prometheus-traffic
     instance: billing-prod-claims
     with:
@@ -61,7 +61,7 @@ rules:
   - target:
       # Exactly one of project, environment, component, instance, or deployment (a UUID).
       instance: billing-prod-claims
-      key: md/usage
+      key: md/v1/usage
       # A field of a JSON value. Leave it out to write the whole value.
       field: value
       # TEXT or JSON. Default: JSON with a field, TEXT without one. md/ keys must match the widget catalog.
@@ -71,12 +71,12 @@ rules:
     prometheus:
       # A PromQL expression that returns a scalar or one series.
       query: sum(claims_queue_depth)
-  - target: {instance: billing-prod-claims, key: md/usage, field: max}
+  - target: {instance: billing-prod-claims, key: md/v1/usage, field: max}
     # A fixed value: a string, a number, a list, or an object.
     value: 5000
 
   # A TEXT entry from a number, with text rules. The first rule whose below is more than the number applies.
-  - target: {instance: billing-prod-app, key: md/health}
+  - target: {instance: billing-prod-app, key: md/v1/health}
     cloudwatch:
       namespace: AWS/ApplicationELB
       metric: UnHealthyHostCount
@@ -105,7 +105,7 @@ rules:
     scale: 1000
 
   # Links in the environment's header.
-  - target: {environment: billing-prod, key: md/links}
+  - target: {environment: billing-prod, key: md/v1/links}
     value:
       links:
         - {label: Runbook, url: "https://wiki.example.com/billing/runbook"}

@@ -1,15 +1,15 @@
 # stash-sync
 
 On an interval, reads metrics from AWS CloudWatch and Prometheus and writes them to Massdriver stash entries. The
-widget keys under `md/` then show on the canvas for everyone who can view the project:
+widget keys under `md/v1/` then show on the canvas for everyone who can view the project:
 
 | Key | Stash | Format | Widget |
 |---|---|---|---|
-| `md/health` | instance | TEXT, 1 to 64 characters | A dot on the instance. `healthy`, `ok`, and `up` are green; `degraded`, `warning`, and `recovering` are yellow; `down`, `failed`, and `error` are red. |
-| `md/usage` | instance | JSON `{value, max, label?}` | A bar on the instance. |
-| `md/traffic` | instance | JSON `{rps, errors_5m, p95_ms?}` | Traffic on the lines that leave the instance. |
-| `md/banner` | environment | JSON `{message, level?}` | A message across the top of the environment. `level` is `info`, `warning`, or `error`. |
-| `md/links` | environment | JSON `{links: [{label, url}]}` | Up to 8 links in the environment's header. |
+| `md/v1/health` | instance | TEXT, 1 to 64 characters | A dot on the instance. `healthy`, `ok`, and `up` are green; `degraded`, `warning`, and `recovering` are yellow; `down`, `failed`, and `error` are red. |
+| `md/v1/usage` | instance | JSON `{value, max, label?}` | A bar on the instance. |
+| `md/v1/traffic` | instance | JSON `{rps, errors_5m, p95_ms?}` | Traffic on the lines that leave the instance. |
+| `md/v1/banner` | environment | JSON `{message, level?}` | A message across the top of the environment. `level` is `info`, `warning`, or `error`. |
+| `md/v1/links` | environment | JSON `{links: [{label, url}]}` | Up to 8 links in the environment's header. |
 
 The automation runs in your cloud, next to your metrics, with your credentials. Massdriver does not need access to
 CloudWatch or Prometheus.
@@ -25,7 +25,8 @@ In simulate mode, it writes changing values from a scenario, with no cloud acces
   away.
 - Before it writes an `md/` key, the automation checks the value against the key's JSON Schema from
   `alphaWidgetCatalog`. A field that the schema says is an integer, such as `errors_5m`, is rounded. A value that
-  does not match is logged and skipped.
+  does not match is logged and skipped. An `md/` key that is not in the catalog, such as the unversioned `md/health`,
+  is skipped.
 - A query that fails is logged, and the other entries are still written. A JSON entry leaves out the fields whose
   queries failed. A query with no data uses the rule's `default`, or is skipped.
 - Values have at most two decimal places, so small changes do not cause a write.
@@ -79,10 +80,10 @@ presets:
 
 | Preset | Key | `with` | Reads |
 |---|---|---|---|
-| `aws-rds-connections` | `md/usage` | `db_instance`, `max`, `label` (default `connections`) | `AWS/RDS` `DatabaseConnections`, average over 1 minute, against `max`. |
-| `aws-alb-traffic` | `md/traffic` | `load_balancer`, `target_group` (optional) | `AWS/ApplicationELB`: `RequestCount` per second, `HTTPCode_Target_5XX_Count` over 5 minutes, and `TargetResponseTime` p95 in milliseconds. A period with no requests or errors counts as 0. |
-| `aws-alarm-health` | `md/health` | `alarm` | A metric or composite alarm's state: `OK` is `healthy`, `INSUFFICIENT_DATA` is `degraded`, and `ALARM` is `down`. |
-| `prometheus-traffic` | `md/traffic` | `job` or `selector`, `requests_metric` (default `http_requests_total`), `code_label` (default `code`), `duration_metric` (default `http_request_duration_seconds`) | The request rate, the 5xx responses in 5 minutes, and the p95 of the duration histogram, over 5 minutes. |
+| `aws-rds-connections` | `md/v1/usage` | `db_instance`, `max`, `label` (default `connections`) | `AWS/RDS` `DatabaseConnections`, average over 1 minute, against `max`. |
+| `aws-alb-traffic` | `md/v1/traffic` | `load_balancer`, `target_group` (optional) | `AWS/ApplicationELB`: `RequestCount` per second, `HTTPCode_Target_5XX_Count` over 5 minutes, and `TargetResponseTime` p95 in milliseconds. A period with no requests or errors counts as 0. |
+| `aws-alarm-health` | `md/v1/health` | `alarm` | A metric or composite alarm's state: `OK` is `healthy`, `INSUFFICIENT_DATA` is `degraded`, and `ALARM` is `down`. |
+| `prometheus-traffic` | `md/v1/traffic` | `job` or `selector`, `requests_metric` (default `http_requests_total`), `code_label` (default `code`), `duration_metric` (default `http_request_duration_seconds`) | The request rate, the 5xx responses in 5 minutes, and the p95 of the duration histogram, over 5 minutes. |
 
 `load_balancer` and `target_group` are the `LoadBalancer` and `TargetGroup` dimensions, the end of each ARN, such
 as `app/name/0123456789abcdef`. `selector` is PromQL label matchers, such as `service="claims",namespace="billing"`.
@@ -94,11 +95,11 @@ A rule writes one entry, or one field of a JSON entry. It has a `target` and exa
 
 ```yaml
 rules:
-  - target: {instance: billing-prod-claims, key: md/usage, field: value}
+  - target: {instance: billing-prod-claims, key: md/v1/usage, field: value}
     prometheus: {query: sum(claims_queue_depth)}
-  - target: {instance: billing-prod-claims, key: md/usage, field: max}
+  - target: {instance: billing-prod-claims, key: md/v1/usage, field: max}
     value: 5000
-  - target: {instance: billing-prod-app, key: md/health}
+  - target: {instance: billing-prod-app, key: md/v1/health}
     cloudwatch:
       namespace: AWS/ApplicationELB
       metric: UnHealthyHostCount

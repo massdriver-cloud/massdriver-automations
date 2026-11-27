@@ -1,5 +1,5 @@
 // Package stashsync copies cloud metrics into Massdriver stash entries on an interval, so the widget keys under
-// md/ show health, usage, traffic, and banners on the canvas. In simulate mode it writes changing values from a
+// md/v1/ show health, usage, traffic, and banners on the canvas. In simulate mode it writes changing values from a
 // scenario, with no cloud access.
 package stashsync
 

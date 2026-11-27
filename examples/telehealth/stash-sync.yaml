@@ -1,5 +1,5 @@
 # A live Postgres migration on the billing-dev canvas, with no cloud access. In the billing project,
-# billing-dev-claims and billing-dev-ledger both connect to billing-dev-app, so each one's md/traffic draws the
+# billing-dev-claims and billing-dev-ledger both connect to billing-dev-app, so each one's md/v1/traffic draws the
 # line to the app. billing-dev-claims plays the old database and billing-dev-ledger the new one.
 mode: simulate
 # A write every 5 seconds. Entries expire after 15 seconds once the simulator stops.
