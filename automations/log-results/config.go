@@ -15,7 +15,7 @@ import (
 
 // Defaults of the config file.
 const (
-	DefaultPrefix     = "results/v1"
+	DefaultPrefix     = "md/v1"
 	DefaultMaxLogMB   = 64
 	DefaultMaxMatches = 1000
 
@@ -50,7 +50,8 @@ type Config struct {
 
 // Results is where the entries go.
 type Results struct {
-	// Prefix starts every key. The server rejects an md/ key that its widget catalog does not have.
+	// Prefix starts every key. The server rejects an md/ key that its widget catalog does not have, and an md/ value
+	// that does not match the key's schema.
 	Prefix string `yaml:"prefix"`
 }
 

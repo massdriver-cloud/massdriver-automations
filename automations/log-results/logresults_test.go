@@ -70,42 +70,39 @@ func TestExampleRulesReadProvisionerLogs(t *testing.T) {
 		want    map[string]any
 	}{
 		{"opentofu-apply.log", Deployment{Action: "PROVISION", Attributes: prod}, map[string]any{
-			"results/v1/step/src": map[string]any{"tool": "opentofu", "action": "apply", "status": "succeeded",
+			"md/v1/step/src": map[string]any{"tool": "opentofu", "action": "apply", "status": "succeeded",
 				"message": "Apply complete! Resources: 2 added, 1 changed, 0 destroyed."},
-			"results/v1/changes/src":    map[string]any{"tool": "opentofu", "add": 2.0, "change": 1.0, "destroy": 0.0},
-			"results/v1/compliance/src": map[string]any{"tool": "checkov", "tool_version": "3.2.469", "passed": 36.0, "failed": 2.0, "skipped": 4.0},
+			"md/v1/changes/src":    map[string]any{"tool": "opentofu", "add": 2.0, "change": 1.0, "destroy": 0.0},
+			"md/v1/compliance/src": map[string]any{"tool": "checkov", "tool_version": "3.2.469", "passed": 36.0, "failed": 2.0, "skipped": 4.0},
 		}},
 		{"opentofu-plan-no-changes.log", Deployment{Action: "PLAN", Attributes: prod}, map[string]any{
-			"results/v1/step/src": map[string]any{"tool": "opentofu", "tool_version": "1.10.6", "action": "plan",
+			"md/v1/step/src": map[string]any{"tool": "opentofu", "tool_version": "1.10.6", "action": "plan",
 				"status": "succeeded", "message": "No changes."},
-			"results/v1/changes/src":    map[string]any{"tool": "opentofu", "add": 0.0, "change": 0.0, "destroy": 0.0},
-			"results/v1/plan_summary":   "No changes.",
-			"results/v1/compliance/src": map[string]any{"tool": "checkov", "tool_version": "3.2.469", "passed": 38.0, "failed": 0.0, "skipped": 4.0},
+			"md/v1/changes/src":    map[string]any{"tool": "opentofu", "add": 0.0, "change": 0.0, "destroy": 0.0},
+			"md/v1/compliance/src": map[string]any{"tool": "checkov", "tool_version": "3.2.469", "passed": 38.0, "failed": 0.0, "skipped": 4.0},
 		}},
 		{"terraform-failed.log", Deployment{Action: "PROVISION", Failed: true, Attributes: prod}, map[string]any{
-			"results/v1/step/src": map[string]any{"tool": "terraform", "action": "apply", "status": "failed",
+			"md/v1/step/src": map[string]any{"tool": "terraform", "action": "apply", "status": "failed",
 				"message": "modifying RDS DB Instance (api-prod-database): InvalidParameterCombination: RDS does not support " +
 					"creating a DB instance with the following combination: DBInstanceClass=db.r6g.large, Engine=postgres, EngineVersion=12.19"},
-			"results/v1/changes/src": map[string]any{"tool": "terraform", "add": 0.0, "change": 1.0, "destroy": 0.0},
+			"md/v1/changes/src": map[string]any{"tool": "terraform", "add": 0.0, "change": 1.0, "destroy": 0.0},
 		}},
 		{"helm-upgrade.log", Deployment{Action: "PROVISION", Attributes: prod}, map[string]any{
-			"results/v1/step/src": map[string]any{"tool": "helm", "action": "apply", "status": "succeeded",
-				"release": "api-prod-cache", "namespace": "api-prod", "revision": 4.0, "chart_version": "20.6.2",
-				"message": "api-prod-cache revision 4 deployed"},
+			"md/v1/step/src": map[string]any{"tool": "helm", "action": "apply", "status": "succeeded",
+				"message": "api-prod-cache revision 4 deployed in api-prod, chart 20.6.2"},
 		}},
 		{"helm-local.log", Deployment{Action: "PROVISION", Attributes: prod}, map[string]any{
-			"results/v1/step/src": map[string]any{"tool": "helm", "action": "apply", "status": "succeeded",
-				"release": "api-prod-app", "namespace": "api-prod", "revision": 1.0, "message": "api-prod-app revision 1 deployed"},
-			"results/v1/compliance/src": map[string]any{"tool": "checkov", "tool_version": "3.2.469", "passed": 61.0, "failed": 3.0, "skipped": 0.0},
+			"md/v1/step/src": map[string]any{"tool": "helm", "action": "apply", "status": "succeeded",
+				"message": "api-prod-app revision 1 deployed in api-prod"},
+			"md/v1/compliance/src": map[string]any{"tool": "checkov", "tool_version": "3.2.469", "passed": 61.0, "failed": 3.0, "skipped": 0.0},
 		}},
 		{"bicep-stack.log", Deployment{Action: "PROVISION", Attributes: prod}, map[string]any{
-			"results/v1/step/src": map[string]any{"tool": "bicep", "action": "apply", "status": "succeeded",
-				"stack": "api-prod-storage-src", "provisioning_state": "succeeded",
-				"message": "Stack api-prod-storage-src deployed successfully."},
-			"results/v1/compliance/src": map[string]any{"tool": "checkov", "tool_version": "3.2.469", "passed": 18.0, "failed": 1.0, "skipped": 0.0},
+			"md/v1/step/src": map[string]any{"tool": "bicep", "action": "apply", "status": "succeeded",
+				"message": "Stack api-prod-storage-src deployed successfully. Provisioning state: succeeded."},
+			"md/v1/compliance/src": map[string]any{"tool": "checkov", "tool_version": "3.2.469", "passed": 18.0, "failed": 1.0, "skipped": 0.0},
 		}},
 		{"bicep-what-if.log", Deployment{Action: "PLAN", Attributes: prod}, map[string]any{
-			"results/v1/changes/src": map[string]any{"tool": "bicep", "add": 1.0, "change": 1.0, "destroy": 1.0, "no_op": 1.0},
+			"md/v1/changes/src": map[string]any{"tool": "bicep", "add": 1.0, "change": 1.0, "destroy": 1.0, "no_op": 1.0},
 		}},
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {
@@ -127,7 +124,7 @@ func TestNumbersStayNumbers(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if e.Key == "results/v1/changes/src" && e.Value != `{"add":2,"change":1,"destroy":0,"tool":"opentofu"}` {
+		if e.Key == "md/v1/changes/src" && e.Value != `{"add":2,"change":1,"destroy":0,"tool":"opentofu"}` {
 			t.Fatalf("value = %s", e.Value)
 		}
 	}
@@ -175,9 +172,9 @@ rules:
 		t.Fatal(err)
 	}
 	want := []Entry{
-		{Rule: "r", Key: "results/v1/k", Label: "r", Format: "json",
+		{Rule: "r", Key: "md/v1/k", Label: "r", Format: "json",
 			Value: `{"action":"destroy","env":"prod","id":"dep-1","matches":2,"status":"failed"}`},
-		{Rule: "t", Key: "results/v1/t", Label: "t", Format: "text", Value: "fine"},
+		{Rule: "t", Key: "md/v1/t", Label: "t", Format: "text", Value: "fine"},
 	}
 	if !reflect.DeepEqual(entries, want) {
 		t.Fatalf("got %+v", entries)
@@ -309,8 +306,7 @@ func TestTestCommand(t *testing.T) {
 	}
 	got := strings.Join(strings.Fields(out.String()), " ")
 	for _, want := range []string{
-		`opentofu-changes results/v1/changes/src json OpenTofu changes {"add":0,"change":0,"destroy":0,"tool":"opentofu"}`,
-		"opentofu-plan-summary results/v1/plan_summary text Plan No changes.",
+		`opentofu-changes md/v1/changes/src json OpenTofu changes {"add":0,"change":0,"destroy":0,"tool":"opentofu"}`,
 		"helm-step - - - skipped: detect did not match",
 	} {
 		if !strings.Contains(got, want) {
@@ -320,7 +316,7 @@ func TestTestCommand(t *testing.T) {
 
 	out.Reset()
 	err = Test([]string{"-config", "config.example.yaml"}, strings.NewReader(fixture(t, "helm-upgrade.log")), &out)
-	if err != nil || !strings.Contains(out.String(), `"revision":4`) {
+	if err != nil || !strings.Contains(out.String(), "revision 4 deployed") {
 		t.Fatalf("stdin: err=%v\n%s", err, out.String())
 	}
 }
@@ -391,6 +387,7 @@ func send(t *testing.T, h http.Handler, id, typ, action string) int {
 	body, _ := json.Marshal(map[string]any{
 		"id":   id,
 		"type": typ,
+		"time": time.Now().UTC().Format(time.RFC3339),
 		"data": map[string]any{
 			"entity":     map[string]any{"id": "dep-1"},
 			"attributes": prod,
@@ -415,7 +412,7 @@ func TestHandleWritesTheSameEntriesForTheSameDeployment(t *testing.T) {
 		t.Fatalf("writes = %d, want 3", len(first))
 	}
 	w := first[1]
-	if !reflect.DeepEqual(w["scope"], map[string]any{"deployment": "dep-1"}) || w["key"] != "results/v1/changes/src" ||
+	if !reflect.DeepEqual(w["scope"], map[string]any{"deployment": "dep-1"}) || w["key"] != "md/v1/changes/src" ||
 		!reflect.DeepEqual(w["input"], map[string]any{"format": "JSON", "label": "OpenTofu changes",
 			"value": `{"add":2,"change":1,"destroy":0,"tool":"opentofu"}`}) {
 		t.Fatalf("write = %v", w)
@@ -456,12 +453,31 @@ func TestHandleAsksForTheEventAgainWhenLogsAreMissing(t *testing.T) {
 }
 
 func TestHandleKeepsGoingAfterAFailedWrite(t *testing.T) {
-	f := &fakeAPI{logs: map[string]string{"dep-1": fixture(t, "opentofu-apply.log")}, rejected: "results/v1/step/src"}
+	f := &fakeAPI{logs: map[string]string{"dep-1": fixture(t, "opentofu-apply.log")}, rejected: "md/v1/step/src"}
 	h := newHandler(t, f)
 	if code := send(t, h, "evt-1", "deployment.completed", "PROVISION"); code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204", code)
 	}
 	if w := f.written(); len(w) != 3 {
 		t.Fatalf("writes = %d, want 3", len(w))
+	}
+}
+
+func TestHandleGivesUpOnLogsThatNeverArrive(t *testing.T) {
+	srv := httptest.NewServer(&fakeAPI{logs: map[string]string{}})
+	t.Cleanup(srv.Close)
+	l := New(&massdriver.Client{Endpoint: srv.URL, OrganizationID: "acme", APIKey: "md_test"}, exampleConfig(t))
+	finished := time.Date(2026, 11, 27, 20, 0, 0, 0, time.UTC)
+	ev := automation.Event{ID: "evt-1", Type: "deployment.failed", Time: finished, Data: automation.EventData{
+		Entity: json.RawMessage(`{"id":"dep-1"}`), Attributes: prod,
+		Metadata: map[string]any{"deployment_action": "PROVISION"},
+	}}
+	l.now = func() time.Time { return finished.Add(5 * time.Minute) }
+	if err := l.Handle(t.Context(), ev); err == nil {
+		t.Fatal("a fresh deployment without logs: want an error, so Massdriver sends the event again")
+	}
+	l.now = func() time.Time { return finished.Add(giveUpAfter + time.Minute) }
+	if err := l.Handle(t.Context(), ev); err != nil {
+		t.Fatalf("an old deployment without logs: err = %v, want nil", err)
 	}
 }

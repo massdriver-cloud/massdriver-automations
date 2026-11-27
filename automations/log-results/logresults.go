@@ -14,8 +14,13 @@ import (
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
 )
 
-// Massdriver waits 10 seconds for a response. The logs must arrive before that, with room for the writes.
-const fetchTimeout = 7 * time.Second
+const (
+	// Massdriver waits 10 seconds for a response. The logs must arrive before that, with room for the writes.
+	fetchTimeout = 7 * time.Second
+	// Logs that are still missing this long after the deployment finished will not arrive, and a deployment that
+	// failed before its provisioner started has none.
+	giveUpAfter = 15 * time.Minute
+)
 
 // Definition registers the automation.
 var Definition = automation.Definition{
@@ -40,11 +45,12 @@ var Definition = automation.Definition{
 type LogResults struct {
 	api *massdriver.Client
 	cfg *Config
+	now func() time.Time
 }
 
 // New returns the automation. cfg must be validated.
 func New(api *massdriver.Client, cfg *Config) *LogResults {
-	return &LogResults{api: api, cfg: cfg}
+	return &LogResults{api: api, cfg: cfg, now: time.Now}
 }
 
 // Handle reads the logs of a finished deployment and writes the entries that the rules produce.
@@ -74,7 +80,11 @@ func (l *LogResults) Handle(ctx context.Context, ev automation.Event) error {
 	entries, skips, err := l.read(ctx, d)
 	if err != nil {
 		// The logs of a deployment that just finished may not be stored yet, and the API returns none while
-		// storage fails. Either way, the next delivery of the event can read them.
+		// storage fails. Either way, the next delivery of the event can read them, until the event is too old.
+		if ev.Time.IsZero() || l.now().Sub(ev.Time) > giveUpAfter {
+			log.Warn("logs unavailable", "err", err)
+			return nil
+		}
 		return err
 	}
 	for _, s := range skips {

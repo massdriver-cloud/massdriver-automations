@@ -11,10 +11,11 @@
 actions: [PROVISION, PLAN]
 
 results:
-  # Optional. The start of every key. Default: results/v1.
-  # The server refuses an md/ key that is not in its widget catalog. When the catalog has the result keys, set
-  # md/v1 and these entries show as widgets.
-  prefix: results/v1
+  # Optional. The start of every key. Default: md/v1.
+  # md/v1/step/<step>, md/v1/changes/<step>, and md/v1/compliance/<step> show as widgets on the deployment. The
+  # server refuses an md/ key that is not in its widget catalog, or a value that does not match the key's schema.
+  # A prefix outside md/, such as results/v1, writes any key and shows each entry as a row in Deployment metadata.
+  prefix: md/v1
 
 # Optional. Read at most this many MiB of a deployment's logs. Default: 64.
 max_log_mb: 64
@@ -48,7 +49,7 @@ rules:
     #   first: the first match.
     #   sum: whole numbers add up across matches, such as the plans of several steps. Text keeps the last match.
     mode: last
-    # Required. The key under the prefix: results/v1/step/src. The logs do not say which step wrote a line, so a
+    # Required. The key under the prefix: md/v1/step/src. The logs do not say which step wrote a line, so a
     # bundle with more steps needs a rule for each, matched by md-repo, or a sum over all of them.
     key: step/src
     # Optional. The name of the row in Deployment metadata. Default: the rule's name.
@@ -58,9 +59,10 @@ rules:
     # Optional. A jq expression over the captures. It can also read $status (succeeded or failed), $action (plan,
     # apply, or destroy), $matches (how many lines matched), $deployment_id, and $attributes.
     # Default: the captures as an object for json, or the one capture for text.
+    # The step widget allows only its own fields, and a message of up to 280 characters.
     value: >-
       {tool: (.tool | ascii_downcase), tool_version, action: $action, status: $status,
-       message: (.error // .message)}
+       message: ((.error // .message) | if . then tostring | .[:280] else . end)}
       | with_entries(select(.value != null))
 
   - name: opentofu-changes
@@ -75,15 +77,6 @@ rules:
     label: OpenTofu changes
     value: >-
       {tool: (.tool | ascii_downcase), add: (.add // 0), change: (.change // 0), destroy: (.destroy // 0)}
-
-  - name: opentofu-plan-summary
-    actions: [PLAN]
-    detect: (OpenTofu|Terraform) has been successfully initialized
-    patterns:
-      - (?P<summary>Plan:.*|No changes\.)
-    key: plan_summary
-    label: Plan
-    format: text
 
   # ---------------------------------------------------------------- Checkov
   # The OpenTofu, Terraform, Helm, and Bicep provisioners all run Checkov, and print the same summary.
@@ -113,9 +106,9 @@ rules:
     key: step/src
     label: Helm release
     value: >-
-      {tool: "helm", action: $action, status: $status, release, namespace, revision, chart_version,
-       message: (.error // "\(.release) revision \(.revision) \(.release_status)")}
-      | with_entries(select(.value != null))
+      {tool: "helm", action: $action, status: $status,
+       message: ((.error // "\(.release) revision \(.revision) \(.release_status) in \(.namespace)"
+                 + (if .chart_version then ", chart \(.chart_version)" else "" end)) | tostring | .[:280])}
 
   # ---------------------------------------------------------------- Bicep and ARM
 
@@ -129,10 +122,9 @@ rules:
     key: step/src
     label: Bicep deployment
     value: >-
-      {tool: "bicep", action: $action, status: $status, stack,
-       provisioning_state: (.provisioning_state | if . then ascii_downcase else . end),
-       message: (.error // .message)}
-      | with_entries(select(.value != null))
+      {tool: "bicep", action: $action, status: $status,
+       message: (.error // ([.message, (.provisioning_state | if . then "Provisioning state: \(ascii_downcase)." else . end)]
+                 | map(select(. != null)) | join(" ")) | tostring | .[:280])}
 
   # The Massdriver Bicep provisioner skips what-if. A custom provisioner that runs `az deployment group what-if`
   # prints this summary.

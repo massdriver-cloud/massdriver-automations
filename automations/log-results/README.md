@@ -2,7 +2,7 @@
 
 When a deployment finishes, read its logs with rules from the config file, and write what the rules find to the
 deployment's stash: the changes of a plan, the outcome of an apply, a Helm release, or the findings of a Checkov
-scan. Each entry has a label, so it shows as a row in the deployment's **Deployment metadata**.
+scan. With the default `md/v1` keys, the deployment shows them as widgets; each entry also has a label.
 
 Provisioners will write these results to the stash themselves. Until they do, this automation reads them from the
 logs.
@@ -43,7 +43,7 @@ that is not valid jq stops the automation at start.
 | Key | Default | |
 |---|---|---|
 | `actions` | `[PROVISION, PLAN]` | The deployment actions whose logs are read: `PROVISION`, `PLAN`, and `DECOMMISSION`. |
-| `results.prefix` | `results/v1` | The start of every key. See [Keys and widgets](#keys-and-widgets). |
+| `results.prefix` | `md/v1` | The start of every key. See [Keys and widgets](#keys-and-widgets). |
 | `max_log_mb` | `64` | Read at most this many MiB of a deployment's logs. |
 | `max_matches` | `1000` | A rule stops reading after this many matches. |
 | `rules` | | Required. The [rules](#rules). |
@@ -121,7 +121,7 @@ rules:
     label: OpenTofu step
     value: >-
       {tool: (.tool | ascii_downcase), tool_version, action: $action, status: $status,
-       message: (.error // .message)}
+       message: ((.error // .message) | if . then tostring | .[:280] else . end)}
       | with_entries(select(.value != null))
 
   - name: opentofu-changes
@@ -152,9 +152,9 @@ On a `PROVISION` with Checkov, these write:
 
 | Key | Value |
 |---|---|
-| `results/v1/step/src` | `{"tool": "opentofu", "action": "apply", "status": "succeeded", "message": "Apply complete! Resources: 2 added, 1 changed, 0 destroyed."}` |
-| `results/v1/changes/src` | `{"tool": "opentofu", "add": 2, "change": 1, "destroy": 0}` |
-| `results/v1/compliance/src` | `{"tool": "checkov", "tool_version": "3.2.469", "passed": 36, "failed": 2, "skipped": 4}` |
+| `md/v1/step/src` | `{"tool": "opentofu", "action": "apply", "status": "succeeded", "message": "Apply complete! Resources: 2 added, 1 changed, 0 destroyed."}` |
+| `md/v1/changes/src` | `{"tool": "opentofu", "add": 2, "change": 1, "destroy": 0}` |
+| `md/v1/compliance/src` | `{"tool": "checkov", "tool_version": "3.2.469", "passed": 36, "failed": 2, "skipped": 4}` |
 
 OpenTofu prints its version only with `TF_LOG` set, such as the provisioner's `log_level: INFO`, so `tool_version`
 is often absent. On a failed deployment, `message` is the last `Error:` line.
@@ -178,14 +178,14 @@ rules:
     key: step/src
     label: Helm release
     value: >-
-      {tool: "helm", action: $action, status: $status, release, namespace, revision, chart_version,
-       message: (.error // "\(.release) revision \(.revision) \(.release_status)")}
-      | with_entries(select(.value != null))
+      {tool: "helm", action: $action, status: $status,
+       message: ((.error // "\(.release) revision \(.revision) \(.release_status) in \(.namespace)"
+                 + (if .chart_version then ", chart \(.chart_version)" else "" end)) | tostring | .[:280])}
 ```
 
 ```json
-{"tool": "helm", "action": "apply", "status": "succeeded", "release": "api-prod-cache", "namespace": "api-prod",
- "revision": 4, "chart_version": "20.6.2", "message": "api-prod-cache revision 4 deployed"}
+{"tool": "helm", "action": "apply", "status": "succeeded",
+ "message": "api-prod-cache revision 4 deployed in api-prod, chart 20.6.2"}
 ```
 
 The chart version comes from the provisioner's `Using OCI Helm chart` or `Using remote Helm chart` line, so a local
@@ -205,10 +205,9 @@ rules:
     key: step/src
     label: Bicep deployment
     value: >-
-      {tool: "bicep", action: $action, status: $status, stack,
-       provisioning_state: (.provisioning_state | if . then ascii_downcase else . end),
-       message: (.error // .message)}
-      | with_entries(select(.value != null))
+      {tool: "bicep", action: $action, status: $status,
+       message: (.error // ([.message, (.provisioning_state | if . then "Provisioning state: \(ascii_downcase)." else . end)]
+                 | map(select(. != null)) | join(" ")) | tostring | .[:280])}
 
   - name: bicep-what-if
     detect: 'Resource changes:'
@@ -227,8 +226,8 @@ rules:
 
 | Key | Value |
 |---|---|
-| `results/v1/step/src` | `{"tool": "bicep", "action": "apply", "status": "succeeded", "stack": "api-prod-storage-src", "provisioning_state": "succeeded", "message": "Stack api-prod-storage-src deployed successfully."}` |
-| `results/v1/changes/src` | `{"tool": "bicep", "add": 1, "change": 1, "destroy": 1, "no_op": 1}` |
+| `md/v1/step/src` | `{"tool": "bicep", "action": "apply", "status": "succeeded", "message": "Stack api-prod-storage-src deployed successfully. Provisioning state: succeeded."}` |
+| `md/v1/changes/src` | `{"tool": "bicep", "add": 1, "change": 1, "destroy": 1, "no_op": 1}` |
 
 The Massdriver Bicep provisioner prints the stack's `provisioningState` only with `show_output: true`, and skips
 what-if on a `PLAN`. The `bicep-what-if` rule reads `az deployment group what-if`, from a custom provisioner. Each
@@ -254,12 +253,11 @@ docker run --rm -i -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:
 ```
 
 ```text
-RULE                   KEY                        FORMAT  LABEL             VALUE
-opentofu-step          results/v1/step/src        json    OpenTofu step     {"action":"plan","message":"No changes.","status":"succeeded","tool":"opentofu","tool_version":"1.10.6"}
-opentofu-changes       results/v1/changes/src     json    OpenTofu changes  {"add":0,"change":0,"destroy":0,"tool":"opentofu"}
-opentofu-plan-summary  results/v1/plan_summary    text    Plan              No changes.
-checkov                results/v1/compliance/src  json    Checkov           {"failed":0,"passed":38,"skipped":4,"tool":"checkov","tool_version":"3.2.469"}
-helm-step              -                          -       -                 skipped: detect did not match
+RULE              KEY                   FORMAT  LABEL             VALUE
+opentofu-step     md/v1/step/src        json    OpenTofu step     {"action":"plan","message":"No changes.","status":"succeeded","tool":"opentofu","tool_version":"1.10.6"}
+opentofu-changes  md/v1/changes/src     json    OpenTofu changes  {"add":0,"change":0,"destroy":0,"tool":"opentofu"}
+checkov           md/v1/compliance/src  json    Checkov           {"failed":0,"passed":38,"skipped":4,"tool":"checkov","tool_version":"3.2.469"}
+helm-step         -                     -       -                 skipped: detect did not match
 ```
 
 | Flag | Default | |
@@ -274,10 +272,15 @@ match, none of its patterns matched, or its value failed, with the jq error.
 
 ## Keys and widgets
 
-The proposed `md/v1/step/<step>`, `md/v1/changes/<step>`, and `md/v1/compliance/<step>` keys are not in the server's
-widget catalog yet, and the server refuses an `md/` key that is not in the catalog. So the keys start with
-`results/v1` and show as labeled rows in **Deployment metadata**. When the catalog has the result keys, set
-`results.prefix: md/v1` and the same entries show as widgets.
+Keys under `md/` are widget keys. The examples write `md/v1/step/<step>`, `md/v1/changes/<step>`, and
+`md/v1/compliance/<step>`, which the deployment shows as widgets. The server refuses an `md/` entry when no widget
+reads its key, when it is not on a deployment, or when its value does not match the key's schema. Those schemas allow
+only their own fields: a step has `tool`, `tool_version`, `action`, `status`, `started_at`, `finished_at`,
+`duration_s`, `exit_code`, and a `message` of up to 280 characters, so the examples put a Helm release or a Bicep
+stack in the message. A refused entry is logged as `stash write failed` with the server's reason.
+
+For keys of your own, set `results.prefix` outside `md/`, such as `results/v1`. Those entries can hold any value,
+and show as labeled rows in **Deployment metadata**.
 
 ## Permissions
 
@@ -319,7 +322,11 @@ docker run -p 8080:8080 \
 - The automation reads the logs before it responds, and Massdriver waits 10 seconds. Logs that take longer to read
   fail the event, and Massdriver sends it again.
 - The logs of a deployment that just finished can be missing for a moment. The automation answers `500`, and
-  Massdriver sends the event again.
+  Massdriver sends the event again. After 15 minutes it stops asking, logs `logs unavailable`, and writes nothing.
+- The logs do not say which step wrote a line, so the examples name the step `src`.
+- OpenTofu prints its version only with `TF_LOG` set, so `tool_version` of a step is often missing.
+- The Massdriver Bicep provisioner skips what-if, and prints `provisioningState` only with `show_output: true`.
+- Checkov's logs do not say whether `halt_on_failure` is on, so the examples leave out `blocking`.
 - A failed stash write is logged as `stash write failed`, with the server's message, and does not fail the event.
 - A line longer than 64 KiB is cut to its first 64 KiB, and a text capture to its first 1 KiB.
 - Duplicate events are dropped by id for one hour, in memory.

@@ -1,0 +1,210 @@
+{
+  "md/v1/step/{step}": {
+    "scope": "deployment",
+    "format": "json",
+    "schema": {
+      "type": "object",
+      "required": [
+        "tool",
+        "action",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "tool": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "tool_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "action": {
+          "enum": [
+            "plan",
+            "apply",
+            "destroy",
+            "test",
+            "scan"
+          ]
+        },
+        "status": {
+          "enum": [
+            "running",
+            "succeeded",
+            "failed",
+            "skipped",
+            "canceled"
+          ]
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finished_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "duration_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 280
+        }
+      }
+    }
+  },
+  "md/v1/changes/{step}": {
+    "scope": "deployment",
+    "format": "json",
+    "schema": {
+      "type": "object",
+      "required": [
+        "tool",
+        "add",
+        "change",
+        "destroy"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "tool": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "tool_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "add": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "change": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "destroy": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "replace": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "no_op": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resources": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": [
+              "address",
+              "action"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "address": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "action": {
+                "enum": [
+                  "create",
+                  "update",
+                  "delete",
+                  "replace"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "md/v1/compliance/{step}": {
+    "scope": "deployment",
+    "format": "json",
+    "schema": {
+      "type": "object",
+      "required": [
+        "tool",
+        "passed",
+        "failed"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "tool": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "tool_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "passed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "severity": {
+          "type": "object",
+          "required": [
+            "critical",
+            "high",
+            "medium",
+            "low"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "critical": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "high": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "medium": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "low": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "blocking": {
+          "type": "boolean"
+        },
+        "report_url": {
+          "type": "string",
+          "maxLength": 2048,
+          "pattern": "^https?://[^\\s]+(?![\\s\\S])"
+        }
+      }
+    }
+  }
+}
