@@ -1,0 +1,13 @@
+query Instance($org: ID!, $id: ID!) {
+  instance(organizationId: $org, id: $id) {
+    id
+    status
+    version
+    params
+    resolvedVersion
+    deployedVersion
+    firingAlarmCount
+    effectiveAttributes
+    latestDeployment { id status }
+  }
+}

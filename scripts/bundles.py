@@ -645,10 +645,55 @@ def automations(k8s):
                             "items": {"description": {"ui:widget": "textarea", "ui:options": {"rows": 2}},
                                       "environments": TAG, "components": TAG}}},
     )
+
+    # ---------------------------------------------------------------- upgrade-train
+    stage = obj("Stage", {
+        "name": s("Name", "Unique in the train.", pattern="^[a-z0-9][a-z0-9-]*$",
+                  message={"pattern": "Must be lowercase letters, numbers, and hyphens."}),
+        "match": values_map("Instance attributes", "Effective attributes of the instances in this stage."),
+        "mode": choice("Mode", [("deploy", "Deploy now"), ("propose", "Propose a deployment for a person to approve")],
+                       default="propose"),
+        "soak": s("Soak", "How long the stage waits after its deployments complete, with no firing alarms, before "
+                  "the next stage starts.", default="1h", **DURATION),
+    }, required=["name", "match", "mode"])
+    train = obj("Train", {
+        "name": s("Name", "Unique. Posts, deployment messages, and `POST /upgrade-train/run?train=<name>` use it.",
+                  pattern="^[a-z0-9][a-z0-9-]*$",
+                  message={"pattern": "Must be lowercase letters, numbers, and hyphens."}),
+        "bundles": arr("Bundles", s("Bundle", examples=["aws-aurora-postgres"]),
+                       "The bundles whose new versions ride this train. Each bundle runs on its own.",
+                       uniqueItems=True, minItems=1),
+        "include_development": b("Include development versions",
+                                 "Also run versions such as `1.3.1-dev.20261124T055403Z`."),
+        "stages": arr("Stages", stage, "Run in order.", minItems=1),
+        "slack": slack("Replaces the default channel for this train."),
+    }, required=["name", "bundles", "stages"])
+    extra = {}
+    if k8s:
+        extra["storage_size_gi"] = storage("State storage (GiB)", "The volume for the runs in progress.")
+    out["upgrade-train"] = dict(
+        title="Upgrade train",
+        description="Moves each new bundle version through stages of instances, such as dev, staging, and prod, "
+                    "with a soak time and an alarm check between stages. Set the `UPGRADE_TRAIN_TOKEN` secret to "
+                    "start, resume, and stop runs with `POST https://<host>/upgrade-train/run` and `/halt`.",
+        config=obj("Trains", {
+            "slack": slack("The channel for trains that do not name their own. Empty writes posts to the logs "
+                           "only."),
+            "trains": arr("Trains", train, minItems=1),
+            "massdriver": massdriver_ui(),
+        }, required=["trains"]),
+        extra=extra,
+        ui={"ui:order": ["slack", "trains", "massdriver"],
+            "trains": {"ui:options": {"itemTitle": "{{name}}"},
+                       "items": {"ui:order": ["name", "bundles", "include_development", "stages", "slack"],
+                                 "bundles": TAG,
+                                 "stages": {"ui:options": {"itemTitle": "{{name}}"},
+                                            "items": {"ui:order": ["name", "match", "mode", "soak"]}}}}},
+    )
     return out
 
 
-STATEFUL = {"cost-explorer", "drift", "freeze-guard", "statuspage"}
+STATEFUL = {"cost-explorer", "drift", "freeze-guard", "statuspage", "upgrade-train"}
 WEBSITE = {"cost-explorer": "The cost dashboard.", "statuspage": "The status page."}
 
 SECRET_DEFS = {
@@ -671,6 +716,9 @@ SECRET_DEFS = {
                                               "`Authorization: Bearer <token>`."},
     "DRIFT_RUN_TOKEN": {"title": "Run token",
                         "description": "Callers of `POST /drift/run` send it as `Authorization: Bearer <token>`."},
+    "UPGRADE_TRAIN_TOKEN": {"title": "Run token",
+                            "description": "Callers of `POST /upgrade-train/run` and `POST /upgrade-train/halt` send "
+                                           "it as `Authorization: Bearer <token>`."},
     "FREEZE_ADMIN_TOKEN": {"title": "Admin token",
                            "description": "Callers of `POST /freeze/lift` send it as `Authorization: Bearer <token>`."},
     "GITHUB_TOKEN": {"title": "GitHub token",
@@ -697,6 +745,7 @@ SECRETS = {
     "release-notes": SLACK + ["TEAMS_WEBHOOK_URL"],
     "rollback-on-failure": SLACK,
     "router": ["ROUTER_ENV"],
+    "upgrade-train": SLACK + ["UPGRADE_TRAIN_TOKEN"],
 }
 
 HOST = r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"

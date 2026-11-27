@@ -18,6 +18,7 @@ One Massdriver bundle for each automation and platform:
 | [router](../automations/router) | [massdriver-router](massdriver-router) | [massdriver-router-ecs](massdriver-router-ecs) |
 | [sandbox-on-join](../automations/sandbox-on-join) | [massdriver-sandbox-on-join](massdriver-sandbox-on-join) | [massdriver-sandbox-on-join-ecs](massdriver-sandbox-on-join-ecs) |
 | [statuspage](../automations/statuspage) | [massdriver-statuspage](massdriver-statuspage) | [massdriver-statuspage-ecs](massdriver-statuspage-ecs) |
+| [upgrade-train](../automations/upgrade-train) | [massdriver-upgrade-train](massdriver-upgrade-train) | [massdriver-upgrade-train-ecs](massdriver-upgrade-train-ecs) |
 
 Every bundle:
 
@@ -37,7 +38,8 @@ Publish the resource types that a bundle uses before you publish the bundle. See
 official, `website` and `aws-ecs-cluster` are examples in this repo, and `aws-iam-role` is the AWS credential type.
 
 An attribute value with commas, such as `api, web`, matches any of its values, where the config file accepts a
-list: the attributes of autodeploy-downstream rules, chaos-monkey's match, drift checks, and freeze-guard windows.
+list: the attributes of autodeploy-downstream rules, chaos-monkey's match, drift checks, freeze-guard windows, and
+upgrade-train stages.
 
 ## Kubernetes
 
@@ -46,7 +48,7 @@ The bundle deploys into the namespace of that resource, or `default`. It does no
 
 - a Deployment with one replica, a Secret with the environment variables, and a ConfigMap with the config file
 - a Service, and an Ingress for the host that sends every path to the automation
-- for cost-explorer, drift, freeze-guard, and statuspage, a PersistentVolumeClaim for `STATE_DIR`
+- for cost-explorer, drift, freeze-guard, statuspage, and upgrade-train, a PersistentVolumeClaim for `STATE_DIR`
 - for statuspage with an output directory, a second claim `<instance>-site`, mounted at that directory
 - for router, a ConfigMap with its **Scripts**, mounted as executables in `/scripts`
 
@@ -71,7 +73,7 @@ Massdriver identity token of that level. The `aws-ecs-cluster` type is an exampl
 - a task execution role that can read only that secret and write only that log group
 - a target group with a health check on `/healthz`, and a rule for the host on the cluster's HTTPS listener
 - a CNAME record for the host, when it is in the cluster's hosted zone and **Create a DNS record** is on
-- for cost-explorer, drift, freeze-guard, and statuspage, an EFS file system and an access point for `STATE_DIR`,
+- for cost-explorer, drift, freeze-guard, statuspage, and upgrade-train, an EFS file system and an access point for `STATE_DIR`,
   with a task role that can mount only that access point
 - for audit-archiver with an S3 bucket and no AWS key secrets, a task role that can write to the bucket
 
