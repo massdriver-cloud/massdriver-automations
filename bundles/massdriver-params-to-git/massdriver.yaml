@@ -101,6 +101,8 @@ params:
                 title: Commit to the branch
               - const: pull_request
                 title: Open or update a pull request into the branch
+              - const: stdout
+                title: Print the file to the logs and write nothing to GitHub
               default: push
             sensitive:
               type: string
@@ -224,6 +226,8 @@ params:
                   title: Commit to the branch
                 - const: pull_request
                   title: Open or update a pull request into the branch
+                - const: stdout
+                  title: Print the file to the logs and write nothing to GitHub
               sensitive:
                 type: string
                 title: Sensitive params

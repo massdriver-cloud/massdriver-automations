@@ -4,12 +4,18 @@ github:
   # For GitHub Enterprise Server: https://<host>/api/v3. Default: https://api.github.com.
   api_url: https://api.github.com
   # The environment variable that holds the GitHub token. The token needs the Contents: write repository
-  # permission, and Pull requests: write for the pull_request strategy. Default: GITHUB_TOKEN.
+  # permission, and Pull requests: write for the pull_request strategy. Default: GITHUB_TOKEN. The token is
+  # required only when defaults or a mapping that is not skipped uses push or pull_request.
   token_env: GITHUB_TOKEN
+
+debug:
+  # The directory strategy writes <directory>/<root>/<project>/<environment>/<component>/params.json here, and
+  # creates the directories. Required when defaults or a mapping that is not skipped uses directory.
+  directory: /var/lib/params-to-git
 
 # Where every instance goes when no mapping matches it. A mapping replaces only the keys it sets.
 defaults:
-  # Required unless skip is true. The repository, as owner/name.
+  # Required unless skip is true or the strategy is stdout or directory. The repository, as owner/name.
   repo: acme/platform
   # The branch that holds the files. Default: main.
   branch: main
@@ -19,6 +25,8 @@ defaults:
   root: /
   # push (default): commit to branch.
   # pull_request: commit to a branch of its own and open or update a pull request into branch.
+  # stdout: print the file that push would write, and write nothing to GitHub.
+  # directory: write the file under debug.directory instead of GitHub.
   strategy: push
   # What happens to a param that the bundle's params schema marks with $md.sensitive, format: password, or
   # writeOnly. mask (default): keep the key with the value [SENSITIVE], or [SENSITIVE:<fingerprint>] with
@@ -70,6 +78,11 @@ mappings:
       team: data
     repo: acme/data-platform
     sensitive: omit
+
+  - name: try-lab-on-stdout
+    match:
+      md-project: lab
+    strategy: stdout
 
   - name: skip-previews
     match:

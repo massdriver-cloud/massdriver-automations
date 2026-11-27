@@ -849,7 +849,7 @@ func TestStartRefusesBadConfig(t *testing.T) {
 	cases := []struct{ name, file, want string }{
 		{"unknown key", write("unknown.yaml", "defaults:\n  repo: a/b\n  path: x\n"), "field path not found"},
 		{"no repo", write("norepo.yaml", "defaults:\n  branch: main\n"), "defaults.repo must be owner/name"},
-		{"bad strategy", write("strategy.yaml", "defaults:\n  repo: a/b\n  strategy: merge\n"), "defaults.strategy must be push or pull_request"},
+		{"bad strategy", write("strategy.yaml", "defaults:\n  repo: a/b\n  strategy: merge\n"), "defaults.strategy must be push, pull_request, stdout, or directory"},
 		{"dot dot root", write("root.yaml", "defaults:\n  repo: a/b\n  root: ../x\n"), "defaults.root must not have a .. segment"},
 		{"no match", write("nomatch.yaml", "defaults:\n  repo: a/b\nmappings:\n  - name: x\n"), "mappings[0].match needs at least one attribute"},
 		{"bad template", write("tmpl.yaml", "defaults:\n  repo: a/b\n  commit:\n    message: '\\(.a | '\n"), "defaults.commit.message"},
@@ -885,13 +885,16 @@ func TestExampleConfigLoads(t *testing.T) {
 	if err := automation.LoadConfigFile("config.example.yaml", &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.routes) != 4 || cfg.routes[0].strategy != StrategyPullRequest || cfg.routes[1].root != "deploy/massdriver" {
+	if len(cfg.routes) != 5 || cfg.routes[0].strategy != StrategyPullRequest || cfg.routes[1].root != "deploy/massdriver" {
 		t.Fatalf("routes = %+v", cfg.routes)
 	}
 	if got := cfg.routes[0].teams; len(got) != 1 || got[0] != "platform-team" {
 		t.Fatalf("teams = %v", got)
 	}
-	if !cfg.routes[3].skip {
+	if cfg.routes[3].strategy != StrategyStdout || cfg.Debug.Directory != "/var/lib/params-to-git" {
+		t.Fatalf("debug route = %+v, directory = %q", cfg.routes[3], cfg.Debug.Directory)
+	}
+	if !cfg.routes[4].skip {
 		t.Fatal("skip-previews does not skip")
 	}
 }

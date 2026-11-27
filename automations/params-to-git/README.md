@@ -64,6 +64,80 @@ run, so the pull request is a record to review, and merging it deploys nothing.
 `reviewers` are asked to review each new pull request. A name with a slash, such as `acme/platform-team`, is a
 team.
 
+## Try it without GitHub
+
+Two more strategies write nothing to GitHub and need no token. Use them to try the automation, or to check where a
+mapping sends an instance and what its file holds before you point it at a repository.
+
+`stdout` prints one block for each sync: the action, the path, the repository and branch that `push` would write,
+the commit message, and the file. Secrets are masked or omitted as in the repository. Logs go to stderr, so stdout
+holds only the blocks.
+
+```yaml
+defaults:
+  strategy: stdout
+```
+
+```text
+--- params-to-git write api/prod/database/params.json
+instance: api-prod-database
+deployment: 6f1c...
+mapping: defaults
+branch: main
+message: api-prod-database: provision deployment 6f1c...
+{
+  "database": {
+    "name": "app",
+    "password": "[SENSITIVE]"
+  },
+  "size": "large"
+}
+--- end
+```
+
+A decommission prints `--- params-to-git delete <path>` and no file. `stdout` has no copy of the file, so it
+prints every sync, even when the params did not change.
+
+`directory` writes the files under `debug.directory`, in the same layout as the repository. It skips a file that
+has not changed, and deletes it on decommission with `on_decommission: delete`.
+
+```yaml
+debug:
+  directory: /out
+defaults:
+  strategy: directory
+```
+
+```bash
+mkdir -p params
+docker run -p 8080:8080 \
+  --user "$(id -u):$(id -g)" \
+  -v "$PWD/config.yaml:/etc/massdriver-automations/config.yaml:ro" \
+  -v "$PWD/params:/out" \
+  -e MASSDRIVER_ORGANIZATION_ID=acme \
+  -e MASSDRIVER_API_KEY=md_... \
+  -e MASSDRIVER_SIGNING_SECRET=whsec_... \
+  ghcr.io/massdriver-cloud/massdriver-automations:0.2 run params-to-git
+```
+
+For `stdout`, leave out the `params` volume and `--user`, and add `> params.log` to keep the blocks in a file.
+Massdriver needs a public URL to send events to your computer. See [Run locally](../../README.md#run-locally).
+
+A mapping can set its own strategy, so one project can print while the others push:
+
+```yaml
+defaults:
+  repo: acme/platform
+mappings:
+  - name: try-lab
+    match:
+      md-project: lab
+    strategy: stdout
+```
+
+The GitHub token is required only when `defaults` or a mapping that is not skipped uses `push` or `pull_request`.
+`repo` is optional with `stdout` and `directory`. `stdout` prints it when it is set.
+
 ## Secrets
 
 A param is sensitive when its field in the bundle's params schema has `$md.sensitive: true`, `format: password`,
@@ -103,7 +177,7 @@ api-prod-database: provision deployment 6f1c...
 | `MASSDRIVER_ORGANIZATION_ID` | Required. Your organization's identifier. |
 | `MASSDRIVER_API_KEY` | Required. An `md_` access token of a service account. |
 | `MASSDRIVER_URL` | The URL of your Massdriver installation. Default: `https://api.massdriver.cloud`. |
-| `GITHUB_TOKEN` | Required, or the variable that `github.token_env` names. A GitHub token with the `Contents: write` repository permission, and `Pull requests: write` for the `pull_request` strategy (fine-grained), or the `repo` scope (classic). |
+| `GITHUB_TOKEN` | Required with `push` or `pull_request`, or the variable that `github.token_env` names. A GitHub token with the `Contents: write` repository permission, and `Pull requests: write` for the `pull_request` strategy (fine-grained), or the `repo` scope (classic). |
 | `PARAMS_MASK_KEY` | Optional. A random key that turns each masked value into a fingerprint. |
 | `CONFIG_FILE` | The config file. Default: `/etc/massdriver-automations/config.yaml`. |
 
@@ -116,6 +190,7 @@ stops the automation at start.
 |---|---|---|
 | `github.api_url` | `https://api.github.com` | For GitHub Enterprise Server, `https://<host>/api/v3`. |
 | `github.token_env` | `GITHUB_TOKEN` | The variable that holds the GitHub token. |
+| `debug.directory` | | Required with the `directory` strategy. The directory that it writes the files to. |
 | `defaults` | | The target of the instances that no mapping matches, and the keys that mappings leave out. |
 | `mappings` | none | Each has a unique `name`, a `match` of attributes, and any keys of a target. |
 
@@ -123,10 +198,10 @@ The keys of a target, in `defaults` or in a mapping:
 
 | Key | Default | |
 |---|---|---|
-| `repo` | | Required unless `skip`. The repository, as `owner/name`. |
+| `repo` | | Required unless `skip`, `stdout`, or `directory`. The repository, as `owner/name`. |
 | `branch` | `main` | The branch that holds the files. |
 | `root` | `/` | The directory of the files. `/` is the top of the repository. |
-| `strategy` | `push` | `push` or `pull_request`. |
+| `strategy` | `push` | `push`, `pull_request`, `stdout`, or `directory`. |
 | `sensitive` | `mask` | `mask` or `omit`. |
 | `on_decommission` | `delete` | `delete` or `keep`. |
 | `skip` | `false` | `true` writes nothing. |

@@ -454,7 +454,8 @@ def automations(k8s):
             "root": s("Root", "The directory of the files. `/` is the top of the repository. Below it, each instance "
                       "writes `<project>/<environment>/<component>/params.json`." + inherit, **d("/")),
             "strategy": choice("Strategy", [("push", "Commit to the branch"),
-                                            ("pull_request", "Open or update a pull request into the branch")],
+                                            ("pull_request", "Open or update a pull request into the branch"),
+                                            ("stdout", "Print the file to the logs and write nothing to GitHub")],
                                **d("push")),
             "sensitive": choice("Sensitive params", [("mask", "Keep the key with a masked value"),
                                                      ("omit", "Drop the key")], **d("mask")),

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -15,6 +16,8 @@ import (
 const (
 	StrategyPush        = "push"
 	StrategyPullRequest = "pull_request"
+	StrategyStdout      = "stdout"
+	StrategyDirectory   = "directory"
 
 	SensitiveMask = "mask"
 	SensitiveOmit = "omit"
@@ -36,6 +39,7 @@ const (
 // Config is the config file of params-to-git.
 type Config struct {
 	GitHub   GitHubConfig `yaml:"github"`
+	Debug    DebugConfig  `yaml:"debug"`
 	Defaults Target       `yaml:"defaults"`
 	Mappings []Mapping    `yaml:"mappings"`
 
@@ -49,6 +53,11 @@ type GitHubConfig struct {
 	TokenEnv string `yaml:"token_env"`
 
 	token string
+}
+
+// DebugConfig is where the directory strategy writes.
+type DebugConfig struct {
+	Directory string `yaml:"directory"`
 }
 
 // Mapping sends the instances whose deployment event has every attribute of Match to its own target. Each field of
@@ -186,7 +195,30 @@ func (c *Config) Validate() error {
 		}
 		c.routes = append(c.routes, r)
 	}
+
+	if c.uses(StrategyDirectory) {
+		if c.Debug.Directory == "" {
+			fail("debug.directory is required by the directory strategy")
+		} else {
+			c.Debug.Directory = filepath.Clean(c.Debug.Directory)
+		}
+	}
 	return errors.Join(errs...)
+}
+
+// uses reports whether the defaults or a mapping that is not skipped sends instances by one of strategies.
+func (c *Config) uses(strategies ...string) bool {
+	for _, r := range append([]*route{c.defaultRoute}, c.routes...) {
+		if r != nil && !r.skip && slices.Contains(strategies, r.strategy) {
+			return true
+		}
+	}
+	return false
+}
+
+// usesGitHub reports whether any instance can be sent to GitHub, which needs the token.
+func (c *Config) usesGitHub() bool {
+	return c.uses(StrategyPush, StrategyPullRequest)
 }
 
 // build lays t over base, fills what both leave out, and checks the result. Each problem starts with the field's
@@ -237,7 +269,9 @@ func build(name string, match map[string]Values, base, t Target) (*route, []stri
 	var problems []string
 	fail := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 
-	if !repoPattern.MatchString(r.repo) {
+	toGitHub := r.strategy == StrategyPush || r.strategy == StrategyPullRequest
+	// stdout and directory write nowhere on GitHub, so they print a repository only when one is set.
+	if (toGitHub || r.repo != "") && !repoPattern.MatchString(r.repo) {
 		fail(".repo must be owner/name")
 	}
 	if strings.HasPrefix(r.branch, "/") || strings.Contains(r.branch, "..") {
@@ -248,8 +282,8 @@ func build(name string, match map[string]Values, base, t Target) (*route, []stri
 		fail(".root %s", err)
 	}
 	r.root = root
-	if r.strategy != StrategyPush && r.strategy != StrategyPullRequest {
-		fail(".strategy must be push or pull_request")
+	if !toGitHub && r.strategy != StrategyStdout && r.strategy != StrategyDirectory {
+		fail(".strategy must be push, pull_request, stdout, or directory")
 	}
 	if r.sensitive != SensitiveMask && r.sensitive != SensitiveOmit {
 		fail(".sensitive must be mask or omit")

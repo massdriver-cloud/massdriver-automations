@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -41,11 +42,13 @@ var Definition = automation.Definition{
 		if err := automation.LoadConfig(&cfg); err != nil {
 			return nil, err
 		}
-		v, err := automation.RequireEnv(cfg.GitHub.TokenEnv)
-		if err != nil {
-			return nil, err
+		if cfg.usesGitHub() {
+			v, err := automation.RequireEnv(cfg.GitHub.TokenEnv)
+			if err != nil {
+				return nil, err
+			}
+			cfg.GitHub.token = v[cfg.GitHub.TokenEnv]
 		}
-		cfg.GitHub.token = v[cfg.GitHub.TokenEnv]
 		api, err := massdriver.FromEnv()
 		if err != nil {
 			return nil, err
@@ -60,6 +63,7 @@ type ParamsToGit struct {
 	gh      *github
 	cfg     Config
 	maskKey []byte
+	out     io.Writer
 
 	mu    sync.Mutex
 	locks map[string]chan struct{}
@@ -72,6 +76,7 @@ func New(api *massdriver.Client, cfg Config, maskKey []byte) *ParamsToGit {
 		gh:      &github{url: cfg.GitHub.APIURL, token: cfg.GitHub.token, http: automation.HTTPClient(0)},
 		cfg:     cfg,
 		maskKey: maskKey,
+		out:     os.Stdout,
 		locks:   map[string]chan struct{}{},
 	}
 }
@@ -156,6 +161,12 @@ func (p *ParamsToGit) Handle(ctx context.Context, ev automation.Event) error {
 		}
 	}
 
+	switch rt.strategy {
+	case StrategyStdout:
+		return p.locked(ctx, StrategyStdout, "", log, write(func(c change) error { p.toStdout(log, rt, instance, dep.ID, c); return nil }))
+	case StrategyDirectory:
+		return p.locked(ctx, StrategyDirectory, "", log, write(func(c change) error { p.toDirectory(log, c); return nil }))
+	}
 	if rt.strategy == StrategyPullRequest {
 		head, err := rt.prBranch.eval(ctx, data)
 		if err == nil && !rt.rolling {
