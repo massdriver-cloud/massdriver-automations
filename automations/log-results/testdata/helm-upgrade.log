@@ -1,0 +1,20 @@
+Using OCI Helm chart: oci://registry-1.docker.io/bitnamicharts/redis (version 20.6.2)
+Pulled: registry-1.docker.io/bitnamicharts/redis:20.6.2
+Digest: sha256:3f0b2a4c6e8197a3c5e7f9b1d3a5c7e9f1b3d5a7c9e1f3b5d7a9c1e3f5b7d9a1
+Release "api-prod-cache" has been upgraded. Happy Helming!
+NAME: api-prod-cache
+LAST DEPLOYED: Fri Nov 27 20:01:02 2026
+NAMESPACE: api-prod
+STATUS: deployed
+REVISION: 4
+TEST SUITE: None
+NOTES:
+CHART NAME: redis
+CHART VERSION: 20.6.2
+APP VERSION: 7.4.1
+
+** Please be patient while the chart is being deployed **
+
+Redis can be accessed on the following DNS names from within your cluster:
+
+    api-prod-cache-redis-master.api-prod.svc.cluster.local for read/write operations (port 6379)

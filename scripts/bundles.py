@@ -442,6 +442,28 @@ def automations(k8s):
         ui={"github": {"ui:order": ["repo_attribute", "ref_attribute", "environment_name", "api_url"]}},
     )
 
+    # ---------------------------------------------------------------- log-results
+    out["log-results"] = dict(
+        title="Log results",
+        description="Reads the logs of each finished deployment with the rules in its settings, and writes what "
+                    "they find, such as plan changes, Helm releases, and Checkov findings, to the deployment's "
+                    "stash as Deployment metadata.",
+        config=s("Settings (YAML)", f"The YAML config of log-results. See the [log-results README]"
+                 f"({README.format('log-results')}) for the rules and examples for OpenTofu, Terraform, Helm, and "
+                 "Bicep.",
+                 default="rules:\n  - name: opentofu-changes\n"
+                         "    detect: (OpenTofu|Terraform) has been successfully initialized\n"
+                         "    patterns:\n"
+                         "      - 'Plan: (?P<add>\\d+) to add, (?P<change>\\d+) to change, (?P<destroy>\\d+) to destroy'\n"
+                         "      - (?P<no_changes>No changes\\.)\n"
+                         "    key: changes/src\n    label: OpenTofu changes\n"
+                         "    value: '{tool: \"opentofu\", add: (.add // 0), change: (.change // 0), "
+                         "destroy: (.destroy // 0)}'\n"),
+        extra={"attributes": ATTRIBUTES},
+        ui=None,
+        config_ui={"ui:widget": "textarea", "ui:options": {"rows": 16}},
+    )
+
     # ---------------------------------------------------------------- params-to-git
     def target(defaults):
         d = (lambda v: {"default": v}) if defaults else (lambda v: {})

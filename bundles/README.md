@@ -12,6 +12,7 @@ One Massdriver bundle for each automation and platform:
 | [drift](../automations/drift) | [massdriver-drift](massdriver-drift) | [massdriver-drift-ecs](massdriver-drift-ecs) |
 | [freeze-guard](../automations/freeze-guard) | [massdriver-freeze-guard](massdriver-freeze-guard) | [massdriver-freeze-guard-ecs](massdriver-freeze-guard-ecs) |
 | [github-deployments](../automations/github-deployments) | [massdriver-github-deployments](massdriver-github-deployments) | [massdriver-github-deployments-ecs](massdriver-github-deployments-ecs) |
+| [log-results](../automations/log-results) | [massdriver-log-results](massdriver-log-results) | [massdriver-log-results-ecs](massdriver-log-results-ecs) |
 | [params-to-git](../automations/params-to-git) | [massdriver-params-to-git](massdriver-params-to-git) | [massdriver-params-to-git-ecs](massdriver-params-to-git-ecs) |
 | [pr-sync](../automations/pr-sync) | [massdriver-pr-sync](massdriver-pr-sync) | [massdriver-pr-sync-ecs](massdriver-pr-sync-ecs) |
 | [proposal-chatops](../automations/proposal-chatops) | [massdriver-proposal-chatops](massdriver-proposal-chatops) | [massdriver-proposal-chatops-ecs](massdriver-proposal-chatops-ecs) |

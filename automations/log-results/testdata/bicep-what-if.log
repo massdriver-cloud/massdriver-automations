@@ -1,0 +1,29 @@
+Authenticated to Azure.
+
+Note: The result may contain false positive predictions (noise).
+You can help us improve the accuracy of the result by opening an issue here: https://aka.ms/WhatIfIssues
+
+Resource and property changes are indicated with these symbols:
+  - Delete
+  + Create
+  ~ Modify
+  = Nochange
+
+The deployment will update the following scope:
+
+Scope: /subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/api-prod-storage
+
+  - Microsoft.Storage/storageAccounts/apiprodold
+
+  + Microsoft.Storage/storageAccounts/apiprodlogs [2023-05-01]
+
+      apiVersion: "2023-05-01"
+      kind:       "StorageV2"
+      location:   "eastus2"
+
+  ~ Microsoft.Storage/storageAccounts/apiprodstorage [2023-05-01]
+    ~ properties.minimumTlsVersion: "TLS1_0" => "TLS1_2"
+
+  = Microsoft.Network/virtualNetworks/api-prod-vnet [2023-09-01]
+
+Resource changes: 1 to delete, 1 to create, 1 to modify, 1 no change.

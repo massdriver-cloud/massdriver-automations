@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
 )
 
 // Results of a plan.
@@ -21,7 +23,6 @@ const (
 )
 
 var (
-	ansi       = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 	countEntry = regexp.MustCompile(`(\d+) to (\w+)`)
 )
 
@@ -70,7 +71,7 @@ type Result struct {
 // Analyze reads plan logs with the check's patterns. Steps are matched to step names in log order, because the
 // logs do not say which step wrote them.
 func Analyze(logs string, steps []string, ch *Check) Result {
-	logs = ansi.ReplaceAllString(logs, "")
+	logs = massdriver.StripANSI(logs)
 
 	type match struct {
 		start int

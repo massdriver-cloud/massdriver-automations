@@ -1,0 +1,22 @@
+Initializing the backend...
+Initializing provider plugins...
+- Reusing previous version of hashicorp/aws from the dependency lock file
+- Using previously-installed hashicorp/aws v5.72.1
+
+OpenTofu has been successfully initialized!
+2026-11-27T20:01:02.114Z [INFO]  OpenTofu version: 1.10.6
+aws_s3_bucket.main: Refreshing state... [id=api-prod-storage]
+
+[0m[1m[32mNo changes.[0m[1m Your infrastructure matches the configuration.[0m
+
+OpenTofu has compared your real infrastructure against your configuration
+and found no differences, so no changes are needed.
+
+Evaluating Checkov policies...
+By Prisma Cloud | version: 3.2.469
+
+terraform_plan scan results:
+
+Passed checks: 38, Failed checks: 0, Skipped checks: 4
+
+Checkov evaluation completed.
