@@ -154,11 +154,11 @@ const trafficRules = `
 prometheus:
   url: http://prometheus:9090
 rules:
-  - target: {instance: billing-dev-claims, key: md/traffic, field: rps}
+  - target: {instance: billing-dev-claims, key: md/v1/traffic, field: rps}
     prometheus: {query: rps}
-  - target: {instance: billing-dev-claims, key: md/traffic, field: errors_5m}
+  - target: {instance: billing-dev-claims, key: md/v1/traffic, field: errors_5m}
     prometheus: {query: errors}
-  - target: {instance: billing-dev-claims, key: md/traffic, field: p95_ms}
+  - target: {instance: billing-dev-claims, key: md/v1/traffic, field: p95_ms}
     prometheus: {query: p95}
     scale: 1000
 `
@@ -173,7 +173,7 @@ func TestFieldsOfOneKeyAreOneWrite(t *testing.T) {
 		t.Fatalf("calls = %+v", calls)
 	}
 	c := calls[0]
-	if !reflect.DeepEqual(c.Scope, map[string]any{"instance": "billing-dev-claims"}) || c.Key != "md/traffic" {
+	if !reflect.DeepEqual(c.Scope, map[string]any{"instance": "billing-dev-claims"}) || c.Key != "md/v1/traffic" {
 		t.Errorf("target = %v %s", c.Scope, c.Key)
 	}
 	if c.Input["format"] != "JSON" || c.Input["ttl"] != float64(180) {
@@ -260,22 +260,22 @@ func TestFailingQueryDoesNotStopOtherEntries(t *testing.T) {
 prometheus:
   url: http://prometheus:9090
 rules:
-  - target: {instance: billing-dev-claims, key: md/traffic, field: rps}
+  - target: {instance: billing-dev-claims, key: md/v1/traffic, field: rps}
     prometheus: {query: claims_rps}
-  - target: {instance: billing-dev-claims, key: md/traffic, field: errors_5m}
+  - target: {instance: billing-dev-claims, key: md/v1/traffic, field: errors_5m}
     prometheus: {query: claims_errors}
     default: 0
-  - target: {instance: billing-dev-claims, key: md/traffic, field: p95_ms}
+  - target: {instance: billing-dev-claims, key: md/v1/traffic, field: p95_ms}
     prometheus: {query: claims_p95}
-  - target: {instance: billing-dev-ledger, key: md/traffic, field: rps}
+  - target: {instance: billing-dev-ledger, key: md/v1/traffic, field: rps}
     prometheus: {query: ledger_rps}
-  - target: {instance: billing-dev-ledger, key: md/traffic, field: errors_5m}
+  - target: {instance: billing-dev-ledger, key: md/v1/traffic, field: errors_5m}
     prometheus: {query: ledger_errors}
   - target: {instance: billing-dev-app, key: queue.depth}
     prometheus: {query: queue}
 `)
 	// claims: p95 fails, which is optional; errors has no data and uses its default.
-	// ledger: rps fails, which md/traffic requires, so ledger is skipped.
+	// ledger: rps fails, which md/v1/traffic requires, so ledger is skipped.
 	e.src.values = map[string]float64{"claims_rps": 5, "ledger_errors": 1, "queue": 17}
 	e.src.errs = map[string]error{"claims_p95": errors.New("timeout"), "ledger_rps": errors.New("timeout")}
 	e.cycle(t)
@@ -287,7 +287,7 @@ rules:
 	if len(got) != 2 {
 		t.Fatalf("writes = %v", got)
 	}
-	if v := decode(t, got["billing-dev-claims md/traffic"]); !reflect.DeepEqual(v, map[string]any{"rps": float64(5), "errors_5m": float64(0)}) {
+	if v := decode(t, got["billing-dev-claims md/v1/traffic"]); !reflect.DeepEqual(v, map[string]any{"rps": float64(5), "errors_5m": float64(0)}) {
 		t.Errorf("claims = %v", v)
 	}
 	if got["billing-dev-app queue.depth"] != "17" {
@@ -298,7 +298,7 @@ rules:
 func TestTextRulesMapNumbersToHealth(t *testing.T) {
 	e := setup(t, `
 rules:
-  - target: {instance: billing-dev-app, key: md/health}
+  - target: {instance: billing-dev-app, key: md/v1/health}
     cloudwatch: {namespace: AWS/ApplicationELB, metric: UnHealthyHostCount, stat: Maximum}
     default: 0
     text:
@@ -329,17 +329,19 @@ rules:
 func TestWidgetValuesAreCheckedAgainstTheCatalog(t *testing.T) {
 	e := setup(t, `
 rules:
-  - target: {instance: billing-dev-app, key: md/usage}
+  - target: {instance: billing-dev-app, key: md/v1/usage}
     value: {value: 10, max: 0}
-  - target: {environment: billing-dev, key: md/health}
+  - target: {environment: billing-dev, key: md/v1/health}
     value: healthy
   - target: {instance: billing-dev-app, key: md/unknown}
     value: "1"
-  - target: {environment: billing-dev, key: md/banner}
+  - target: {instance: billing-dev-app, key: md/health}
+    value: healthy
+  - target: {environment: billing-dev, key: md/v1/banner}
     value: {message: "Deploys are paused", level: notice}
-  - target: {environment: billing-dev, key: md/links}
+  - target: {environment: billing-dev, key: md/v1/links}
     value: {links: [{label: Runbook, url: "not a url"}]}
-  - target: {instance: billing-dev-ledger, key: md/usage}
+  - target: {instance: billing-dev-ledger, key: md/v1/usage}
     value: {value: 10, max: 100, label: connections}
 `)
 	e.cycle(t)
@@ -349,7 +351,7 @@ rules:
 			keys = append(keys, id.(string)+" "+c.Key)
 		}
 	}
-	want := []string{"billing-dev-ledger md/usage"}
+	want := []string{"billing-dev-ledger md/v1/usage"}
 	if !reflect.DeepEqual(keys, want) {
 		t.Errorf("written = %v, want %v", keys, want)
 	}
@@ -358,7 +360,7 @@ rules:
 func TestValidLinksAreWritten(t *testing.T) {
 	e := setup(t, `
 rules:
-  - target: {environment: billing-dev, key: md/links, label: Links}
+  - target: {environment: billing-dev, key: md/v1/links, label: Links}
     value: {links: [{label: Runbook, url: "https://wiki.example.com/runbook"}]}
 `)
 	e.cycle(t)
@@ -371,7 +373,7 @@ rules:
 func TestCatalogIsReadAgainAfterAFailure(t *testing.T) {
 	e := setup(t, `
 rules:
-  - target: {instance: billing-dev-app, key: md/health}
+  - target: {instance: billing-dev-app, key: md/v1/health}
     value: healthy
   - target: {instance: billing-dev-app, key: owner}
     value: billing-team
@@ -384,7 +386,7 @@ rules:
 	e.api.catalogDown = false
 	e.clock = e.clock.Add(time.Minute)
 	e.cycle(t)
-	if calls := e.api.calls(); len(calls) != 2 || calls[1].Key != "md/health" {
+	if calls := e.api.calls(); len(calls) != 2 || calls[1].Key != "md/v1/health" {
 		t.Fatalf("calls = %+v", calls)
 	}
 }
@@ -495,10 +497,10 @@ func TestConfigExampleLoads(t *testing.T) {
 		keys[g.scope.String()+" "+g.key] = true
 	}
 	for _, k := range []string{
-		"instance billing-prod-ledger md/usage", "instance billing-prod-app md/traffic",
-		"instance billing-prod-ledger md/health", "instance billing-prod-claims md/traffic",
-		"instance billing-prod-claims md/usage", "instance billing-prod-app md/health",
-		"environment billing-prod billing.p99_ms", "environment billing-prod md/links",
+		"instance billing-prod-ledger md/v1/usage", "instance billing-prod-app md/v1/traffic",
+		"instance billing-prod-ledger md/v1/health", "instance billing-prod-claims md/v1/traffic",
+		"instance billing-prod-claims md/v1/usage", "instance billing-prod-app md/v1/health",
+		"environment billing-prod billing.p99_ms", "environment billing-prod md/v1/links",
 	} {
 		if !keys[k] {
 			t.Errorf("missing %s in %v", k, keys)
@@ -555,18 +557,18 @@ prometheus: {url: http://prometheus:9090}
 		}
 	}
 	want := map[string][]rule{
-		"instance billing-dev-ledger md/usage": {
+		"instance billing-dev-ledger md/v1/usage": {
 			{Field: "value", Query: "AWS/RDS DatabaseConnections Average 1m0s DBInstanceIdentifier=ledger-pg"},
 			{Field: "max", Value: float64(200)},
 			{Field: "label", Value: "connections"},
 		},
-		"instance billing-dev-app md/traffic": {
+		"instance billing-dev-app md/v1/traffic": {
 			{Field: "rps", Query: "AWS/ApplicationELB RequestCount Sum 1m0s LoadBalancer=app/billing/1 TargetGroup=targetgroup/billing/2", Scale: 1.0 / 60, Default: true},
 			{Field: "errors_5m", Query: "AWS/ApplicationELB HTTPCode_Target_5XX_Count Sum 5m0s LoadBalancer=app/billing/1 TargetGroup=targetgroup/billing/2", Default: true},
 			{Field: "p95_ms", Query: "AWS/ApplicationELB TargetResponseTime p95 1m0s LoadBalancer=app/billing/1 TargetGroup=targetgroup/billing/2", Scale: 1000},
 		},
-		"instance billing-dev-claims md/health": {{Query: "claims-cpu"}},
-		"instance billing-dev-claims md/traffic": {
+		"instance billing-dev-claims md/v1/health": {{Query: "claims-cpu"}},
+		"instance billing-dev-claims md/v1/traffic": {
 			{Field: "rps", Query: `sum(rate(http_requests_total{job="claims"}[5m]))`, Default: true},
 			{Field: "errors_5m", Query: `sum(increase(http_requests_total{job="claims",code=~"5.."}[5m]))`, Default: true},
 			{Field: "p95_ms", Query: `histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job="claims"}[5m]))) * 1000`},
@@ -634,24 +636,24 @@ func TestValidateSchema(t *testing.T) {
 		value string
 		valid bool
 	}{
-		{"md/health", `"healthy"`, true},
-		{"md/health", `""`, false},
-		{"md/health", `"` + strings.Repeat("x", 65) + `"`, false},
-		{"md/usage", `{"value": 0, "max": 1}`, true},
-		{"md/usage", `{"value": 1, "max": 0}`, false},
-		{"md/usage", `{"value": -1, "max": 1}`, false},
-		{"md/usage", `{"value": 1, "max": 2, "unit": "GB"}`, false},
-		{"md/usage", `{"value": 1}`, false},
-		{"md/traffic", `{"rps": 1.5, "errors_5m": 2, "p95_ms": 3.5}`, true},
-		{"md/traffic", `{"rps": 1.5, "errors_5m": 2.5}`, false},
-		{"md/traffic", `{"rps": "1", "errors_5m": 2}`, false},
-		{"md/banner", `{"message": "Hi", "level": "warning"}`, true},
-		{"md/banner", `{"message": "Hi", "level": "debug"}`, false},
-		{"md/banner", `{"message": ""}`, false},
-		{"md/links", `{"links": [{"label": "Runbook", "url": "https://wiki.example.com"}]}`, true},
-		{"md/links", `{"links": [{"label": "Runbook", "url": "https://wiki.example.com/a b"}]}`, false},
-		{"md/links", `{"links": [{"label": "Runbook", "url": "ftp://wiki.example.com"}]}`, false},
-		{"md/links", `{"links": []}`, false},
+		{"md/v1/health", `"healthy"`, true},
+		{"md/v1/health", `""`, false},
+		{"md/v1/health", `"` + strings.Repeat("x", 65) + `"`, false},
+		{"md/v1/usage", `{"value": 0, "max": 1}`, true},
+		{"md/v1/usage", `{"value": 1, "max": 0}`, false},
+		{"md/v1/usage", `{"value": -1, "max": 1}`, false},
+		{"md/v1/usage", `{"value": 1, "max": 2, "unit": "GB"}`, false},
+		{"md/v1/usage", `{"value": 1}`, false},
+		{"md/v1/traffic", `{"rps": 1.5, "errors_5m": 2, "p95_ms": 3.5}`, true},
+		{"md/v1/traffic", `{"rps": 1.5, "errors_5m": 2.5}`, false},
+		{"md/v1/traffic", `{"rps": "1", "errors_5m": 2}`, false},
+		{"md/v1/banner", `{"message": "Hi", "level": "warning"}`, true},
+		{"md/v1/banner", `{"message": "Hi", "level": "debug"}`, false},
+		{"md/v1/banner", `{"message": ""}`, false},
+		{"md/v1/links", `{"links": [{"label": "Runbook", "url": "https://wiki.example.com"}]}`, true},
+		{"md/v1/links", `{"links": [{"label": "Runbook", "url": "https://wiki.example.com/a b"}]}`, false},
+		{"md/v1/links", `{"links": [{"label": "Runbook", "url": "ftp://wiki.example.com"}]}`, false},
+		{"md/v1/links", `{"links": []}`, false},
 	}
 	for _, c := range cases {
 		var v any
@@ -670,18 +672,18 @@ func TestGraphQLStashSendsTheEntry(t *testing.T) {
 	srv := httptest.NewServer(api)
 	defer srv.Close()
 	stash := &GraphQLStash{API: &massdriver.Client{Endpoint: srv.URL, OrganizationID: "tendwell-health", APIKey: "md_test"}}
-	err := stash.Set(context.Background(), Write{Scope: Scope{Kind: "environment", ID: "billing-dev"}, Key: "md/banner",
+	err := stash.Set(context.Background(), Write{Scope: Scope{Kind: "environment", ID: "billing-dev"}, Key: "md/v1/banner",
 		Format: FormatJSON, Value: `{"message":"Hi"}`, TTL: 3 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := setCall{Scope: map[string]any{"environment": "billing-dev"}, Key: "md/banner",
+	want := setCall{Scope: map[string]any{"environment": "billing-dev"}, Key: "md/v1/banner",
 		Input: map[string]any{"value": `{"message":"Hi"}`, "format": "JSON", "ttl": float64(180)}}
 	if got := api.calls(); len(got) != 1 || !reflect.DeepEqual(got[0], want) {
 		t.Errorf("calls = %+v", got)
 	}
-	api.reject = "md/banner can be set only on an environment"
-	if err := stash.Set(context.Background(), Write{Scope: Scope{Kind: "instance", ID: "x"}, Key: "md/banner",
+	api.reject = "md/v1/banner can be set only on an environment"
+	if err := stash.Set(context.Background(), Write{Scope: Scope{Kind: "instance", ID: "x"}, Key: "md/v1/banner",
 		Format: FormatJSON, Value: "{}"}); err == nil || !strings.Contains(err.Error(), "only on an environment") {
 		t.Errorf("err = %v", err)
 	}
@@ -690,7 +692,7 @@ func TestGraphQLStashSendsTheEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(widgets) != 5 || widgets[0].Key != "md/banner" || widgets[0].Scope != "environment" || widgets[0].Format != "JSON" {
+	if len(widgets) != 5 || widgets[0].Key != "md/v1/banner" || widgets[0].Scope != "environment" || widgets[0].Format != "JSON" {
 		t.Errorf("widgets = %+v", widgets)
 	}
 }

@@ -126,14 +126,14 @@ simulate:
 		t.Errorf("phases = %v", got)
 	}
 	for _, id := range []string{"billing-dev-claims", "billing-dev-app", "billing-dev-ledger"} {
-		if got := sequence(ticks, id, "md/health"); !reflect.DeepEqual(got, []string{"healthy"}) {
+		if got := sequence(ticks, id, "md/v1/health"); !reflect.DeepEqual(got, []string{"healthy"}) {
 			t.Errorf("%s health = %v", id, got)
 		}
-		rps := fieldValues(ticks, id, "md/traffic", "rps")
+		rps := fieldValues(ticks, id, "md/v1/traffic", "rps")
 		if len(rps) != 36 || len(distinct(fmtAll(rps))) < 10 {
 			t.Errorf("%s rps does not change: %v", id, rps)
 		}
-		for _, u := range fieldValues(ticks, id, "md/usage", "value") {
+		for _, u := range fieldValues(ticks, id, "md/v1/usage", "value") {
 			if u < 35 || u > 60 {
 				t.Errorf("%s usage %v is outside the steady range", id, u)
 			}
@@ -164,7 +164,7 @@ simulate:
 	if got, want := distinct(phases), []string{"normal", "degrading", "outage", "recovering", "resolved"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("phases = %v, want %v", got, want)
 	}
-	if got, want := sequence(ticks, "billing-dev-app", "md/health"), []string{"healthy", "degraded", "down", "recovering", "healthy"}; !reflect.DeepEqual(got, want) {
+	if got, want := sequence(ticks, "billing-dev-app", "md/v1/health"), []string{"healthy", "degraded", "down", "recovering", "healthy"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("health = %v, want %v", got, want)
 	}
 	want := []string{
@@ -173,10 +173,10 @@ simulate:
 		"info: billing-dev-app is recovering. Monitoring.",
 		"info: Resolved: billing-dev-app is healthy.",
 	}
-	if got := sequence(ticks, "billing-dev", "md/banner"); !reflect.DeepEqual(got, want) {
+	if got := sequence(ticks, "billing-dev", "md/v1/banner"); !reflect.DeepEqual(got, want) {
 		t.Errorf("banner = %v, want %v", got, want)
 	}
-	if got := sequence(ticks, "billing-dev-claims", "md/health"); !reflect.DeepEqual(got, []string{"healthy"}) {
+	if got := sequence(ticks, "billing-dev-claims", "md/v1/health"); !reflect.DeepEqual(got, []string{"healthy"}) {
 		t.Errorf("claims health = %v", got)
 	}
 
@@ -189,11 +189,11 @@ simulate:
 			}
 			d, _ := e.Data.(map[string]any)
 			switch e.Key {
-			case "md/traffic":
+			case "md/v1/traffic":
 				if p == "outage" {
 					peakErrors = max(peakErrors, d["errors_5m"].(float64))
 				}
-			case "md/usage":
+			case "md/v1/usage":
 				v := d["value"].(float64)
 				peakUsage = max(peakUsage, v)
 				past80 = past80 || (v > 80 && v < 95)
@@ -226,17 +226,17 @@ simulate:
 		"warning: Cutover in progress.",
 		"info: Cutover complete.",
 	}
-	if got := sequence(ticks, "billing-dev", "md/banner"); !reflect.DeepEqual(got, want) {
+	if got := sequence(ticks, "billing-dev", "md/v1/banner"); !reflect.DeepEqual(got, want) {
 		t.Errorf("banner = %v, want %v", got, want)
 	}
-	if got, want := sequence(ticks, "billing-dev-claims", "md/health"), []string{"healthy", "draining", "idle"}; !reflect.DeepEqual(got, want) {
+	if got, want := sequence(ticks, "billing-dev-claims", "md/v1/health"), []string{"healthy", "draining", "idle"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("old health = %v, want %v", got, want)
 	}
-	if got, want := sequence(ticks, "billing-dev-ledger", "md/health"), []string{"replicating", "catching up", "cutover", "healthy"}; !reflect.DeepEqual(got, want) {
+	if got, want := sequence(ticks, "billing-dev-ledger", "md/v1/health"), []string{"replicating", "catching up", "cutover", "healthy"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("new health = %v, want %v", got, want)
 	}
 
-	lag := fieldValues(ticks, "billing-dev-ledger", "md/usage", "value")
+	lag := fieldValues(ticks, "billing-dev-ledger", "md/v1/usage", "value")
 	if lag[0] < 90 || lag[len(lag)-1] != 0 {
 		t.Errorf("lag = %v", lag)
 	}
@@ -250,8 +250,8 @@ simulate:
 		t.Errorf("lag while catching up = %v", catchingUp)
 	}
 
-	oldRPS := fieldValues(ticks, "billing-dev-claims", "md/traffic", "rps")
-	newRPS := fieldValues(ticks, "billing-dev-ledger", "md/traffic", "rps")
+	oldRPS := fieldValues(ticks, "billing-dev-claims", "md/v1/traffic", "rps")
+	newRPS := fieldValues(ticks, "billing-dev-ledger", "md/v1/traffic", "rps")
 	last := len(oldRPS) - 1
 	if oldRPS[0] == 0 || newRPS[0] != 0 || oldRPS[last] != 0 || newRPS[last] == 0 {
 		t.Errorf("old rps = %v\nnew rps = %v", oldRPS, newRPS)
@@ -281,12 +281,12 @@ simulate:
 			"warning: Patching " + env + ": " + n + " instances patched.",
 			"info: Patched: " + env + " has the fix.",
 		}
-		if got := sequence(ticks, env, "md/banner"); !reflect.DeepEqual(got, want) {
+		if got := sequence(ticks, env, "md/v1/banner"); !reflect.DeepEqual(got, want) {
 			t.Errorf("%s banner = %v, want %v", env, got, want)
 		}
 	}
 	for _, id := range []string{"billing-dev-claims", "billing-dev-app", "billing-staging-app"} {
-		if got, want := sequence(ticks, id, "md/health"), []string{"vulnerable", "patching", "patched"}; !reflect.DeepEqual(got, want) {
+		if got, want := sequence(ticks, id, "md/v1/health"), []string{"vulnerable", "patching", "patched"}; !reflect.DeepEqual(got, want) {
 			t.Errorf("%s health = %v, want %v", id, got, want)
 		}
 	}
@@ -306,7 +306,7 @@ func healthAt(ticks [][]Entry, id string) []string {
 	var out []string
 	for _, entries := range ticks {
 		for _, e := range entries {
-			if e.Scope.ID == id && e.Key == "md/health" {
+			if e.Scope.ID == id && e.Key == "md/v1/health" {
 				out = append(out, e.Data.(string))
 			}
 		}

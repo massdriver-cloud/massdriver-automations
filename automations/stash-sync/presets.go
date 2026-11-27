@@ -36,7 +36,7 @@ var presets = map[string]presetDef{
 			if label == "" {
 				label = "connections"
 			}
-			t := Target{Instance: instance, Key: "md/usage"}
+			t := Target{Instance: instance, Key: "md/v1/usage"}
 			return []Rule{
 				{Target: field(t, "value"), CloudWatch: &CloudWatchQuery{
 					Namespace: "AWS/RDS", Metric: "DatabaseConnections", Stat: "Average", Period: Duration(time.Minute),
@@ -59,7 +59,7 @@ var presets = map[string]presetDef{
 				return &CloudWatchQuery{Namespace: "AWS/ApplicationELB", Metric: name, Stat: stat,
 					Period: Duration(period), Dimensions: dims}
 			}
-			t := Target{Instance: instance, Key: "md/traffic"}
+			t := Target{Instance: instance, Key: "md/v1/traffic"}
 			return []Rule{
 				// RequestCount is a sum for each period. A period of 60s divided by 60 is requests per second.
 				{Target: field(t, "rps"), CloudWatch: metric("RequestCount", "Sum", time.Minute),
@@ -76,7 +76,7 @@ var presets = map[string]presetDef{
 		need: []string{"alarm"},
 		build: func(instance string, with map[string]string) ([]Rule, error) {
 			return []Rule{{
-				Target:     Target{Instance: instance, Key: "md/health"},
+				Target:     Target{Instance: instance, Key: "md/v1/health"},
 				CloudWatch: &CloudWatchQuery{Alarm: with["alarm"]},
 				Text: []TextRule{
 					{Below: ptr(float64(AlarmInsufficientData)), Text: "healthy"},
@@ -102,7 +102,7 @@ var presets = map[string]presetDef{
 			requests := or(with["requests_metric"], "http_requests_total")
 			duration := or(with["duration_metric"], "http_request_duration_seconds")
 			code := or(with["code_label"], "code")
-			t := Target{Instance: instance, Key: "md/traffic"}
+			t := Target{Instance: instance, Key: "md/v1/traffic"}
 			q := func(s string) *PrometheusQuery { return &PrometheusQuery{Query: s} }
 			return []Rule{
 				{Target: field(t, "rps"), Default: ptr(0.0),

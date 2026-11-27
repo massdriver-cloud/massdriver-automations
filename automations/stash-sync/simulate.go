@@ -253,16 +253,16 @@ func instance(id, key string, data any) Entry {
 	return Entry{Scope: Scope{Kind: "instance", ID: id}, Key: key, Format: format, Data: data}
 }
 
-func health(id, state string) Entry { return instance(id, "md/health", state) }
+func health(id, state string) Entry { return instance(id, "md/v1/health", state) }
 
 func banner(env, level, message string) Entry {
-	return Entry{Scope: Scope{Kind: "environment", ID: env}, Key: "md/banner", Format: FormatJSON,
+	return Entry{Scope: Scope{Kind: "environment", ID: env}, Key: "md/v1/banner", Format: FormatJSON,
 		Data: map[string]any{"message": message, "level": level}}
 }
 
 // normal is the healthy dot, traffic, and usage of one instance.
 func normal(id string, g *gen, r *rand.Rand, tick int) []Entry {
-	return []Entry{health(id, "healthy"), instance(id, "md/traffic", g.traffic(r, tick)), instance(id, "md/usage", g.cpu(r))}
+	return []Entry{health(id, "healthy"), instance(id, "md/v1/traffic", g.traffic(r, tick)), instance(id, "md/v1/usage", g.cpu(r))}
 }
 
 // phase is a named part of a pass that ends at fraction `until`.
@@ -321,23 +321,23 @@ func (s *incident) step(f float64, tick int) (string, []Entry) {
 	case "degrading":
 		out = []Entry{
 			health(id, "degraded"),
-			instance(id, "md/traffic", trafficData(g.rps.next(s.r), drift(1, 8, lf), drift(150, 700, lf))),
-			instance(id, "md/usage", usageData(drift(60, 90, lf)+s.r.Float64(), 100, "CPU %")),
+			instance(id, "md/v1/traffic", trafficData(g.rps.next(s.r), drift(1, 8, lf), drift(150, 700, lf))),
+			instance(id, "md/v1/usage", usageData(drift(60, 90, lf)+s.r.Float64(), 100, "CPU %")),
 			banner(s.roles.Environment, "warning", "Elevated latency on "+id+"."),
 		}
 	case "outage":
 		spike := burst{every: 3, length: 2, height: 60}
 		out = []Entry{
 			health(id, "down"),
-			instance(id, "md/traffic", trafficData(g.rps.next(s.r)*0.7, 40+spike.at(tick, s.r), 1200+s.r.Float64()*600)),
-			instance(id, "md/usage", usageData(math.Min(100, drift(95, 99, lf)+s.r.Float64()), 100, "CPU %")),
+			instance(id, "md/v1/traffic", trafficData(g.rps.next(s.r)*0.7, 40+spike.at(tick, s.r), 1200+s.r.Float64()*600)),
+			instance(id, "md/v1/usage", usageData(math.Min(100, drift(95, 99, lf)+s.r.Float64()), 100, "CPU %")),
 			banner(s.roles.Environment, "error", id+" is failing requests."),
 		}
 	case "recovering":
 		out = []Entry{
 			health(id, "recovering"),
-			instance(id, "md/traffic", trafficData(g.rps.next(s.r), drift(40, 1, lf), drift(900, 150, lf))),
-			instance(id, "md/usage", usageData(drift(97, 55, lf), 100, "CPU %")),
+			instance(id, "md/v1/traffic", trafficData(g.rps.next(s.r), drift(40, 1, lf), drift(900, 150, lf))),
+			instance(id, "md/v1/usage", usageData(drift(97, 55, lf), 100, "CPU %")),
 			banner(s.roles.Environment, "info", id+" is recovering. Monitoring."),
 		}
 	default:
@@ -365,7 +365,7 @@ func (s *cutover) step(f float64, tick int) (string, []Entry) {
 	limit := s.roles.MaxLag
 	og, ng := s.gens[old], s.gens[next]
 	lagUsage := func(lag float64) Entry {
-		return instance(next, "md/usage", usageData(math.Round(lag), limit, "replication lag (s)"))
+		return instance(next, "md/v1/usage", usageData(math.Round(lag), limit, "replication lag (s)"))
 	}
 	i, lf := phaseAt(cutoverPhases, f)
 	var out []Entry
@@ -374,7 +374,7 @@ func (s *cutover) step(f float64, tick int) (string, []Entry) {
 		out = []Entry{
 			banner(env, "info", fmt.Sprintf("Replicating %s to %s.", old, next)),
 			health(old, "healthy"), health(next, "replicating"),
-			instance(old, "md/traffic", og.traffic(s.r, tick)), instance(next, "md/traffic", idleTraffic()),
+			instance(old, "md/v1/traffic", og.traffic(s.r, tick)), instance(next, "md/v1/traffic", idleTraffic()),
 			lagUsage(s.lag.next(s.r)),
 		}
 	case "catching-up":
@@ -382,7 +382,7 @@ func (s *cutover) step(f float64, tick int) (string, []Entry) {
 		out = []Entry{
 			banner(env, "warning", fmt.Sprintf("Catching up: lag %.0fs.", math.Round(lag))),
 			health(old, "healthy"), health(next, "catching up"),
-			instance(old, "md/traffic", og.traffic(s.r, tick)), instance(next, "md/traffic", idleTraffic()),
+			instance(old, "md/v1/traffic", og.traffic(s.r, tick)), instance(next, "md/v1/traffic", idleTraffic()),
 			lagUsage(lag),
 		}
 	case "cutover":
@@ -392,14 +392,14 @@ func (s *cutover) step(f float64, tick int) (string, []Entry) {
 		out = []Entry{
 			banner(env, "warning", "Cutover in progress."),
 			health(old, "draining"), health(next, "cutover"),
-			instance(old, "md/traffic", ot), instance(next, "md/traffic", nt),
+			instance(old, "md/v1/traffic", ot), instance(next, "md/v1/traffic", nt),
 			lagUsage(0),
 		}
 	default:
 		out = []Entry{
 			banner(env, "info", "Cutover complete."),
 			health(old, "idle"), health(next, "healthy"),
-			instance(old, "md/traffic", idleTraffic()), instance(next, "md/traffic", ng.traffic(s.r, tick)),
+			instance(old, "md/v1/traffic", idleTraffic()), instance(next, "md/v1/traffic", ng.traffic(s.r, tick)),
 			lagUsage(0),
 		}
 	}
@@ -458,12 +458,12 @@ func (s *rollout) step(f float64, tick int) (string, []Entry) {
 			pos := progress*float64(n) - float64(ii)
 			switch {
 			case pos < 0:
-				out = append(out, health(id, "vulnerable"), instance(id, "md/traffic", g.traffic(s.r, tick)))
+				out = append(out, health(id, "vulnerable"), instance(id, "md/v1/traffic", g.traffic(s.r, tick)))
 			case pos < 1:
 				out = append(out, health(id, "patching"),
-					instance(id, "md/traffic", trafficData(g.rps.next(s.r)*0.8, 10+burst{every: 2, length: 1, height: 20}.at(tick, s.r), g.p95.next(s.r)*2)))
+					instance(id, "md/v1/traffic", trafficData(g.rps.next(s.r)*0.8, 10+burst{every: 2, length: 1, height: 20}.at(tick, s.r), g.p95.next(s.r)*2)))
 			default:
-				out = append(out, health(id, "patched"), instance(id, "md/traffic", g.traffic(s.r, tick)))
+				out = append(out, health(id, "patched"), instance(id, "md/v1/traffic", g.traffic(s.r, tick)))
 			}
 		}
 	}

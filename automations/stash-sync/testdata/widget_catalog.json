@@ -1,6 +1,6 @@
 [
   {
-    "key": "md/banner",
+    "key": "md/v1/banner",
     "scope": "ENVIRONMENT",
     "format": "JSON",
     "schema": {
@@ -15,7 +15,7 @@
     }
   },
   {
-    "key": "md/links",
+    "key": "md/v1/links",
     "scope": "ENVIRONMENT",
     "format": "JSON",
     "schema": {
@@ -42,7 +42,7 @@
     }
   },
   {
-    "key": "md/health",
+    "key": "md/v1/health",
     "scope": "INSTANCE",
     "format": "TEXT",
     "schema": {
@@ -54,7 +54,7 @@
     }
   },
   {
-    "key": "md/usage",
+    "key": "md/v1/usage",
     "scope": "INSTANCE",
     "format": "JSON",
     "schema": {
@@ -70,7 +70,7 @@
     }
   },
   {
-    "key": "md/traffic",
+    "key": "md/v1/traffic",
     "scope": "INSTANCE",
     "format": "JSON",
     "schema": {
