@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -38,14 +39,22 @@ var Definition = automation.Definition{
 			return nil, err
 		}
 		cfg.GitHub.token = v[cfg.GitHub.TokenEnv]
-		return New(cfg), nil
+		// The Massdriver API only writes the source result, so a deployment without a service account still works.
+		var api *massdriver.Client
+		if os.Getenv("MASSDRIVER_API_KEY") != "" {
+			if api, err = massdriver.FromEnv(); err != nil {
+				return nil, err
+			}
+		}
+		return New(cfg, api), nil
 	},
 }
 
 // Config is the config file of github-deployments.
 type Config struct {
-	Massdriver massdriver.AppConfig `yaml:"massdriver"`
-	GitHub     GitHubConfig         `yaml:"github"`
+	Massdriver massdriver.AppConfig     `yaml:"massdriver"`
+	Results    massdriver.ResultsConfig `yaml:"results"`
+	GitHub     GitHubConfig             `yaml:"github"`
 }
 
 // GitHubConfig is the GitHub connection and the attribute keys that name the repo and the ref.
@@ -88,8 +97,9 @@ func (c *Config) Validate() error {
 
 // GitHubDeployments holds the GitHub client and the deployments it created.
 type GitHubDeployments struct {
-	cfg Config
-	gh  *github
+	cfg     Config
+	gh      *github
+	results massdriver.Results
 
 	// One event at a time, so a started and a completed event that arrive together create one GitHub deployment.
 	mu          sync.Mutex
@@ -97,11 +107,12 @@ type GitHubDeployments struct {
 	branches    map[string]string
 }
 
-// New returns the automation.
-func New(cfg Config) *GitHubDeployments {
+// New returns the automation. A nil api writes no source results.
+func New(cfg Config, api *massdriver.Client) *GitHubDeployments {
 	return &GitHubDeployments{
 		cfg:         cfg,
 		gh:          &github{url: cfg.GitHub.APIURL, token: cfg.GitHub.token},
+		results:     massdriver.NewResults(api, cfg.Results),
 		deployments: map[string]int64{},
 		branches:    map[string]string{},
 	}
@@ -263,13 +274,14 @@ func (g *GitHubDeployments) githubDeployment(ctx context.Context, ev automation.
 	}
 
 	environment := g.environment(ev)
-	id, err := g.gh.findDeployment(ctx, repo, environment, dep.ID)
+	found, err := g.gh.findDeployment(ctx, repo, environment, dep.ID)
 	if err != nil {
 		return 0, err
 	}
-	if id != 0 {
-		g.deployments[key] = id
-		return id, nil
+	if found.ID != 0 {
+		g.deployments[key] = found.ID
+		g.writeSource(ctx, dep.ID, repo, found)
+		return found.ID, nil
 	}
 
 	ref := ev.Attribute(g.cfg.GitHub.RefAttribute)
@@ -279,9 +291,7 @@ func (g *GitHubDeployments) githubDeployment(ctx context.Context, ev automation.
 		}
 	}
 
-	var out struct {
-		ID int64 `json:"id"`
-	}
+	var out githubDeployment
 	err = g.gh.do(ctx, http.MethodPost, "/repos/"+repo+"/deployments", map[string]any{
 		"ref":         ref,
 		"task":        deploymentTask,
@@ -301,7 +311,38 @@ func (g *GitHubDeployments) githubDeployment(ctx context.Context, ev automation.
 		return 0, err
 	}
 	g.deployments[key] = out.ID
+	g.writeSource(ctx, dep.ID, repo, out)
 	return out.ID, nil
+}
+
+type githubDeployment struct {
+	ID      int64           `json:"id"`
+	SHA     string          `json:"sha"`
+	Ref     string          `json:"ref"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+// writeSource records the commit that GitHub resolved the deployment's ref to.
+func (g *GitHubDeployments) writeSource(ctx context.Context, deploymentID, repo string, d githubDeployment) {
+	src := massdriver.Source{Repo: repo, Ref: d.Ref, Commit: d.SHA}
+	if d.SHA != "" {
+		src.URL = g.commitURL(repo, d.SHA)
+	}
+	g.results.Write(ctx, "deployment", deploymentID, "source", "Source", src)
+}
+
+// commitURL is the commit's page on github.com or on GitHub Enterprise Server, whose API is under /api/v3.
+func (g *GitHubDeployments) commitURL(repo, sha string) string {
+	base := g.cfg.GitHub.APIURL
+	switch {
+	case base == "https://api.github.com":
+		base = "https://github.com"
+	case strings.HasSuffix(base, "/api/v3"):
+		base = strings.TrimSuffix(base, "/api/v3")
+	default:
+		return ""
+	}
+	return base + "/" + repo + "/commit/" + sha
 }
 
 func (g *GitHubDeployments) defaultBranch(ctx context.Context, repo string) (string, error) {
@@ -323,22 +364,19 @@ type github struct {
 	token string
 }
 
-func (c *github) findDeployment(ctx context.Context, repo, environment, massdriverID string) (int64, error) {
+func (c *github) findDeployment(ctx context.Context, repo, environment, massdriverID string) (githubDeployment, error) {
 	q := url.Values{"task": {deploymentTask}, "environment": {environment}, "per_page": {"100"}}
-	var out []struct {
-		ID      int64           `json:"id"`
-		Payload json.RawMessage `json:"payload"`
-	}
+	var out []githubDeployment
 	if err := c.do(ctx, http.MethodGet, "/repos/"+repo+"/deployments?"+q.Encode(), nil, &out); err != nil {
-		return 0, err
+		return githubDeployment{}, err
 	}
 	for _, d := range out {
 		var p deploymentPayload
 		if json.Unmarshal(d.Payload, &p) == nil && p.MassdriverDeploymentID == massdriverID {
-			return d.ID, nil
+			return d, nil
 		}
 	}
-	return 0, nil
+	return githubDeployment{}, nil
 }
 
 func (c *github) latestState(ctx context.Context, repo string, id int64) (string, error) {

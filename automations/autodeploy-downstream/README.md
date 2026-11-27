@@ -36,6 +36,7 @@ The config file is YAML. [`config.example.yaml`](config.example.yaml) has every 
 | Key | Default | |
 |---|---|---|
 | `rules` | one rule, `autodeploy=true` | The [rules](#rules) that select downstream instances. |
+| `results.prefix` | `md/v1` | The start of the [result](#results-in-the-stash) keys. |
 
 Without a config file, or with no rules, one rule named `autodeploy=true` deploys the downstream instances whose attribute `autodeploy` is `true`.
 
@@ -95,6 +96,18 @@ curl https://api.massdriver.cloud/api/v2 \
 ```
 
 Custom attribute keys allow only letters, digits, and underscores.
+
+## Results in the stash
+
+On each downstream deployment it creates or proposes, the automation writes:
+
+| Key | Stash | Label | Value |
+|---|---|---|---|
+| `md/v1/step/autodeploy` | The downstream deployment | Autodeploy | `{"tool": "autodeploy-downstream", "status": "succeeded", "finished_at": "...", "message": "Deployed by rule autodeploy=true after upstream api-prod-db completed deployment <id>"}` |
+
+The keys become widgets once the server's widget catalog has them. Until then, the server rejects an `md/` key that is not in the catalog. Set `results.prefix` to a prefix outside `md/`, such as `results/v1`, to see each result as a metadata row with its label meanwhile. A failed write is logged at `debug` and never fails the event, so Massdriver does not send it again.
+
+The service account needs `stash:write` on the instances.
 
 ## Event destination
 

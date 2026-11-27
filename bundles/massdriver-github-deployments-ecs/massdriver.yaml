@@ -133,6 +133,20 @@ params:
               pattern: ^https?://[^\s]+$
               message:
                 pattern: Must be a URL.
+        results:
+          type: object
+          title: Stash results
+          properties:
+            prefix:
+              type: string
+              title: Key prefix
+              description: The start of the stash keys of the results the automation writes. The server accepts `md/v1`
+                keys once its widget catalog has them. Until then, a prefix outside `md/`, such as `results/v1`, shows
+                each result as a labeled row.
+              default: md/v1
+              pattern: ^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$
+              message:
+                pattern: Must be letters, digits, and `_ . -`, in parts separated by `/`, such as results/v1.
     otel:
       type: object
       title: Tracing

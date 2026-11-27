@@ -100,12 +100,13 @@ type Options struct {
 
 // Drift runs the configured checks and tracks their plans.
 type Drift struct {
-	api   *massdriver.Client
-	slack *slack.Client
-	cfg   *Config
-	opts  Options
-	now   func() time.Time
-	run   func(func())
+	api     *massdriver.Client
+	results massdriver.Results
+	slack   *slack.Client
+	cfg     *Config
+	opts    Options
+	now     func() time.Time
+	run     func(func())
 
 	// handleMu serializes plan results, so two deliveries of one event cannot both resolve.
 	handleMu sync.Mutex
@@ -121,7 +122,10 @@ func New(api *massdriver.Client, sl *slack.Client, cfg *Config, opts Options) (*
 	if err != nil {
 		return nil, fmt.Errorf("state: %w", err)
 	}
-	return &Drift{api: api, slack: sl, cfg: cfg, opts: opts, now: time.Now, run: func(f func()) { go f() }, st: st}, nil
+	return &Drift{
+		api: api, results: massdriver.NewResults(api, cfg.Results), slack: sl, cfg: cfg, opts: opts,
+		now: time.Now, run: func(f func()) { go f() }, st: st,
+	}, nil
 }
 
 // Schedule adds every check that has a schedule to c.
@@ -459,6 +463,7 @@ func (d *Drift) Handle(ctx context.Context, ev automation.Event) error {
 		}
 		res := Analyze(logs, p.Steps, ch)
 		outcome = res.Status
+		d.writeResults(ctx, p.Instance, dep.ID, res)
 		switch res.Status {
 		case Drifted:
 			log.Info("plan drifted", "steps", len(res.Steps), "resources", len(res.Resources))
@@ -513,6 +518,33 @@ func (d *Drift) Handle(ctx context.Context, ev automation.Event) error {
 	bg := context.WithoutCancel(ctx)
 	d.run(func() { d.fill(bg, ch) })
 	return nil
+}
+
+var driftStatus = map[string]string{Clean: "none", Drifted: "detected", Unknown: "unknown"}
+
+func (d *Drift) writeResults(ctx context.Context, instance, planID string, res Result) {
+	changes := massdriver.Changes{Tool: automationName}
+	resources := 0
+	for _, s := range res.Steps {
+		for _, c := range s.Counts {
+			resources += c.N
+			switch c.Verb {
+			case "add":
+				changes.Add += c.N
+			case "change":
+				changes.Change += c.N
+			case "destroy":
+				changes.Destroy += c.N
+			}
+		}
+	}
+	// Some steps of an unknown plan have no result, so its counts would undercount.
+	if res.Status != Unknown {
+		d.results.Write(ctx, "deployment", planID, "changes/"+automationName, "Changes", changes)
+	}
+	d.results.Write(ctx, "instance", instance, "drift", "Drift", massdriver.Drift{
+		Status: driftStatus[res.Status], Resources: resources, CheckedAt: massdriver.Timestamp(d.now()),
+	})
 }
 
 func (d *Drift) finishPlan(p *plan, planID, outcome string) {

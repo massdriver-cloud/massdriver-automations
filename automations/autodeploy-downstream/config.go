@@ -5,6 +5,8 @@ import (
 	"slices"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
 )
 
 // Actions of a rule.
@@ -50,7 +52,8 @@ func (v *Values) UnmarshalYAML(n *yaml.Node) error {
 
 // Config is the config file of autodeploy-downstream.
 type Config struct {
-	Rules []Rule `yaml:"rules"`
+	Rules   []Rule                   `yaml:"rules"`
+	Results massdriver.ResultsConfig `yaml:"results"`
 }
 
 // DefaultRule deploys the instances whose attribute autodeploy is "true". It applies when the config has no rules.

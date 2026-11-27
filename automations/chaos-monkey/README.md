@@ -70,6 +70,7 @@ stops the automation at start.
 | `signature` | ten built-in sign-offs | Ends each deployment message and its Slack posts. A string, or a list to pick from at random for each deployment. `null` or `""` turns it off. |
 | `slack.channel` | | The channel for posts, with `SLACK_BOT_TOKEN`. Without a channel or a webhook, posts go to the logs only. |
 | `massdriver.app_url` | `https://app.massdriver.cloud` | The Massdriver UI, for the links in posts. |
+| `results.prefix` | `md/v1` | The start of the [result](#results-in-the-stash) keys. |
 
 ### Run now
 
@@ -88,6 +89,18 @@ The service account needs these permissions on the matching instances:
 - `project:view` on their projects, to list and read them
 - `instance:propose`, for `propose` mode
 - `instance:deploy`, for `plan` and `deploy` modes
+
+## Results in the stash
+
+On each deployment it creates or proposes, the automation writes:
+
+| Key | Stash | Label | Value |
+|---|---|---|---|
+| `md/v1/step/chaos-monkey` | The deployment | Chaos monkey | `{"tool": "chaos-monkey", "status": "succeeded", "finished_at": "...", "message": "<strategy>: <what it changed>"}` |
+
+The keys become widgets once the server's widget catalog has them. Until then, the server rejects an `md/` key that is not in the catalog. Set `results.prefix` to a prefix outside `md/`, such as `results/v1`, to see each result as a metadata row with its label meanwhile. A failed write is logged at `debug` and never fails the event, so Massdriver does not send it again.
+
+The service account needs `stash:write` on the instances.
 
 ## Event destination
 

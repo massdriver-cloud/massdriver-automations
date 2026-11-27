@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -113,6 +114,9 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.created++
 		data = map[string]any{field: map[string]any{"successful": true, "messages": []any{},
 			"result": map[string]any{"id": fmt.Sprintf("dep-%d", f.created)}}}
+	case "SetStashEntry":
+		data = map[string]any{"alphaSetStashEntry": map[string]any{"successful": true, "messages": []any{},
+			"result": map[string]any{"key": req.Variables["key"]}}}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 }
@@ -141,6 +145,22 @@ func (f *fakeAPI) deployments() []call {
 		if strings.HasSuffix(c.Op, "Deployment") {
 			out = append(out, c)
 		}
+	}
+	return out
+}
+
+// stash lists the stash writes as scope, key, label, and value.
+func (f *fakeAPI) stash() [][4]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out [][4]string
+	for _, c := range f.calls {
+		if c.Op != "SetStashEntry" {
+			continue
+		}
+		scope, _ := json.Marshal(c.Vars["scope"])
+		input := c.Vars["input"].(map[string]any)
+		out = append(out, [4]string{string(scope), c.Vars["key"].(string), input["label"].(string), input["value"].(string)})
 	}
 	return out
 }
@@ -506,5 +526,21 @@ func TestExampleConfigLoads(t *testing.T) {
 	var cfg Config
 	if err := automation.LoadConfigFile("config.example.yaml", &cfg); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestStageResultsGoToTheStash(t *testing.T) {
+	e := setup(t, trainYAML, t.TempDir())
+	e.published(t)
+	e.api.instances["api-dev-db"].deployed = "1.3.0"
+	e.finished(t, "done-1", "deployment.completed", "dep-1")
+
+	want := [][4]string{
+		{`{"deployment":"dep-1"}`, "md/v1/step/upgrade-train", "Upgrade train",
+			`{"tool":"upgrade-train","status":"succeeded","finished_at":"2026-11-27T09:00:00Z","message":"Stage dev of train db: api-db@1.3.0"}`},
+		{`{"instance":"api-dev-db"}`, "md/v1/release", "Release", `{"version":"1.3.0","deployed_at":"2026-11-27T09:00:00Z"}`},
+	}
+	if got := e.api.stash(); !reflect.DeepEqual(got, want) {
+		t.Errorf("stash = %v\nwant    %v", got, want)
 	}
 }

@@ -96,8 +96,22 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		data = payload("createDeployment", "deploy-1")
 	case "ProposeDeployment":
 		data = payload("proposeDeployment", "proposal-1")
+	case "SetStashEntry":
+		data = map[string]any{"alphaSetStashEntry": map[string]any{"successful": true, "messages": []any{}, "result": map[string]any{"key": req.Variables["key"]}}}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
+}
+
+func (f *fakeAPI) stash() []call {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []call
+	for _, c := range f.calls {
+		if c.Op == "SetStashEntry" {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (f *fakeAPI) mutations() []call {
@@ -192,6 +206,20 @@ func TestRunProposesByDefault(t *testing.T) {
 	if !strings.Contains(texts[0], "deployment=proposal-1") {
 		t.Errorf("slack does not link the proposal: %q", texts[0])
 	}
+
+	writes := e.api.stash()
+	if len(writes) != 1 {
+		t.Fatalf("stash writes = %+v, want 1", writes)
+	}
+	scope, _ := json.Marshal(writes[0].Vars["scope"])
+	stashed := writes[0].Vars["input"].(map[string]any)
+	var step map[string]any
+	_ = json.Unmarshal([]byte(stashed["value"].(string)), &step)
+	if string(scope) != `{"deployment":"proposal-1"}` || writes[0].Vars["key"] != "md/v1/step/chaos-monkey" ||
+		stashed["label"] != "Chaos monkey" || step["tool"] != "chaos-monkey" || step["status"] != "succeeded" ||
+		MessagePrefix+step["message"].(string) != in["message"] {
+		t.Errorf("stash write = %v, step = %v", writes[0].Vars, step)
+	}
 }
 
 func TestRunPlansAndDeploys(t *testing.T) {
@@ -255,6 +283,9 @@ func TestRejectedParamsArePosted(t *testing.T) {
 	if len(texts) != 1 || !strings.Contains(texts[0], "with gibberish: garbled ") ||
 		!strings.HasSuffix(texts[0], "Massdriver rejected the params: params: replicas must be at most 9") {
 		t.Errorf("slack = %q", texts)
+	}
+	if writes := e.api.stash(); len(writes) != 0 {
+		t.Errorf("stash writes for a rejected deployment: %+v", writes)
 	}
 }
 

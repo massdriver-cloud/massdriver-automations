@@ -34,9 +34,10 @@ const (
 // Config is the config file of drift.
 type Config struct {
 	// Slack is where alerts go when a check does not name its own channel.
-	Slack      slack.Config         `yaml:"slack"`
-	Massdriver massdriver.AppConfig `yaml:"massdriver"`
-	Checks     []Check              `yaml:"checks"`
+	Slack      slack.Config             `yaml:"slack"`
+	Massdriver massdriver.AppConfig     `yaml:"massdriver"`
+	Results    massdriver.ResultsConfig `yaml:"results"`
+	Checks     []Check                  `yaml:"checks"`
 }
 
 // Check is one set of instances to plan on a schedule.

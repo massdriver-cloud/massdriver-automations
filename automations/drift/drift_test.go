@@ -63,6 +63,8 @@ type fakeAPI struct {
 	instances map[string]fakeInstance
 	logs      map[string]string
 	calls     []call
+	// rejectStash answers every stash write the way the server answers a key its widget catalog does not have.
+	rejectStash bool
 }
 
 func newFakeAPI() *fakeAPI {
@@ -136,6 +138,12 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		data = payload("createDeployment", "deploy-1")
 	case "ProposeDeployment":
 		data = payload("proposeDeployment", "proposal-1")
+	case "SetStashEntry":
+		set := map[string]any{"successful": true, "messages": []any{}, "result": map[string]any{"key": req.Variables["key"]}}
+		if f.rejectStash {
+			set = map[string]any{"successful": false, "messages": []any{map[string]any{"field": "key", "message": "is reserved"}}}
+		}
+		data = map[string]any{"alphaSetStashEntry": set}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 }
@@ -149,6 +157,22 @@ func (f *fakeAPI) mutations(except ...string) []call {
 		if strings.HasSuffix(c.Op, "Deployment") && !contains(except, c.Op) {
 			out = append(out, c)
 		}
+	}
+	return out
+}
+
+// stash lists the stash writes as scope, key, label, and value.
+func (f *fakeAPI) stash() [][4]string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out [][4]string
+	for _, c := range f.calls {
+		if c.Op != "SetStashEntry" {
+			continue
+		}
+		scope, _ := json.Marshal(c.Vars["scope"])
+		input := c.Vars["input"].(map[string]any)
+		out = append(out, [4]string{string(scope), c.Vars["key"].(string), input["label"].(string), input["value"].(string)})
 	}
 	return out
 }
@@ -675,5 +699,67 @@ func TestExampleConfigLoads(t *testing.T) {
 	}
 	if got := cfg.Checks[0].Match["team"]; !reflect.DeepEqual(got, Values{"payments", "billing"}) {
 		t.Errorf("match.team = %v", got)
+	}
+}
+
+func TestPlanResultsGoToTheStash(t *testing.T) {
+	checked := time.Date(2026, 11, 27, 20, 3, 24, 0, time.UTC)
+	tests := []struct {
+		name, logs, prefix string
+		want               [][4]string
+	}{
+		{"drifted", driftLogs, "", [][4]string{
+			{`{"deployment":"plan-dep-db-1"}`, "md/v1/changes/drift", "Changes", `{"tool":"drift","add":0,"change":1,"destroy":1}`},
+			{`{"instance":"api-prod-db"}`, "md/v1/drift", "Drift", `{"status":"detected","resources":2,"checked_at":"2026-11-27T20:03:24Z"}`},
+		}},
+		{"clean", cleanLogs, "results/v1/", [][4]string{
+			{`{"deployment":"plan-dep-db-1"}`, "results/v1/changes/drift", "Changes", `{"tool":"drift","add":0,"change":0,"destroy":0}`},
+			{`{"instance":"api-prod-db"}`, "results/v1/drift", "Drift", `{"status":"none","resources":0,"checked_at":"2026-11-27T20:03:24Z"}`},
+		}},
+		{"unknown", "Initializing the backend...\n", "", [][4]string{
+			{`{"instance":"api-prod-db"}`, "md/v1/drift", "Drift", `{"status":"unknown","resources":0,"checked_at":"2026-11-27T20:03:24Z"}`},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config("detect", "deployed")
+			if tt.prefix != "" {
+				cfg += "results:\n  prefix: " + tt.prefix + "\n"
+			}
+			e := setup(t, cfg, "")
+			e.d.now = func() time.Time { return checked }
+			e.api.listed = []string{"api-prod-db"}
+			e.api.instances["api-prod-db"] = provisioned("dep-db-1")
+			e.api.logs["plan-dep-db-1"] = tt.logs
+			if err := e.d.RunCheck(context.Background(), "nightly"); err != nil {
+				t.Fatal(err)
+			}
+			if code := e.event(t, "evt-1", "deployment.completed", "PLAN", "plan-dep-db-1"); code != http.StatusNoContent {
+				t.Fatalf("status = %d", code)
+			}
+			if got := e.api.stash(); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("stash = %v\nwant    %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRejectedStashWriteDoesNotFailThePlan(t *testing.T) {
+	e := setup(t, config("detect", "deployed"), "")
+	e.api.rejectStash = true
+	e.api.listed = []string{"api-prod-db"}
+	e.api.instances["api-prod-db"] = provisioned("dep-db-1")
+	e.api.logs["plan-dep-db-1"] = driftLogs
+	if err := e.d.RunCheck(context.Background(), "nightly"); err != nil {
+		t.Fatal(err)
+	}
+	if code := e.event(t, "evt-1", "deployment.completed", "PLAN", "plan-dep-db-1"); code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204: a stash write must not make Massdriver retry", code)
+	}
+	if got := len(e.slack.Calls()); got != 1 {
+		t.Errorf("slack posts = %d, want the alert", got)
+	}
+	if got := len(e.api.stash()); got != 2 {
+		t.Errorf("stash writes = %d, want 2", got)
 	}
 }

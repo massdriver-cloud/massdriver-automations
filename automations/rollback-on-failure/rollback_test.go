@@ -76,6 +76,8 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			data = map[string]any{"approveDeployment": ok(req.Variables["id"].(string))}
 		}
+	case "SetStashEntry":
+		data = map[string]any{"alphaSetStashEntry": map[string]any{"successful": true, "messages": []any{}, "result": map[string]any{"key": req.Variables["key"]}}}
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 }
@@ -153,6 +155,27 @@ func ops(api *fakeAPI) []string {
 	return out
 }
 
+// checkStep checks the step/rollback result written on the rollback deployment.
+func checkStep(t *testing.T, c call, deploymentID, message string) {
+	t.Helper()
+	scope, _ := json.Marshal(c.Variables["scope"])
+	input := c.Variables["input"].(map[string]any)
+	if string(scope) != `{"deployment":"`+deploymentID+`"}` || c.Variables["key"] != "md/v1/step/rollback" ||
+		input["format"] != "JSON" || input["label"] != "Rollback" {
+		t.Fatalf("stash write = %v", c.Variables)
+	}
+	var step struct {
+		Tool, Status, Message string
+		FinishedAt            time.Time `json:"finished_at"`
+	}
+	if err := json.Unmarshal([]byte(input["value"].(string)), &step); err != nil {
+		t.Fatal(err)
+	}
+	if step.Tool != "rollback-on-failure" || step.Status != "succeeded" || step.Message != message || step.FinishedAt.IsZero() {
+		t.Errorf("step = %+v", step)
+	}
+}
+
 func TestRollsBackToLastCompletedProvision(t *testing.T) {
 	api := &fakeAPI{lastCompleted: []any{completed("good-dep", "1.2.3", "2026-11-24T09:00:00Z")}}
 	h, slack := setup(t, api)
@@ -161,9 +184,10 @@ func TestRollsBackToLastCompletedProvision(t *testing.T) {
 		t.Fatalf("status = %d", code)
 	}
 
-	if got := strings.Join(ops(api), ","); got != "InstanceDeployments,RollbackDeployment,ApproveDeployment" {
+	if got := strings.Join(ops(api), ","); got != "InstanceDeployments,RollbackDeployment,ApproveDeployment,SetStashEntry" {
 		t.Fatalf("calls = %s", got)
 	}
+	checkStep(t, api.calls[3], "rollback-dep", "Rolls back failed deployment failed-dep to deployment good-dep (v1.2.3)")
 	if v := api.calls[0].Variables; v["org"] != "acme" || v["instance"] != "api-prod-database" {
 		t.Errorf("InstanceDeployments variables = %v", v)
 	}
@@ -197,7 +221,7 @@ func TestApprovesTheExistingProposalOnRetry(t *testing.T) {
 		t.Fatalf("status = %d", code)
 	}
 
-	if got := strings.Join(ops(api), ","); got != "InstanceDeployments,ApproveDeployment" {
+	if got := strings.Join(ops(api), ","); got != "InstanceDeployments,ApproveDeployment,SetStashEntry" {
 		t.Fatalf("calls = %s", got)
 	}
 	if v := api.calls[1].Variables; v["id"] != "earlier-rollback" {
@@ -215,9 +239,10 @@ func TestLeavesTheProposalWhenApprovalIsRefused(t *testing.T) {
 	if code := post(t, h, failedEvent("evt-1", "PROVISION", nil, nil)); code != http.StatusNoContent {
 		t.Fatalf("status = %d", code)
 	}
-	if got := strings.Join(ops(api), ","); got != "InstanceDeployments,RollbackDeployment,ApproveDeployment" {
+	if got := strings.Join(ops(api), ","); got != "InstanceDeployments,RollbackDeployment,ApproveDeployment,SetStashEntry" {
 		t.Fatalf("calls = %s", got)
 	}
+	checkStep(t, api.calls[3], "rollback-dep", "Rolls back failed deployment failed-dep to deployment good-dep (v1.2.3). Waits for approval.")
 	if len(slack.Texts()) != 1 || !strings.Contains(slack.Texts()[0], "waits for approval: approveDeployment: separationOfDuty: is enabled on environment api-prod") {
 		t.Errorf("slack = %q", slack.Texts())
 	}

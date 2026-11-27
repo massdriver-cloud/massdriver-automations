@@ -58,3 +58,9 @@ signature:
 
 # A fixed seed repeats the same sequence of picks after each restart. Unset picks a new seed at start.
 # seed: 42
+
+results:
+  # The start of the stash keys of the results this automation writes. Default: md/v1. The server rejects an md/
+  # key until its widget catalog has it; a prefix outside md/, such as results/v1, shows each result as a labeled
+  # metadata row until then.
+  prefix: md/v1

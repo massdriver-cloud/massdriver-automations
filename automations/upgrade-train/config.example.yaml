@@ -43,3 +43,9 @@ trains:
           md-environment: [prod, prod-eu]
         mode: propose
         soak: 1h
+
+results:
+  # The start of the stash keys of the results this automation writes. Default: md/v1. The server rejects an md/
+  # key until its widget catalog has it; a prefix outside md/, such as results/v1, shows each result as a labeled
+  # metadata row until then.
+  prefix: md/v1

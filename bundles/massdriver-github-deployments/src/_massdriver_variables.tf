@@ -12,6 +12,9 @@ variable "config" {
     massdriver = optional(object({
       app_url = optional(string)
     }))
+    results = optional(object({
+      prefix = optional(string)
+    }))
   })
 }
 variable "image" {

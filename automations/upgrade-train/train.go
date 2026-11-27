@@ -89,12 +89,13 @@ type Options struct {
 
 // Trains runs the configured trains.
 type Trains struct {
-	api   *massdriver.Client
-	slack *slack.Client
-	cfg   *Config
-	opts  Options
-	now   func() time.Time
-	run   func(func())
+	api     *massdriver.Client
+	results massdriver.Results
+	slack   *slack.Client
+	cfg     *Config
+	opts    Options
+	now     func() time.Time
+	run     func(func())
 
 	// mu serializes every change to the runs, including the API calls that decide it.
 	mu sync.Mutex
@@ -107,7 +108,10 @@ func New(api *massdriver.Client, sl *slack.Client, cfg *Config, opts Options) (*
 	if err != nil {
 		return nil, fmt.Errorf("state: %w", err)
 	}
-	return &Trains{api: api, slack: sl, cfg: cfg, opts: opts, now: time.Now, run: func(f func()) { go f() }, st: st}, nil
+	return &Trains{
+		api: api, results: massdriver.NewResults(api, cfg.Results), slack: sl, cfg: cfg, opts: opts,
+		now: time.Now, run: func(f func()) { go f() }, st: st,
+	}, nil
 }
 
 // Handle starts a run when a covered bundle publishes a version, and records the end of each deployment a run
@@ -171,6 +175,13 @@ func (t *Trains) Handle(ctx context.Context, ev automation.Event) error {
 		return nil
 	}
 	log.Info("train deployment completed")
+	deployedAt := ev.Time
+	if deployedAt.IsZero() {
+		deployedAt = t.now()
+	}
+	t.results.Write(ctx, "instance", instance, "release", "Release", massdriver.Release{
+		Version: r.Version, DeployedAt: massdriver.Timestamp(deployedAt),
+	})
 	r.Done = append(r.Done, instance)
 	t.stageDoneLocked(ctx, tr, r)
 	t.saveLocked()
@@ -380,6 +391,12 @@ func (t *Trains) upgradeLocked(ctx context.Context, tr *Train, r *run, id string
 	}
 	r.Deployments[p.Result.ID] = id
 	automation.Logger(ctx).Info("train deployment created", "train", r.Train, "instance", id, "deployment_id", p.Result.ID, "mode", st.Mode)
+	t.results.Write(ctx, "deployment", p.Result.ID, "step/upgrade-train", "Upgrade train", massdriver.Step{
+		Tool:       "upgrade-train",
+		Status:     "succeeded",
+		FinishedAt: massdriver.Timestamp(t.now()),
+		Message:    fmt.Sprintf("Stage %s of train %s: %s@%s", st.Name, r.Train, r.Bundle, r.Version),
+	})
 	return outcomeDeployed, nil
 }
 

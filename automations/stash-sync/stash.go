@@ -10,12 +10,8 @@ import (
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
 )
 
-var (
-	//go:embed queries/set_stash_entry.graphql
-	setStashEntryMutation string
-	//go:embed queries/widget_catalog.graphql
-	widgetCatalogQuery string
-)
+//go:embed queries/widget_catalog.graphql
+var widgetCatalogQuery string
 
 // Entry is one stash entry to write.
 type Entry struct {
@@ -60,28 +56,9 @@ type GraphQLStash struct {
 
 // Set writes one entry with alphaSetStashEntry.
 func (s *GraphQLStash) Set(ctx context.Context, w Write) error {
-	input := map[string]any{"value": w.Value, "format": w.Format}
-	if w.TTL > 0 {
-		input["ttl"] = int(w.TTL / time.Second)
-	}
-	if w.Label != "" {
-		input["label"] = w.Label
-	}
-	var out struct {
-		Set massdriver.Payload[struct {
-			Key string `json:"key"`
-		}] `json:"alphaSetStashEntry"`
-	}
-	err := s.API.Do(ctx, setStashEntryMutation, map[string]any{
-		"org":   s.API.OrganizationID,
-		"scope": map[string]any{w.Scope.Kind: w.Scope.ID},
-		"key":   w.Key,
-		"input": input,
-	}, &out)
-	if err != nil {
-		return err
-	}
-	return out.Set.Err()
+	return s.API.SetStashEntry(ctx, massdriver.StashEntry{
+		Scope: w.Scope.Kind, ID: w.Scope.ID, Key: w.Key, Format: w.Format, Label: w.Label, Value: w.Value, TTL: w.TTL,
+	})
 }
 
 // WidgetCatalog reads alphaWidgetCatalog.
