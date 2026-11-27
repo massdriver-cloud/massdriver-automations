@@ -50,6 +50,7 @@ flowchart LR
 | 💬 [proposal-chatops](automations/proposal-chatops) | `deployment.proposed`, `deployment.approved`, `deployment.rejected` | Approve or reject proposed deployments from Slack. |
 | ⏰ [stale-proposals](automations/stale-proposals) | none (reads the API on a schedule) | Posts a digest of proposed deployments that wait too long for approval, with Slack mentions, and can reject the oldest. |
 | 🐙 [github-deployments](automations/github-deployments) | `deployment.*` | Shows Massdriver deployments as GitHub Deployments. |
+| 🗂️ [params-to-git](automations/params-to-git) | `deployment.completed` | Writes the params of each successful deployment to `params.json` in a GitHub repository, by push or pull request. |
 | 🔃 [pr-sync](automations/pr-sync) | none (reads GitHub on an interval) | Writes the pull requests of a project's GitHub repositories to the project's stash, so a note on the project lists their review, check, and merge state. |
 | 📣 [release-notes](automations/release-notes) | `repo.published` | Posts new bundle versions, and the instances that can upgrade, to Slack and Teams. |
 | 🔍 [bundle-scanner](automations/bundle-scanner) | `repo.published` | Scans each new bundle version with Trivy and Checkov. Uses the `-scanner` image tag. |

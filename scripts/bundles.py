@@ -430,6 +430,77 @@ def automations(k8s):
         ui={"github": {"ui:order": ["repo_attribute", "ref_attribute", "environment_name", "api_url"]}},
     )
 
+    # ---------------------------------------------------------------- params-to-git
+    def target(defaults):
+        d = (lambda v: {"default": v}) if defaults else (lambda v: {})
+        inherit = "" if defaults else " Empty uses the defaults."
+        return {
+            "repo": s("Repository", "The repository, as `owner/name`." + inherit,
+                      pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+                      message={"pattern": "Must be owner/name, such as acme/platform."}),
+            "branch": s("Branch", "The branch that holds the files." + inherit, **d("main")),
+            "root": s("Root", "The directory of the files. `/` is the top of the repository. Below it, each instance "
+                      "writes `<project>/<environment>/<component>/params.json`." + inherit, **d("/")),
+            "strategy": choice("Strategy", [("push", "Commit to the branch"),
+                                            ("pull_request", "Open or update a pull request into the branch")],
+                               **d("push")),
+            "sensitive": choice("Sensitive params", [("mask", "Keep the key with a masked value"),
+                                                     ("omit", "Drop the key")], **d("mask")),
+            "on_decommission": choice("On decommission", [("delete", "Delete params.json"),
+                                                          ("keep", "Keep params.json")], **d("delete")),
+            "skip": b("Skip", "Write nothing for these instances.") if defaults else
+            {"type": "boolean", "title": "Skip", "description": "Write nothing for these instances. Empty uses the "
+                                                                "defaults."},
+            "commit": obj("Commit", {
+                "author": choice("Author", [("actor", "The person or service account that deployed"),
+                                            ("bot", "The account of the GitHub token")], **d("actor")),
+                "email": s("Author email", "The author's email when the author is the person who deployed. "
+                           "Empty uses noreply@massdriver.cloud."),
+                "message": s("Message", "Text with `\\(expr)` jq interpolations over the event. Empty uses "
+                             "`<instance>: <action> deployment <id>`."),
+            }),
+            "pull_request": obj("Pull request", {
+                "branch": s("Branch", "Text with `\\(expr)`. Empty uses `massdriver/params/<project>-<environment>`."),
+                "title": s("Title", "Text with `\\(expr)`. Empty uses `Massdriver params: <project>-<environment>`."),
+                "rolling": {"type": "boolean", "title": "Rolling",
+                            "description": "One open pull request that each deployment adds to. Off opens one for "
+                                          "each deployment.", **d(True)},
+                "reviewers": arr("Reviewers", s("Reviewer", pattern=r"^[A-Za-z0-9-]+(/[A-Za-z0-9_.-]+)?$",
+                                                message={"pattern": "Must be a login, or org/team."}),
+                                 "Asked to review each new pull request. A login, or `org/team` for a team."),
+            }),
+        }
+
+    out["params-to-git"] = dict(
+        title="Params to git",
+        description="Writes the params of each successful deployment to `params.json` in a GitHub repository, by "
+                    "push or pull request. Set the `GITHUB_TOKEN` secret.",
+        config=obj("Params to git", {
+            "defaults": obj("Defaults", target(True), "Where instances go when no mapping matches them. Mappings "
+                            "use these for each field they leave empty.", required=["repo"]),
+            "mappings": arr("Mappings", obj("Mapping", {
+                "name": s("Name", "Unique. The logs name the mapping.", pattern="^[a-z0-9][a-z0-9-]*$",
+                          message={"pattern": "Must be lowercase letters, numbers, and hyphens."}),
+                "match": values_map("Attributes", "Attributes that the deployment event must have, such as "
+                                    "`md-environment` = `prod`."),
+                **target(False),
+            }, required=["name", "match"]), "The first mapping that matches an instance applies.", default=[]),
+            "github": obj("GitHub", {
+                "api_url": s("API URL", "For GitHub Enterprise Server: `https://<host>/api/v3`.",
+                             default="https://api.github.com", **HTTPS),
+            }),
+        }, required=["defaults"]),
+        extra={"attributes": ATTRIBUTES},
+        ui={"ui:order": ["defaults", "mappings", "github"],
+            "defaults": {"ui:order": ["repo", "branch", "root", "strategy", "sensitive", "on_decommission", "skip",
+                                      "commit", "pull_request"],
+                         "pull_request": {"reviewers": TAG}},
+            "mappings": {"ui:options": {"itemTitle": "{{name}}"},
+                         "items": {"ui:order": ["name", "match", "repo", "branch", "root", "strategy", "sensitive",
+                                                "on_decommission", "skip", "commit", "pull_request"],
+                                   "pull_request": {"reviewers": TAG}}}},
+    )
+
     # ---------------------------------------------------------------- pr-sync
     out["pr-sync"] = dict(
         title="Pull requests in the project stash",
@@ -824,6 +895,9 @@ SECRET_DEFS = {
                            "description": "Callers of `POST /freeze/lift` send it as `Authorization: Bearer <token>`."},
     "GITHUB_TOKEN": {"title": "GitHub token",
                      "description": "Needs `Deployments` write and `Metadata` read, or the `repo_deployment` scope."},
+    "PARAMS_MASK_KEY": {"title": "Mask key",
+                        "description": "A random key. With it, each masked param is a fingerprint of the secret, so a "
+                                       "diff shows that it changed."},
     "TEAMS_WEBHOOK_URL": {"title": "Teams webhook URL",
                           "description": "A Microsoft Teams Workflows webhook, for `teams.enabled`."},
     "ROUTER_ENV": {"title": "Route environment",
@@ -835,6 +909,9 @@ SECRET_DEFS = {
 }
 # One secret name can need different access in different automations.
 SECRET_OVERRIDES = {
+    "params-to-git": {"GITHUB_TOKEN": {"title": "GitHub token",
+                                       "description": "Needs `Contents` write, and `Pull requests` write for the "
+                                                      "pull request strategy, or the `repo` scope."}},
     "pr-sync": {"GITHUB_TOKEN": {"title": "GitHub token",
                                  "description": "Needs `Pull requests`, `Commit statuses`, and `Contents` read, or "
                                                 "the `repo` scope for private repositories."}},
@@ -854,6 +931,7 @@ SECRETS = {
     "drift": SLACK + ["DRIFT_RUN_TOKEN"],
     "freeze-guard": SLACK + ["FREEZE_ADMIN_TOKEN"],
     "github-deployments": ["GITHUB_TOKEN"],
+    "params-to-git": ["GITHUB_TOKEN", "PARAMS_MASK_KEY"],
     "pr-sync": ["GITHUB_TOKEN"],
     "proposal-chatops": ["SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET"],
     "release-notes": SLACK + ["TEAMS_WEBHOOK_URL"],

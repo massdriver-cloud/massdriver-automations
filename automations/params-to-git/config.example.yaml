@@ -1,0 +1,77 @@
+# params-to-git config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+
+github:
+  # For GitHub Enterprise Server: https://<host>/api/v3. Default: https://api.github.com.
+  api_url: https://api.github.com
+  # The environment variable that holds the GitHub token. The token needs the Contents: write repository
+  # permission, and Pull requests: write for the pull_request strategy. Default: GITHUB_TOKEN.
+  token_env: GITHUB_TOKEN
+
+# Where every instance goes when no mapping matches it. A mapping replaces only the keys it sets.
+defaults:
+  # Required unless skip is true. The repository, as owner/name.
+  repo: acme/platform
+  # The branch that holds the files. Default: main.
+  branch: main
+  # The directory of the files. / is the top of the repository. The layout below it is fixed:
+  #   <root>/<project>/<environment>/<component>/params.json
+  # Default: /.
+  root: /
+  # push (default): commit to branch.
+  # pull_request: commit to a branch of its own and open or update a pull request into branch.
+  strategy: push
+  # What happens to a param that the bundle's params schema marks with $md.sensitive, format: password, or
+  # writeOnly. mask (default): keep the key with the value [SENSITIVE], or [SENSITIVE:<fingerprint>] with
+  # PARAMS_MASK_KEY set, so a diff shows that the secret changed. omit: drop the key.
+  sensitive: mask
+  # When the instance is decommissioned. delete (default): delete its params.json. keep: leave the file.
+  on_decommission: delete
+  # true sends nothing. Set it here to sync only the instances that a mapping matches. Default: false.
+  skip: false
+  commit:
+    # actor (default): the person or service account that ran the deployment is the author. bot: the token's
+    # account is the author. The token's account is always the committer.
+    author: actor
+    # The author's email with author: actor. Massdriver events do not carry one. Default: noreply@massdriver.cloud.
+    email: noreply@massdriver.cloud
+    # The commit message. Each \(expr) is replaced with the output of a jq expression over the event, as in router.
+    message: '\(.data.attributes["md-instance"]): \(.data.metadata.deployment_action | ascii_downcase) deployment \(.data.entity.id)'
+  pull_request:
+    # The branch of the pull request, as text with \(expr). Default: massdriver/params/<project>-<environment>.
+    branch: 'massdriver/params/\(.data.attributes["md-project"])-\(.data.attributes["md-environment"])'
+    # The title of the pull request, as text with \(expr). Default: Massdriver params: <project>-<environment>.
+    title: 'Massdriver params: \(.data.attributes["md-project"])-\(.data.attributes["md-environment"])'
+    # true (default): one open pull request for the branch, and each deployment adds a commit to it.
+    # false: one pull request for each deployment, on the branch with -<first 8 characters of the deployment ID>.
+    rolling: true
+    # Asked to review each new pull request. A login, or org/team for a team. Default: none.
+    reviewers: []
+
+# Each mapping sends the instances that it matches to its own target. The first mapping that matches applies.
+mappings:
+  - # Required. Unique. The logs name the mapping.
+    name: prod-needs-review
+    # Required. Attributes that the deployment event must have, such as md-project, md-environment, and custom
+    # attributes. A list matches any one of its values.
+    match:
+      md-environment: prod
+    strategy: pull_request
+    pull_request:
+      reviewers: [acme/platform-team, octocat]
+
+  - name: ecomm-own-repo
+    match:
+      md-project: ecomm
+    repo: acme/ecomm
+    root: deploy/massdriver
+
+  - name: data-team
+    match:
+      team: data
+    repo: acme/data-platform
+    sensitive: omit
+
+  - name: skip-previews
+    match:
+      md-environment: [preview, sandbox]
+    skip: true
