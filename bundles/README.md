@@ -7,6 +7,7 @@ One Massdriver bundle for each automation and platform:
 | [audit-archiver](../automations/audit-archiver) | [massdriver-audit-archiver](massdriver-audit-archiver) | [massdriver-audit-archiver-ecs](massdriver-audit-archiver-ecs) |
 | [autodeploy-downstream](../automations/autodeploy-downstream) | [massdriver-autodeploy-downstream](massdriver-autodeploy-downstream) | [massdriver-autodeploy-downstream-ecs](massdriver-autodeploy-downstream-ecs) |
 | [bundle-scanner](../automations/bundle-scanner) | [massdriver-bundle-scanner](massdriver-bundle-scanner) | [massdriver-bundle-scanner-ecs](massdriver-bundle-scanner-ecs) |
+| [chaos-monkey](../automations/chaos-monkey) | [massdriver-chaos-monkey](massdriver-chaos-monkey) | [massdriver-chaos-monkey-ecs](massdriver-chaos-monkey-ecs) |
 | [cost-explorer](../automations/cost-explorer) | [massdriver-cost-explorer](massdriver-cost-explorer) | [massdriver-cost-explorer-ecs](massdriver-cost-explorer-ecs) |
 | [drift](../automations/drift) | [massdriver-drift](massdriver-drift) | [massdriver-drift-ecs](massdriver-drift-ecs) |
 | [freeze-guard](../automations/freeze-guard) | [massdriver-freeze-guard](massdriver-freeze-guard) | [massdriver-freeze-guard-ecs](massdriver-freeze-guard-ecs) |
@@ -36,7 +37,7 @@ Publish the resource types that a bundle uses before you publish the bundle. See
 official, `website` and `aws-ecs-cluster` are examples in this repo, and `aws-iam-role` is the AWS credential type.
 
 An attribute value with commas, such as `api, web`, matches any of its values, where the config file accepts a
-list: the attributes of autodeploy-downstream rules, drift checks, and freeze-guard windows.
+list: the attributes of autodeploy-downstream rules, chaos-monkey's match, drift checks, and freeze-guard windows.
 
 ## Kubernetes
 

@@ -226,6 +226,51 @@ def automations(k8s):
             "scanners": {"ui:widget": "checkboxes", "ui:options": {"inline": True}}},
     )
 
+    # ---------------------------------------------------------------- chaos-monkey
+    out["chaos-monkey"] = dict(
+        title="Chaos monkey",
+        description="Picks matching instances at random on a schedule and sends them deployments of presets, "
+                    "merged presets, mutated params, and gibberish, then posts how each one went. Set the "
+                    "`CHAOS_MONKEY_RUN_TOKEN` secret to start runs with `POST https://<host>/chaos-monkey/run`.",
+        config=obj("Chaos", {
+            "match": values_map("Instance attributes", "Effective attributes of the instances to target. Match "
+                                "only instances you can rebuild."),
+            "mode": choice("Mode", [("propose", "Propose deployments for a person to approve"),
+                                    ("plan", "Plan deployments, which change nothing"),
+                                    ("deploy", "Deploy now")], default="propose"),
+            "schedule": s("Schedule", "Standard cron (minute, hour, day of month, month, day of week), or "
+                          "`@hourly`, `@every 30m`. Empty runs only from `POST /chaos-monkey/run`.",
+                          examples=["@every 30m"]),
+            "timezone": s("Time zone", "The time zone of the schedule.", default="UTC", **TIMEZONE),
+            "status": arr("Instance statuses", {"type": "string", "enum": ["INITIALIZED", "PROVISIONED", "FAILED",
+                                                                           "DECOMMISSIONED"]},
+                          uniqueItems=True, minItems=1, default=["PROVISIONED"]),
+            "instances": i("Instances per run", default=1, minimum=1, maximum=50),
+            "strategies": obj("Strategy weights", {
+                "preset": i("Preset", "One preset over the instance's params.", default=1, minimum=0),
+                "merge": i("Merge", "Two or more presets merged together.", default=1, minimum=0),
+                "mutate": i("Mutate", "Random fields set to new values from their schema.", default=1, minimum=0),
+                "gibberish": i("Gibberish", "Random fields set to nonsense.", default=1, minimum=0),
+            }, "How often each strategy is picked. 0 turns one off."),
+            "mutate": obj("Mutate", {"rate": {"type": "number", "title": "Rate", "description": "The chance that "
+                                              "each field changes.", "default": 0.3, "minimum": 0.01,
+                                              "maximum": 1}}),
+            "gibberish": obj("Gibberish", {"max_fields": i("Most fields", "The most fields that one run garbles.",
+                                                           default=3, minimum=1, maximum=50)}),
+            "sign_off": b("Sign off", "Ends each deployment message and its Slack posts with a signature.",
+                          default=True),
+            "signature": s("Signature", "Empty picks one of ten built-in sign-offs for each deployment.",
+                           examples=["Hey, thanks for monkeyin' around. 🐒🤙🏼🏄‍♂️"]),
+            "slack": slack("The channel for what each run sent and how each deployment ended. Empty writes them "
+                           "to the logs only."),
+            "massdriver": massdriver_ui(),
+        }, required=["match", "mode"]),
+        extra={},
+        ui={"ui:order": ["match", "mode", "schedule", "timezone", "status", "instances", "strategies", "mutate",
+                         "gibberish", "sign_off", "signature", "slack", "massdriver"],
+            "status": {"ui:widget": "checkboxes", "ui:options": {"inline": True}}},
+    )
+
     # ---------------------------------------------------------------- cost-explorer
     extra = {}
     if k8s:
@@ -621,6 +666,9 @@ SECRET_DEFS = {
     "COST_EXPLORER_PASSWORD": {"title": "Dashboard password",
                                "description": "The basic auth password. The user is the `username` in the settings, "
                                               "`massdriver` by default."},
+    "CHAOS_MONKEY_RUN_TOKEN": {"title": "Run token",
+                               "description": "Callers of `POST /chaos-monkey/run` send it as "
+                                              "`Authorization: Bearer <token>`."},
     "DRIFT_RUN_TOKEN": {"title": "Run token",
                         "description": "Callers of `POST /drift/run` send it as `Authorization: Bearer <token>`."},
     "FREEZE_ADMIN_TOKEN": {"title": "Admin token",
@@ -640,6 +688,7 @@ SLACK = ["SLACK_BOT_TOKEN", "SLACK_WEBHOOK_URL"]
 SECRETS = {
     "audit-archiver": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "SPLUNK_HEC_TOKEN", "DD_API_KEY"],
     "bundle-scanner": SLACK,
+    "chaos-monkey": SLACK + ["CHAOS_MONKEY_RUN_TOKEN"],
     "cost-explorer": ["COST_EXPLORER_PASSWORD"],
     "drift": SLACK + ["DRIFT_RUN_TOKEN"],
     "freeze-guard": SLACK + ["FREEZE_ADMIN_TOKEN"],

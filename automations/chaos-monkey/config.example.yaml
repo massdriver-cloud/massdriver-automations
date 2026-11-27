@@ -1,0 +1,60 @@
+# chaos-monkey config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+
+slack:
+  # The channel for what each run did and how each deployment ended, with SLACK_BOT_TOKEN. Empty writes them to the
+  # logs only. Ignored with only SLACK_WEBHOOK_URL.
+  channel: "#chaos"
+
+massdriver:
+  # The Massdriver UI, for the links in messages. Default: https://app.massdriver.cloud.
+  app_url: https://app.massdriver.cloud
+
+# Standard cron: minute, hour, day of month, month, day of week. Also @daily, @hourly, @every 30m.
+# Without a schedule, runs start only from POST /chaos-monkey/run.
+schedule: "@every 30m"
+# An IANA zone for the schedule. Default: UTC.
+timezone: UTC
+
+# propose (default): create a proposal that waits for a person to approve it.
+# plan: create a PLAN deployment, which changes nothing.
+# deploy: create a PROVISION deployment that runs now.
+mode: propose
+
+# Required. Effective attributes of the instances to target. A list matches any of its values.
+match:
+  md-environment: sandbox
+  chaos: ["true", "yes"]
+
+# Instance statuses to target. INITIALIZED, PROVISIONED, FAILED, or DECOMMISSIONED. Default: [PROVISIONED].
+status: [PROVISIONED, FAILED]
+
+# Instances to hit in each run, picked at random. Default: 1.
+instances: 1
+
+# How often each strategy is picked, by weight. 0 turns one off. Default: 1 each.
+#   preset:    apply one preset (the params schema's examples) over the instance's params
+#   merge:     apply two or more presets, in random order, over the instance's params
+#   mutate:    change random fields to new values from their schema
+#   gibberish: put values of the wrong type, out of range, or plain nonsense in random fields
+strategies:
+  preset: 3
+  merge: 2
+  mutate: 3
+  gibberish: 1
+
+mutate:
+  # The chance that mutate changes each field. Default: 0.3.
+  rate: 0.3
+
+gibberish:
+  # The most fields that gibberish garbles. Default: 3.
+  max_fields: 3
+
+# Ends each deployment message and its Slack posts. A list picks one at random for each deployment. null or ""
+# turns it off. Without the key, each deployment gets one of ten built-in sign-offs at random.
+signature:
+  - "Hey, thanks for monkeyin' around. 🐒🤙🏼🏄‍♂️"
+  - "Ook ook. Ship it. 🐵🚀"
+
+# A fixed seed repeats the same sequence of picks after each restart. Unset picks a new seed at start.
+# seed: 42

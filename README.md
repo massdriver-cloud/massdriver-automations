@@ -51,6 +51,7 @@ flowchart LR
 | [github-deployments](automations/github-deployments) | `deployment.*` | Shows Massdriver deployments as GitHub Deployments. |
 | [release-notes](automations/release-notes) | `repo.published` | Posts new bundle versions, and the instances that can upgrade, to Slack and Teams. |
 | [bundle-scanner](automations/bundle-scanner) | `repo.published` | Scans each new bundle version with Trivy and Checkov. Uses the `-scanner` image tag. |
+| [chaos-monkey](automations/chaos-monkey) | `deployment.completed`, `deployment.failed`, `deployment.aborted` | Sends random presets, merged presets, mutated params, and gibberish to the instances that match its attributes, as proposals, plans, or deployments. |
 | [cost-explorer](automations/cost-explorer) | `deployment.completed` | Serves a dashboard of instance costs that you can group, filter, and chart over time. |
 | [sandbox-on-join](automations/sandbox-on-join) | `group_membership.*`, `deployment.completed` | Forks a sandbox environment for each new group member, and removes it when they leave. |
 | [statuspage](automations/statuspage) | `alarm.*`, `alarm_state.created`, `deployment.*`, `instance.*` | Serves a public status page from alarms, instances, and deployments. |
@@ -227,6 +228,7 @@ does not post to Slack. drift and rollback-on-failure reply in the thread of an 
 | Automation | Posts | Channel settings |
 |---|---|---|
 | bundle-scanner | Scan results | `slack.channel` |
+| chaos-monkey | What each run sent, and how each of its deployments ended | `slack.channel` |
 | drift | Drift alerts, the outcome of each resolution in the alert's thread, and run totals | `slack.channel`, `checks[].slack.channel` |
 | freeze-guard | Window starts, ends, and lifts | `slack.channel`, `windows[].slack.channel` |
 | proposal-chatops | Proposals with Approve and Reject buttons | `slack.channel`, `slack.channel_attribute` |
