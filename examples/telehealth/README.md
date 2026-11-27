@@ -12,6 +12,10 @@ reminders), Care (charting), and Billing (claims). Each app has a `dev` and a `p
 | [sandbox-on-join](sandbox-on-join.yaml) | Each person who joins a team gets a sandbox environment, deleted when they leave. |
 | [statuspage](statuspage.yaml) | A status page for dev and one for prod, with the components patients and clinicians use. |
 | [audit-archiver](audit-archiver.yaml) | Every event, as one JSON file, on disk. |
+| [stash-sync](stash-sync.yaml) | A live Postgres migration on the billing-dev canvas: banners, replication lag, health dots, and traffic moving from the old database to the new one. With no cloud access. |
+| [stash-sync-incident](stash-sync-incident.yaml) | The billing-dev ledger slows down, fails, and recovers. |
+| [stash-sync-rollout](stash-sync-rollout.yaml) | A security fix rolls out to billing-dev, then billing-prod. |
+| [stash-sync-steady](stash-sync-steady.yaml) | Healthy traffic and usage on every billing-dev instance. |
 | [router](router.yaml) | Prints deploys, proposals, alarms, and team changes to the terminal, in color. |
 
 The tests load every file here, so they stay valid.

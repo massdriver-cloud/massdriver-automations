@@ -1,0 +1,10 @@
+# billing-dev-ledger slows down, fails, and recovers, while the rest of billing-dev stays healthy.
+mode: simulate
+interval: 5s
+simulate:
+  scenario: incident
+  duration: 3m
+  roles:
+    environment: billing-dev
+    instance: billing-dev-ledger
+    instances: [billing-dev-claims, billing-dev-app]
