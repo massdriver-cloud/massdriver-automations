@@ -40,8 +40,6 @@ var (
 	matchingInstancesQuery string
 	//go:embed queries/instance.graphql
 	instanceQuery string
-	//go:embed queries/plan_logs.graphql
-	planLogsQuery string
 	//go:embed queries/plan_deployment.graphql
 	planDeploymentMutation string
 	//go:embed queries/rollback_deployment.graphql
@@ -618,21 +616,14 @@ func (d *Drift) Prune() {
 	}
 }
 
+// maxPlanLogBytes keeps a runaway plan from filling memory. A plan summary is near the end of each step, so a cut
+// log reads as fewer steps than expected, which is an unknown result and not a false clean.
+const maxPlanLogBytes = 32 << 20
+
 func (d *Drift) planLogs(ctx context.Context, id string) (string, error) {
-	var out struct {
-		Deployment struct {
-			Logs []struct {
-				Message string `json:"message"`
-			} `json:"logs"`
-		} `json:"deployment"`
-	}
-	if err := d.api.Do(ctx, planLogsQuery, map[string]any{"org": d.api.OrganizationID, "id": id}, &out); err != nil {
-		return "", err
-	}
 	var b strings.Builder
-	for _, l := range out.Deployment.Logs {
-		b.WriteString(l.Message)
-		b.WriteString("\n")
+	if _, _, err := d.api.DeploymentLogs(ctx, id, &b, maxPlanLogBytes); err != nil {
+		return "", err
 	}
 	return b.String(), nil
 }

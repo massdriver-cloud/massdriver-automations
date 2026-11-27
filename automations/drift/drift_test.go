@@ -123,7 +123,7 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			inst["latestProvision"] = map[string]any{"id": fi.provision, "version": fi.version}
 		}
 		data = map[string]any{"instance": inst}
-	case "PlanLogs":
+	case "DeploymentLogs":
 		id := req.Variables["id"].(string)
 		data = map[string]any{"deployment": map[string]any{"id": id, "logs": []any{
 			map[string]any{"message": f.logs[id]},

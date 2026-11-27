@@ -97,6 +97,9 @@ type Definition struct {
 	// Events are the event types that the destination selects. Shown by `list`.
 	Events []string
 	New    func() (Automation, error)
+	// Test is optional. It runs the automation's config against local input, such as a saved file, without
+	// Massdriver, for `massdriver-automations test <name>`.
+	Test func(args []string, stdin io.Reader, stdout io.Writer) error
 }
 
 // Handler returns the HTTP handler for a. It is separate from Serve so tests can drive it.

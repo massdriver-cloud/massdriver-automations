@@ -46,9 +46,48 @@ func FromEnv() (*Client, error) {
 //
 // `Map` inputs are JSON-encoded strings: pass them through JSONString.
 func (c *Client) Do(ctx context.Context, query string, vars map[string]any, out any) error {
-	body, err := json.Marshal(map[string]any{"query": query, "variables": vars})
+	resp, err := c.post(ctx, query, vars)
 	if err != nil {
 		return err
+	}
+	defer resp.Body.Close()
+
+	var envelope struct {
+		Data   json.RawMessage `json:"data"`
+		Errors graphQLErrors   `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		return err
+	}
+	if err := envelope.Errors.err(); err != nil {
+		return err
+	}
+	if out == nil {
+		return nil
+	}
+	return json.Unmarshal(envelope.Data, out)
+}
+
+type graphQLErrors []struct {
+	Message string `json:"message"`
+}
+
+func (e graphQLErrors) err() error {
+	if len(e) == 0 {
+		return nil
+	}
+	msgs := make([]string, len(e))
+	for i, m := range e {
+		msgs[i] = m.Message
+	}
+	return errors.New("graphql: " + strings.Join(msgs, "; "))
+}
+
+// post sends one operation and returns the 200 response, for the caller to read and close.
+func (c *Client) post(ctx context.Context, query string, vars map[string]any) (*http.Response, error) {
+	body, err := json.Marshal(map[string]any{"query": query, "variables": vars})
+	if err != nil {
+		return nil, err
 	}
 	opType, opName := operation(query)
 	spanName := "graphql"
@@ -59,7 +98,7 @@ func (c *Client) Do(ctx context.Context, query string, vars map[string]any, out 
 		semconv.GraphQLOperationTypeKey.String(opType), semconv.GraphQLOperationName(opName))
 	req, err := http.NewRequestWithContext(spanCtx, http.MethodPost, c.Endpoint, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("authorization", "Bearer "+c.APIKey)
@@ -68,32 +107,7 @@ func (c *Client) Do(ctx context.Context, query string, vars map[string]any, out 
 	if httpClient == nil {
 		httpClient = defaultHTTP
 	}
-	resp, err := c.send(ctx, httpClient, req, body, opType == "query")
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	var envelope struct {
-		Data   json.RawMessage `json:"data"`
-		Errors []struct {
-			Message string `json:"message"`
-		} `json:"errors"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
-		return err
-	}
-	if len(envelope.Errors) > 0 {
-		msgs := make([]string, len(envelope.Errors))
-		for i, e := range envelope.Errors {
-			msgs[i] = e.Message
-		}
-		return errors.New("graphql: " + strings.Join(msgs, "; "))
-	}
-	if out == nil {
-		return nil
-	}
-	return json.Unmarshal(envelope.Data, out)
+	return c.send(ctx, httpClient, req, body, opType == "query")
 }
 
 // retryDelays are the waits between attempts of a query. A dropped connection (unexpected EOF, reset) or a

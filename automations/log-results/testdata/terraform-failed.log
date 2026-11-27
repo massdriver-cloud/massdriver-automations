@@ -1,0 +1,20 @@
+Initializing the backend...
+Terraform has been successfully initialized!
+
+Terraform will perform the following actions:
+
+  # aws_db_instance.main will be updated in-place
+  ~ resource "aws_db_instance" "main" {
+      ~ instance_class = "db.t4g.medium" -> "db.r6g.large"
+    }
+
+Plan: 0 to add, 1 to change, 0 to destroy.
+Applying Terraform plan...
+aws_db_instance.main: Modifying... [id=api-prod-database]
+[31m╷[0m[0m
+[31m│[0m [0m[1m[31mError: [0m[0m[1mmodifying RDS DB Instance (api-prod-database): InvalidParameterCombination: RDS does not support creating a DB instance with the following combination: DBInstanceClass=db.r6g.large, Engine=postgres, EngineVersion=12.19[0m
+[31m│[0m [0m
+[31m│[0m [0m  with aws_db_instance.main,
+[31m│[0m [0m  on main.tf line 12, in resource "aws_db_instance" "main":
+[31m│[0m [0m  12: resource "aws_db_instance" "main" {
+[31m╵[0m[0m

@@ -1,0 +1,143 @@
+# log-results config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+#
+# Each rule reads the logs of a finished deployment and writes one stash entry on that deployment. A rule whose
+# detect pattern is not in the logs writes nothing, so rules for OpenTofu, Terraform, Helm, and Bicep can share one
+# file. Check rules against a saved log with:
+#
+#   massdriver-automations test log-results -config config.yaml -action PLAN < deploy.log
+
+# Optional. The deployment actions whose logs are read: PROVISION, PLAN, and DECOMMISSION.
+# Default: [PROVISION, PLAN].
+actions: [PROVISION, PLAN]
+
+results:
+  # Optional. The start of every key. Default: md/v1.
+  # md/v1/step/<step>, md/v1/changes/<step>, and md/v1/compliance/<step> show as widgets on the deployment. The
+  # server refuses an md/ key that is not in its widget catalog, or a value that does not match the key's schema.
+  # A prefix outside md/, such as results/v1, writes any key and shows each entry as a row in Deployment metadata.
+  prefix: md/v1
+
+# Optional. Read at most this many MiB of a deployment's logs. Default: 64.
+max_log_mb: 64
+
+# Optional. A rule stops reading after this many matches. Default: 1000.
+max_matches: 1000
+
+rules:
+  # ---------------------------------------------------------------- OpenTofu and Terraform
+
+  - # Required. Unique. The automation's logs name the rule.
+    name: opentofu-step
+    # Optional. Attributes that the deployment's event must have. md-project, md-environment, md-component,
+    # md-instance, and md-repo (the bundle name) are always there. A list matches any one of its values.
+    # Empty matches every deployment.
+    match:
+      md-environment: [staging, prod]
+    # Optional. The deployment actions this rule reads, from the top-level actions. Default: all of them.
+    actions: [PROVISION, PLAN]
+    # Optional. A regular expression that must match a line of the logs, or the rule writes nothing.
+    detect: (OpenTofu|Terraform) has been successfully initialized
+    # Required. Regular expressions (Go RE2 syntax), each matched against every line. Named groups, such as
+    # (?P<add>\d+), are the captures. A capture that is a whole number becomes a JSON number.
+    patterns:
+      - (?P<tool>OpenTofu|Terraform) has been successfully initialized
+      - (?:OpenTofu|Terraform) v(?:ersion:\s*)?(?P<tool_version>\d+\.\d+\.\d+)
+      - (?P<message>(?:Apply|Destroy) complete! Resources:.*|Plan:.*|No changes\.)
+      - 'Error: (?P<error>.+)'
+    # Optional. Which match gives each capture its value.
+    #   last (default): the last match.
+    #   first: the first match.
+    #   sum: whole numbers add up across matches, such as the plans of several steps. Text keeps the last match.
+    mode: last
+    # Required. The key under the prefix: md/v1/step/src. The logs do not say which step wrote a line, so a
+    # bundle with more steps needs a rule for each, matched by md-repo, or a sum over all of them.
+    key: step/src
+    # Optional. The name of the row in Deployment metadata. Default: the rule's name.
+    label: OpenTofu step
+    # Optional. json (default) or text.
+    format: json
+    # Optional. A jq expression over the captures. It can also read $status (succeeded or failed), $action (plan,
+    # apply, or destroy), $matches (how many lines matched), $deployment_id, and $attributes.
+    # Default: the captures as an object for json, or the one capture for text.
+    # The step widget allows only its own fields, and a message of up to 280 characters.
+    value: >-
+      {tool: (.tool | ascii_downcase), tool_version, action: $action, status: $status,
+       message: ((.error // .message) | if . then tostring | .[:280] else . end)}
+      | with_entries(select(.value != null))
+
+  - name: opentofu-changes
+    actions: [PROVISION, PLAN]
+    detect: (OpenTofu|Terraform) has been successfully initialized
+    patterns:
+      - (?P<tool>OpenTofu|Terraform) has been successfully initialized
+      - 'Plan: (?:(?P<imports>\d+) to import, )?(?P<add>\d+) to add, (?P<change>\d+) to change, (?P<destroy>\d+) to destroy'
+      - (?P<no_changes>No changes\.)
+    mode: sum
+    key: changes/src
+    label: OpenTofu changes
+    value: >-
+      {tool: (.tool | ascii_downcase), add: (.add // 0), change: (.change // 0), destroy: (.destroy // 0)}
+
+  # ---------------------------------------------------------------- Checkov
+  # The OpenTofu, Terraform, Helm, and Bicep provisioners all run Checkov, and print the same summary.
+
+  - name: checkov
+    detect: 'Passed checks: \d+'
+    patterns:
+      - 'By (?:Prisma Cloud|bridgecrew\.io) \| version: (?P<tool_version>\d+\.\d+\.\d+)'
+      - 'Passed checks: (?P<passed>\d+), Failed checks: (?P<failed>\d+), Skipped checks: (?P<skipped>\d+)'
+    mode: sum
+    key: compliance/src
+    label: Checkov
+    value: >-
+      {tool: "checkov", tool_version, passed, failed, skipped} | with_entries(select(.value != null))
+
+  # ---------------------------------------------------------------- Helm
+
+  - name: helm-step
+    detect: '^REVISION: \d+'
+    patterns:
+      - '^NAME: (?P<release>\S+)'
+      - '^NAMESPACE: (?P<namespace>\S+)'
+      - '^STATUS: (?P<release_status>\S+)'
+      - '^REVISION: (?P<revision>\d+)'
+      - 'Helm chart: .*\(version (?P<chart_version>[^)\s]+)\)'
+      - '^Error: (?P<error>.+)'
+    key: step/src
+    label: Helm release
+    value: >-
+      {tool: "helm", action: $action, status: $status,
+       message: ((.error // "\(.release) revision \(.revision) \(.release_status) in \(.namespace)"
+                 + (if .chart_version then ", chart \(.chart_version)" else "" end)) | tostring | .[:280])}
+
+  # ---------------------------------------------------------------- Bicep and ARM
+
+  - name: bicep-step
+    detect: 'Deploying stack |"provisioningState"'
+    patterns:
+      - 'Deploying stack (?P<stack>[^\s.]+)'
+      - '"provisioningState": "(?P<provisioning_state>\w+)"'
+      - (?P<message>Stack \S+ (?:deployed successfully|deployment failed)\.)
+      - '(?:ERROR|Error): (?P<error>.+)'
+    key: step/src
+    label: Bicep deployment
+    value: >-
+      {tool: "bicep", action: $action, status: $status,
+       message: (.error // ([.message, (.provisioning_state | if . then "Provisioning state: \(ascii_downcase)." else . end)]
+                 | map(select(. != null)) | join(" ")) | tostring | .[:280])}
+
+  # The Massdriver Bicep provisioner skips what-if. A custom provisioner that runs `az deployment group what-if`
+  # prints this summary.
+  - name: bicep-what-if
+    detect: 'Resource changes:'
+    patterns:
+      - 'Resource changes:.*?(?P<add>\d+) to create'
+      - 'Resource changes:.*?(?P<change>\d+) to modify'
+      - 'Resource changes:.*?(?P<destroy>\d+) to delete'
+      - 'Resource changes:.*?(?P<no_op>\d+) no change'
+      - '(?P<nothing>Resource changes: no change)'
+    mode: sum
+    key: changes/src
+    label: What-if changes
+    value: >-
+      {tool: "bicep", add: (.add // 0), change: (.change // 0), destroy: (.destroy // 0), no_op: (.no_op // 0)}

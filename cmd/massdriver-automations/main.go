@@ -2,6 +2,7 @@
 //
 //	massdriver-automations list
 //	massdriver-automations run <name>
+//	massdriver-automations test <name> [args]
 //
 // AUTOMATION=<name> works in place of `run <name>`, for platforms that set only environment variables.
 package main
@@ -9,6 +10,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -41,8 +43,10 @@ func main() {
 		_ = w.Flush()
 	case len(args) == 2 && args[0] == "run":
 		os.Exit(run(args[1]))
+	case len(args) >= 2 && args[0] == "test":
+		os.Exit(test(args[1], args[2:]))
 	default:
-		fmt.Fprintln(os.Stderr, "usage: massdriver-automations list | run <name>")
+		fmt.Fprintln(os.Stderr, "usage: massdriver-automations list | run <name> | test <name> [args]")
 		os.Exit(2)
 	}
 }
@@ -87,6 +91,27 @@ func run(name string) int {
 		return 1
 	}
 	return 0
+}
+
+func test(name string, args []string) int {
+	for _, d := range automations.All {
+		if d.Name != name {
+			continue
+		}
+		if d.Test == nil {
+			fmt.Fprintf(os.Stderr, "%s has no test mode\n", name)
+			return 2
+		}
+		if err := d.Test(args, os.Stdin, os.Stdout); err != nil {
+			if !errors.Is(err, flag.ErrHelp) {
+				fmt.Fprintln(os.Stderr, err)
+			}
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintf(os.Stderr, "unknown automation %q; run `massdriver-automations list`\n", name)
+	return 2
 }
 
 func serve(ctx context.Context, name string) error {

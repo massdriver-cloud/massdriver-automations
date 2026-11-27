@@ -49,6 +49,7 @@ flowchart LR
 | 🥶 [freeze-guard](automations/freeze-guard) | `group.created`, `group.updated`, `group.deleted` | Adds deny policies for deployment actions to groups during change freeze windows. |
 | 💬 [proposal-chatops](automations/proposal-chatops) | `deployment.proposed`, `deployment.approved`, `deployment.rejected` | Approve or reject proposed deployments from Slack. |
 | ⏰ [stale-proposals](automations/stale-proposals) | none (reads the API on a schedule) | Posts a digest of proposed deployments that wait too long for approval, with Slack mentions, and can reject the oldest. |
+| 🧾 [log-results](automations/log-results) | `deployment.completed`, `deployment.failed` | Reads each finished deployment's logs with your rules, such as plan changes, Helm releases, and Checkov findings, and writes the results to the deployment's stash. |
 | 🐙 [github-deployments](automations/github-deployments) | `deployment.*` | Shows Massdriver deployments as GitHub Deployments. |
 | 🗂️ [params-to-git](automations/params-to-git) | `deployment.completed` | Writes the params of each successful deployment to `params.json` in a GitHub repository, by push or pull request. |
 | 🔃 [pr-sync](automations/pr-sync) | none (reads GitHub on an interval) | Writes the pull requests of a project's GitHub repositories to the project's stash, so a note on the project lists their review, check, and merge state. |
@@ -402,7 +403,8 @@ type Automation interface {
   `slack.Config`.
 - `pkg/massdriver` calls the V2 GraphQL API. Put each operation in a `.graphql` file under `queries/` and load it
   with `//go:embed`.
-- Export a `Definition` and add it to [`automations/registry.go`](automations/registry.go).
+- Export a `Definition` and add it to [`automations/registry.go`](automations/registry.go). Set its `Test` to give
+  the automation a `massdriver-automations test <name>` command that checks a config against local input.
 - Test with `automation.Handler` and `automation.SignRequest`, against `httptest` fakes of the APIs you call.
 
 [`autodeploy-downstream`](automations/autodeploy-downstream) is a short, complete example.

@@ -1,6 +1,5 @@
-query PlanLogs($org: ID!, $id: UUID!) {
+query DeploymentLogs($org: ID!, $id: UUID!) {
   deployment(organizationId: $org, id: $id) {
-    id
     logs { message }
   }
 }

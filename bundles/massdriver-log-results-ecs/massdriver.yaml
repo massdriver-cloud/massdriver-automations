@@ -1,0 +1,169 @@
+name: massdriver-log-results-ecs
+description: Reads the logs of each finished deployment with the rules in its settings, and writes what they find, such
+  as plan changes, Helm releases, and Checkov findings, to the deployment's stash as Deployment metadata. Runs on Amazon
+  ECS with Fargate, with an event destination that sends it only the events it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/massdriver-log-results-ecs
+version: 0.1.0
+steps:
+- path: src
+  provisioner: opentofu:1.10
+params:
+  required:
+  - image
+  - ingress
+  - logs
+  - config
+  - attributes
+  properties:
+    image:
+      type: object
+      title: Image
+      required:
+      - repository
+      - tag
+      properties:
+        repository:
+          type: string
+          title: Repository
+          description: The automations image. bundle-scanner adds `-scanner` to the tag, and router adds `-scripts` when
+            it runs commands.
+          default: ghcr.io/massdriver-cloud/massdriver-automations
+        tag:
+          type: string
+          title: Tag
+          description: The image tag, such as `0.2.0`. Pin a version so that a redeploy runs the same code.
+          default: '0.2'
+          pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
+          message:
+            pattern: Must be a valid image tag.
+    ingress:
+      type: object
+      title: Ingress
+      required:
+      - dns_records
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Where the automation is served. Empty uses `log-results.<domain of the cluster's hosted zone>`.
+            The load balancer's HTTPS listener needs a certificate for it. Massdriver sends events to `https://<host>/hooks/massdriver`.
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          message:
+            pattern: Must be a lowercase DNS name, such as drift.automations.acme.com.
+        dns_records:
+          type: boolean
+          title: Create a DNS record
+          description: Creates a CNAME record to the load balancer when the host is in the cluster's hosted zone.
+          default: true
+    logs:
+      type: object
+      title: Logs
+      required:
+      - retention_days
+      properties:
+        retention_days:
+          type: integer
+          title: Retention (days)
+          description: Days that CloudWatch Logs keeps the logs.
+          default: 90
+          enum:
+          - 1
+          - 3
+          - 5
+          - 7
+          - 14
+          - 30
+          - 60
+          - 90
+          - 120
+          - 150
+          - 180
+          - 365
+          - 400
+          - 545
+          - 731
+          - 1096
+          - 1827
+          - 2192
+          - 2557
+          - 2922
+          - 3288
+          - 3653
+    config:
+      type: string
+      title: Settings (YAML)
+      description: The YAML config of log-results. See the [log-results README](https://github.com/massdriver-cloud/massdriver-automations/tree/main/automations/log-results)
+        for the rules and examples for OpenTofu, Terraform, Helm, and Bicep.
+      default: |
+        rules:
+          - name: opentofu-changes
+            detect: (OpenTofu|Terraform) has been successfully initialized
+            patterns:
+              - 'Plan: (?P<add>\d+) to add, (?P<change>\d+) to change, (?P<destroy>\d+) to destroy'
+              - (?P<no_changes>No changes\.)
+            key: changes/src
+            label: OpenTofu changes
+            value: '{tool: "opentofu", add: (.add // 0), change: (.change // 0), destroy: (.destroy // 0)}'
+    attributes:
+      type: object
+      title: Event attributes
+      description: Attribute values that an event's entity must have, such as `md-environment` = `prod`. Empty sends events
+        of any attributes.
+      default: {}
+      additionalProperties:
+        type: string
+    otel:
+      type: object
+      title: Tracing
+      description: Sends OpenTelemetry traces to an OTLP endpoint. Set the `OTEL_EXPORTER_OTLP_HEADERS` secret when the
+        endpoint needs credentials.
+      properties:
+        endpoint:
+          type: string
+          title: OTLP endpoint
+          description: The OTLP/HTTP base URL of a collector, such as `http://otel-collector.observability:4318`. Empty
+            turns tracing off.
+dependencies:
+  aws_authentication:
+    resource_type: aws-iam-role
+    required: true
+  ecs_cluster:
+    resource_type: aws-ecs-cluster
+    required: true
+  service_account:
+    resource_type: massdriver-service-account
+    required: true
+resources: {}
+app:
+  secrets:
+    OTEL_EXPORTER_OTLP_HEADERS:
+      title: OTLP headers
+      description: Headers for the OTLP endpoint, as `key=value` pairs separated by commas, such as `authorization=Bearer
+        abc123`.
+ui:
+  ui:order:
+  - image
+  - ingress
+  - logs
+  - config
+  - attributes
+  - otel
+  - '*'
+  image:
+    ui:order:
+    - repository
+    - tag
+  ingress:
+    ui:order:
+    - host
+    - dns_records
+  logs:
+    ui:order:
+    - retention_days
+  config:
+    ui:widget: textarea
+    ui:options:
+      rows: 16
+  attributes:
+    ui:options:
+      addButtonText: Add attribute

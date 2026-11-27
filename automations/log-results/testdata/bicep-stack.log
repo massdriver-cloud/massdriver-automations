@@ -1,0 +1,44 @@
+Authenticating to Azure with workload identity (federated token)...
+Authenticated to Azure.
+
+Targeting resource group api-prod-storage
+
+Evaluating Checkov policies...
+By Prisma Cloud | version: 3.2.469
+
+bicep scan results:
+
+Passed checks: 18, Failed checks: 1, Skipped checks: 0
+
+Check: CKV_AZURE_33: "Ensure Storage logging is enabled for Queue service for read, write and delete requests"
+	FAILED for resource: Microsoft.Storage/storageAccounts.storageAccount
+	File: /template.bicep:12-40
+
+Checkov evaluation completed.
+Provisioning resources...
+Checking if resource group api-prod-storage exists...
+Resource group exists! Using existing resource group api-prod-storage
+Deploying stack api-prod-storage-src...
+{
+  "actionOnUnmanage": {
+    "managementGroups": "detach",
+    "resourceGroups": "detach",
+    "resources": "detach"
+  },
+  "deploymentId": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/api-prod-storage/providers/Microsoft.Resources/deployments/api-prod-storage-src-2026-11-27-20-01-02-4b0b5",
+  "description": null,
+  "duration": "PT48.1203716S",
+  "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/api-prod-storage/providers/Microsoft.Resources/deploymentStacks/api-prod-storage-src",
+  "name": "api-prod-storage-src",
+  "provisioningState": "succeeded",
+  "resources": [
+    {
+      "denyStatus": "none",
+      "id": "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/api-prod-storage/providers/Microsoft.Storage/storageAccounts/apiprodstorage",
+      "resourceGroup": "api-prod-storage",
+      "status": "managed"
+    }
+  ]
+}
+Stack api-prod-storage-src deployed successfully.
+
