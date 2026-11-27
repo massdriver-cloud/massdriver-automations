@@ -3,7 +3,7 @@ locals {
 
   task_roles = {
     for name, a in local.enabled : name => a
-    if a.state || a.s3_write != null
+    if a.state || a.s3_write != null || a.cloudwatch_read
   }
 }
 
@@ -108,6 +108,15 @@ data "aws_iam_policy_document" "task" {
       resources = [
         "arn:${data.aws_partition.current.partition}:s3:::${statement.value.bucket}/${statement.value.prefix}/*"
       ]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = each.value.cloudwatch_read ? [1] : []
+    content {
+      # GetMetricData has no resource-level permissions.
+      actions   = ["cloudwatch:GetMetricData", "cloudwatch:DescribeAlarms"]
+      resources = ["*"]
     }
   }
 }

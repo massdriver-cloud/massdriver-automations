@@ -40,6 +40,8 @@ locals {
       large      = false
       # An S3 bucket that the task role writes to: { bucket, prefix, object_lock }.
       s3_write = null
+      # The task role reads CloudWatch metrics and alarms.
+      cloudwatch_read = false
     }, local.automation)
   }
   stateful = { for name, a in local.enabled : name => a if a.state }

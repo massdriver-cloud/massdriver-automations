@@ -18,6 +18,7 @@ One Massdriver bundle for each automation and platform:
 | [router](../automations/router) | [massdriver-router](massdriver-router) | [massdriver-router-ecs](massdriver-router-ecs) |
 | [sandbox-on-join](../automations/sandbox-on-join) | [massdriver-sandbox-on-join](massdriver-sandbox-on-join) | [massdriver-sandbox-on-join-ecs](massdriver-sandbox-on-join-ecs) |
 | [stale-proposals](../automations/stale-proposals) | [massdriver-stale-proposals](massdriver-stale-proposals) | [massdriver-stale-proposals-ecs](massdriver-stale-proposals-ecs) |
+| [stash-sync](../automations/stash-sync) | [massdriver-stash-sync](massdriver-stash-sync) | [massdriver-stash-sync-ecs](massdriver-stash-sync-ecs) |
 | [statuspage](../automations/statuspage) | [massdriver-statuspage](massdriver-statuspage) | [massdriver-statuspage-ecs](massdriver-statuspage-ecs) |
 | [upgrade-train](../automations/upgrade-train) | [massdriver-upgrade-train](massdriver-upgrade-train) | [massdriver-upgrade-train-ecs](massdriver-upgrade-train-ecs) |
 
@@ -52,6 +53,8 @@ The bundle deploys into the namespace of that resource, or `default`. It does no
 - for statuspage with an output directory, a second claim `<instance>-site`, mounted at that directory
 - for router, a ConfigMap with its **Scripts**, mounted as executables in `/scripts`
 
+stash-sync reads CloudWatch with the `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets on Kubernetes.
+
 The cluster needs an ingress controller, a DNS record for the host, and TLS: Massdriver and Slack send requests
 only to `https://` URLs. Set a cert-manager ClusterIssuer, set a TLS secret, or end TLS in front of the ingress
 controller.
@@ -76,6 +79,8 @@ Massdriver identity token of that level. The `aws-ecs-cluster` type is an exampl
 - for cost-explorer, drift, freeze-guard, statuspage, and upgrade-train, an EFS file system and an access point for `STATE_DIR`,
   with a task role that can mount only that access point
 - for audit-archiver with an S3 bucket and no AWS key secrets, a task role that can write to the bucket
+- for stash-sync with CloudWatch rules or presets and no AWS key secrets, a task role that can call
+  `cloudwatch:GetMetricData` and `cloudwatch:DescribeAlarms`
 
 **Ingress > Host** defaults to `<automation>.<domain of the cluster's hosted zone>`. The listener needs a
 certificate for it.

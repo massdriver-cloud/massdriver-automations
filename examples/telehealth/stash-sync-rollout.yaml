@@ -1,0 +1,15 @@
+# A security fix rolls out to billing-dev, then to billing-prod. The demo runs once and stops; the entries expire
+# 15 seconds later.
+mode: simulate
+interval: 5s
+simulate:
+  scenario: rollout
+  duration: 4m
+  loop: false
+  roles:
+    advisory: "Security advisory: php2shell remote code execution. A patch is on the way."
+    environments:
+      - environment: billing-dev
+        instances: [billing-dev-claims, billing-dev-app, billing-dev-ledger]
+      - environment: billing-prod
+        instances: [billing-prod-claims, billing-prod-app, billing-prod-ledger]

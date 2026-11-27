@@ -11,6 +11,7 @@ import (
 	rollbackonfailure "github.com/massdriver-cloud/massdriver-automations/automations/rollback-on-failure"
 	"github.com/massdriver-cloud/massdriver-automations/automations/router"
 	sandboxonjoin "github.com/massdriver-cloud/massdriver-automations/automations/sandbox-on-join"
+	stashsync "github.com/massdriver-cloud/massdriver-automations/automations/stash-sync"
 	"github.com/massdriver-cloud/massdriver-automations/automations/statuspage"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 )
@@ -26,6 +27,10 @@ func TestTelehealthExamplesLoad(t *testing.T) {
 		"rollback-on-failure":   &rollback,
 		"router":                &router.Config{},
 		"sandbox-on-join":       &sandboxonjoin.Config{},
+		"stash-sync":            &stashsync.Config{},
+		"stash-sync-incident":   &stashsync.Config{},
+		"stash-sync-rollout":    &stashsync.Config{},
+		"stash-sync-steady":     &stashsync.Config{},
 	}
 	for name, cfg := range configs {
 		if err := automation.LoadConfigFile(filepath.Join(dir, name+".yaml"), cfg); err != nil {

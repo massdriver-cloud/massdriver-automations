@@ -1,0 +1,7 @@
+# Healthy traffic and usage on every billing-dev instance.
+mode: simulate
+interval: 5s
+simulate:
+  scenario: steady
+  roles:
+    instances: [billing-dev-claims, billing-dev-app, billing-dev-ledger]
