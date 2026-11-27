@@ -12,6 +12,7 @@ One Massdriver bundle for each automation and platform:
 | [drift](../automations/drift) | [massdriver-drift](massdriver-drift) | [massdriver-drift-ecs](massdriver-drift-ecs) |
 | [freeze-guard](../automations/freeze-guard) | [massdriver-freeze-guard](massdriver-freeze-guard) | [massdriver-freeze-guard-ecs](massdriver-freeze-guard-ecs) |
 | [github-deployments](../automations/github-deployments) | [massdriver-github-deployments](massdriver-github-deployments) | [massdriver-github-deployments-ecs](massdriver-github-deployments-ecs) |
+| [params-to-git](../automations/params-to-git) | [massdriver-params-to-git](massdriver-params-to-git) | [massdriver-params-to-git-ecs](massdriver-params-to-git-ecs) |
 | [pr-sync](../automations/pr-sync) | [massdriver-pr-sync](massdriver-pr-sync) | [massdriver-pr-sync-ecs](massdriver-pr-sync-ecs) |
 | [proposal-chatops](../automations/proposal-chatops) | [massdriver-proposal-chatops](massdriver-proposal-chatops) | [massdriver-proposal-chatops-ecs](massdriver-proposal-chatops-ecs) |
 | [release-notes](../automations/release-notes) | [massdriver-release-notes](massdriver-release-notes) | [massdriver-release-notes-ecs](massdriver-release-notes-ecs) |
@@ -41,7 +42,7 @@ Publish the resource types that a bundle uses before you publish the bundle. See
 official, `website` and `aws-ecs-cluster` are examples in this repo, and `aws-iam-role` is the AWS credential type.
 
 An attribute value with commas, such as `api, web`, matches any of its values, where the config file accepts a
-list: the attributes of autodeploy-downstream rules, chaos-monkey's match, drift checks, freeze-guard windows, upgrade-train stages, and stale-proposals' match, exclude, and mentions.
+list: the attributes of autodeploy-downstream rules, chaos-monkey's match, drift checks, freeze-guard windows, upgrade-train stages, stale-proposals' match, exclude, and mentions, and params-to-git mappings.
 
 ## Kubernetes
 

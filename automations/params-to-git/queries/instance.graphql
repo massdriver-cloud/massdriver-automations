@@ -1,0 +1,10 @@
+query Instance($org: ID!, $id: ID!) {
+  instance(organizationId: $org, id: $id) {
+    status
+    latestProvision {
+      id
+      params
+      bundle { paramsSchema }
+    }
+  }
+}
