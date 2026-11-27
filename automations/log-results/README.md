@@ -116,8 +116,9 @@ rules:
       - (?P<tool>OpenTofu|Terraform) has been successfully initialized
       - (?:OpenTofu|Terraform) v(?:ersion:\s*)?(?P<tool_version>\d+\.\d+\.\d+)
       - (?P<message>(?:Apply|Destroy) complete! Resources:.*|Plan:.*|No changes\.)
-      # OpenTofu boxes its errors. The provisioner's own last line, Error: exit status 1, has no box.
-      - '│ Error: (?P<error>.+)'
+      # OpenTofu boxes its errors with U+2502. The provisioner's own last line, Error: exit status 1, has
+      # no box. Checkov fails a Massdriver deployment whose params hold a character outside ASCII, so the escape.
+      - '\x{2502} Error: (?P<error>.+)'
     key: step/src
     label: OpenTofu step
     value: >-
