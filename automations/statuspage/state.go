@@ -220,12 +220,16 @@ func (s *StatusPage) row(key, title, desc, impact string, e EnvConfig, members [
 		if i.Status == "FAILED" {
 			causes = append(causes, cause{partialOutage, i.StatusAt})
 		}
-		imp := impact
+		configured := impact
 		if v := i.Attrs[s.cfg.Attributes.Impact]; impacts[v] {
-			imp = v
+			configured = v
 		}
+		imp := configured
 		if imp == "" {
 			imp = degraded
+		}
+		if c, ok := s.healthCause(i, configured, now); ok {
+			causes = append(causes, c)
 		}
 		ids := make([]string, 0, len(i.Alarms))
 		for id := range i.Alarms {

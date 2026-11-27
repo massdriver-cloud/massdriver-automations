@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -95,7 +96,58 @@ func fakeAlarm(id, name, status string, at time.Time) map[string]any {
 //	api-staging-worker    created after boot, served by instance()
 //
 // quiet reports the 5xx alarm as OK, as it would be after the alarm clears.
-type fakeAPI struct{ quiet bool }
+type fakeAPI struct {
+	quiet bool
+	stash *fakeStash
+}
+
+// fakeStash serves alphaStashEntriesForScopes from entries that a test changes between reads.
+type fakeStash struct {
+	mu      sync.Mutex
+	entries []map[string]any
+	reads   int
+	scopes  []any
+	fail    bool
+}
+
+func (f *fakeStash) set(entries ...map[string]any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.entries = entries
+}
+
+func (f *fakeStash) serve(vars map[string]any) (any, string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reads++
+	f.scopes, _ = vars["scopes"].([]any)
+	if f.fail {
+		return nil, "you do not have stash:view"
+	}
+	wanted := map[string]bool{}
+	for _, sc := range f.scopes {
+		for kind, id := range sc.(map[string]any) {
+			wanted[strings.ToUpper(kind)+"/"+id.(string)] = true
+		}
+	}
+	items := []any{}
+	for _, e := range f.entries {
+		sc := e["scope"].(map[string]any)
+		if wanted[sc["kind"].(string)+"/"+sc["id"].(string)] {
+			items = append(items, e)
+		}
+	}
+	return map[string]any{"alphaStashEntriesForScopes": map[string]any{"cursor": map[string]any{"next": nil}, "items": items}}, ""
+}
+
+func stashEntryJSON(kind, id, key, value string, updated time.Time, expires *time.Time) map[string]any {
+	e := map[string]any{"scope": map[string]any{"kind": kind, "id": id}, "key": key, "value": value,
+		"updatedAt": updated.Format(time.RFC3339), "expiresAt": nil}
+	if expires != nil {
+		e["expiresAt"] = expires.Format(time.RFC3339)
+	}
+	return e
+}
 
 func (f fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -116,6 +168,17 @@ func (f fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var data any
 	switch {
+	case strings.Contains(req.Query, "StatusPageStashEntries"):
+		if f.stash == nil {
+			http.Error(w, "unexpected stash read", http.StatusBadRequest)
+			return
+		}
+		d, gqlErr := f.stash.serve(req.Variables)
+		if gqlErr != "" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"errors": []any{map[string]any{"message": gqlErr}}})
+			return
+		}
+		data = d
 	case strings.Contains(req.Query, "StatusPageInstanceAlarms"):
 		items := alarms[id]
 		if items == nil {
@@ -153,11 +216,16 @@ type harness struct {
 
 func newHarness(t *testing.T, stateDir, outputDir string, quiet bool) *harness {
 	t.Helper()
-	api := httptest.NewServer(fakeAPI{quiet: quiet})
+	return newHarnessWith(t, testConfig, fakeAPI{quiet: quiet}, stateDir, outputDir)
+}
+
+func newHarnessWith(t *testing.T, config string, fake fakeAPI, stateDir, outputDir string) *harness {
+	t.Helper()
+	api := httptest.NewServer(fake)
 	t.Cleanup(api.Close)
 
 	path := filepath.Join(t.TempDir(), "statuspage.yaml")
-	if err := os.WriteFile(path, []byte(testConfig), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := LoadConfig(path)

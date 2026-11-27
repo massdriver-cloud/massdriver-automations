@@ -1,6 +1,6 @@
 # massdriver-statuspage
 
-Runs [statuspage](../../automations/statuspage) on a Kubernetes cluster. Serves a public status page from the alarms, instances, and deployments of the environments on its pages.
+Runs [statuspage](../../automations/statuspage) on a Kubernetes cluster. Serves a public status page from the alarms, instances, deployments, and stash health and banners of the environments on its pages.
 
 The bundle runs one replica of `ghcr.io/massdriver-cloud/massdriver-automations:<tag> run statuspage`, serves it at **Ingress > Host**, and creates a Massdriver event destination to `https://<host>/hooks/massdriver` with only the events the automation uses. **Settings** has the keys of the automation's config file.
 

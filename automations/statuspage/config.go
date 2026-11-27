@@ -24,6 +24,7 @@ type Config struct {
 	Announcements        []Announcement `yaml:"announcements"`
 	Maintenance          []Maintenance  `yaml:"maintenance"`
 	Pages                []PageConfig   `yaml:"pages"`
+	Stash                StashConfig    `yaml:"stash"`
 	// OutputDir is a directory that gets the static site after each change.
 	OutputDir string `yaml:"output_dir"`
 
@@ -42,6 +43,15 @@ type SiteConfig struct {
 	ShowAlarmDetails bool   `yaml:"show_alarm_details"`
 	FooterLinks      []Link `yaml:"footer_links"`
 }
+
+// StashConfig turns on the stash keys that change the page. Both are off by default.
+type StashConfig struct {
+	Health   bool   `yaml:"health"`
+	Banners  bool   `yaml:"banners"`
+	MinLevel string `yaml:"min_level"`
+}
+
+func (s StashConfig) enabled() bool { return s.Health || s.Banners }
 
 // Link is a titled URL.
 type Link struct {
@@ -121,6 +131,7 @@ var (
 	reserved     = map[string]bool{"api": true, "hooks": true, "healthz": true, "feed.atom": true, "badge.svg": true}
 	impacts      = map[string]bool{degraded: true, partialOutage: true, majorOutage: true}
 	levels       = map[string]bool{"info": true, "warning": true, "critical": true}
+	bannerLevels = map[string]int{"info": 0, "warning": 1, "error": 2}
 )
 
 // LoadConfig reads and checks the config file at path, and the template file it names.
@@ -234,6 +245,13 @@ func (c *Config) Validate() error {
 				}
 			}
 		}
+	}
+
+	if c.Stash.MinLevel == "" {
+		c.Stash.MinLevel = "info"
+	}
+	if _, ok := bannerLevels[c.Stash.MinLevel]; !ok {
+		fail("stash.min_level must be info, warning, or error")
 	}
 
 	for i := range c.Announcements {

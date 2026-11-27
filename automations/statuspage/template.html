@@ -129,7 +129,7 @@ footer .links { display: flex; gap: 16px; flex-wrap: wrap; }
   {{if .Description}}<p class="description">{{.Description}}</p>{{end}}
 
   {{range .Announcements}}
-  <div class="notice {{.Level}}" role="note">{{.Message}}{{if .URL}} <a href="{{.URL}}">More</a>{{end}}</div>
+  <div class="notice {{.Level}}" role="note">{{if .Environment}}<b>{{.Environment}}:</b> {{end}}{{.Message}}{{if .URL}} <a href="{{.URL}}">More</a>{{end}}</div>
   {{end}}
 
   <section class="banner {{.Status}}" id="status" role="status">

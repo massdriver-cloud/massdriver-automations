@@ -57,7 +57,7 @@ flowchart LR
 | 🚂 [upgrade-train](automations/upgrade-train) | `repo.published`, `deployment.completed`, `deployment.failed`, `deployment.aborted`, `deployment.rejected` | Moves each new bundle version through stages of instances, such as dev, staging, and prod, with a soak time and an alarm check between stages. |
 | 💸 [cost-explorer](automations/cost-explorer) | `deployment.completed` | Serves a dashboard of instance costs that you can group, filter, and chart over time. |
 | 🏖️ [sandbox-on-join](automations/sandbox-on-join) | `group_membership.*`, `deployment.completed` | Forks a sandbox environment for each new group member, and removes it when they leave. |
-| 🚦 [statuspage](automations/statuspage) | `alarm.*`, `alarm_state.created`, `deployment.*`, `instance.*` | Serves a public status page from alarms, instances, and deployments. |
+| 🚦 [statuspage](automations/statuspage) | `alarm.*`, `alarm_state.created`, `deployment.*`, `instance.*`, `stash_entry.*` | Serves a public status page from alarms, instances, deployments, and stash health and banners. |
 | 📈 [stash-sync](automations/stash-sync) | none (reads metrics on an interval) | Copies CloudWatch and Prometheus metrics into stash entries, so widgets show health, usage, traffic, and banners. A simulate mode writes changing values for demos. |
 | 🗄️ [audit-archiver](automations/audit-archiver) | every event | Archives every event, unchanged, in S3, Splunk, Datadog, or on disk. |
 | 🔀 [router](automations/router) | configured per route | Runs HTTP requests, commands, and Massdriver API calls for the events that match configured routes. Commands use the `-scripts` image tag. |

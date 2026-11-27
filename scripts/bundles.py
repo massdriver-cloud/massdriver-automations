@@ -664,8 +664,8 @@ def automations(k8s):
     extra["attributes"] = ATTRIBUTES
     out["statuspage"] = dict(
         title="Status page",
-        description="Serves a public status page from the alarms, instances, and deployments of the environments "
-                    "on its pages.",
+        description="Serves a public status page from the alarms, instances, deployments, and stash health and "
+                    "banners of the environments on its pages.",
         config=obj("Status page", {
             "site": obj("Site", {
                 "title": s("Title", default="Status"),
@@ -707,6 +707,15 @@ def automations(k8s):
                 "environments": arr("Environments", s("Environment", examples=["api-prod"]), minItems=1),
                 "components": arr("Rows", s("Row title"), "Empty covers the whole environment.", default=[]),
             }, required=["title", "starts_at", "ends_at", "environments"]), default=[]),
+            "stash": obj("Stash", {
+                "health": b("Instance health", "Reads `md/v1/health` of each instance. `degraded` shows degraded "
+                            "performance, and `down` shows the row's impact. A firing alarm still wins over "
+                            "`healthy`. The service account needs `stash:view`."),
+                "banners": b("Environment banners", "Shows `md/v1/banner` of each environment as a notice. The "
+                             "service account needs `stash:view`."),
+                "min_level": choice("Lowest banner level", [("info", "Info"), ("warning", "Warning"),
+                                                            ("error", "Error")], default="info"),
+            }),
             "attributes": obj("Instance attributes", {
                 "title": s("Title attribute", "Names the row of an instance in an environment without rows.",
                            default="status_title"),
@@ -719,7 +728,7 @@ def automations(k8s):
         }, required=["site", "pages"]),
         extra=extra,
         ui={"ui:order": ["site", "pages", "history_days", "min_duration", "deploys_as_maintenance",
-                         "announcements", "maintenance", "attributes", "output_dir"],
+                         "announcements", "maintenance", "stash", "attributes", "output_dir"],
             "site": {"ui:order": ["title", "base_url", "logo", "accent_color", "timezone", "show_alarm_details",
                                   "footer_links"],
                      "accent_color": {"ui:widget": "color"},
