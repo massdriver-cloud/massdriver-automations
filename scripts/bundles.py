@@ -430,6 +430,40 @@ def automations(k8s):
         ui={"github": {"ui:order": ["repo_attribute", "ref_attribute", "environment_name", "api_url"]}},
     )
 
+    # ---------------------------------------------------------------- pr-sync
+    out["pr-sync"] = dict(
+        title="Pull requests in the project stash",
+        description="Writes the pull requests of a project's GitHub repositories to a JSON entry in the project's "
+                    "stash on an interval, so a note on the project lists their review, check, and merge state. Set "
+                    "the `GITHUB_TOKEN` secret.",
+        config=obj("Pull requests", {
+            "projects": arr("Projects", obj("Project", {
+                "project": {"type": "string", "title": "Project", "description": "The project whose stash gets the "
+                            "entry.", "$md.list": {"resource": "project"}},
+                "repos": arr("Repositories", s("Repository", pattern=r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+                                               message={"pattern": "Must be owner/name, such as acme/api."}),
+                             "GitHub repositories, as `owner/name`.", minItems=1),
+            }, required=["project", "repos"]), minItems=1),
+            "interval": s("Interval", "How often to read GitHub. At least 30s.", default="2m", **DURATION),
+            "merged_window": s("Merged window", "How long a merged pull request stays in the list. `0s` lists only "
+                               "open pull requests.", default="24h", **DURATION),
+            "max_prs": i("Most pull requests", "The most pull requests in one project's entry.", default=20,
+                         minimum=1, maximum=50),
+            "key": s("Stash key", "The key in each project's stash.", default="github/prs",
+                     pattern=r"^[A-Za-z0-9_./-]{1,255}$",
+                     message={"pattern": "Must be letters, digits, and the characters _ . / -."}),
+            "label": s("Label", "The entry's name in the Massdriver UI.", default="Pull requests"),
+            "github": obj("GitHub", {
+                "graphql_url": s("GraphQL URL", "For GitHub Enterprise Server: `https://<host>/api/graphql`.",
+                                 default="https://api.github.com/graphql", **HTTPS),
+            }),
+        }, required=["projects"]),
+        extra={},
+        ui={"ui:order": ["projects", "interval", "merged_window", "max_prs", "key", "label", "github"],
+            "projects": {"ui:options": {"itemTitle": "{{project}}"},
+                         "items": {"ui:order": ["project", "repos"], "repos": TAG}}},
+    )
+
     # ---------------------------------------------------------------- proposal-chatops
     out["proposal-chatops"] = dict(
         title="Slack approvals",
@@ -799,6 +833,18 @@ SECRET_DEFS = {
                                    "description": "Headers for the OTLP endpoint, as `key=value` pairs separated by "
                                                   "commas, such as `authorization=Bearer abc123`."},
 }
+# One secret name can need different access in different automations.
+SECRET_OVERRIDES = {
+    "pr-sync": {"GITHUB_TOKEN": {"title": "GitHub token",
+                                 "description": "Needs `Pull requests`, `Commit statuses`, and `Contents` read, or "
+                                                "the `repo` scope for private repositories."}},
+}
+
+
+def secret_def(name, k):
+    return SECRET_OVERRIDES.get(name, {}).get(k, SECRET_DEFS[k])
+
+
 SLACK = ["SLACK_BOT_TOKEN", "SLACK_WEBHOOK_URL"]
 SECRETS = {
     "audit-archiver": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "SPLUNK_HEC_TOKEN", "DD_API_KEY"],
@@ -808,6 +854,7 @@ SECRETS = {
     "drift": SLACK + ["DRIFT_RUN_TOKEN"],
     "freeze-guard": SLACK + ["FREEZE_ADMIN_TOKEN"],
     "github-deployments": ["GITHUB_TOKEN"],
+    "pr-sync": ["GITHUB_TOKEN"],
     "proposal-chatops": ["SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET"],
     "release-notes": SLACK + ["TEAMS_WEBHOOK_URL"],
     "rollback-on-failure": SLACK,
@@ -893,7 +940,7 @@ def manifest(name, a, k8s):
              "ecs_cluster": {"resource_type": "aws-ecs-cluster", "required": True}})
     deps["service_account"] = {"resource_type": "massdriver-service-account", "required": True}
 
-    secrets = {k: SECRET_DEFS[k] for k in SECRETS.get(name, []) + ["OTEL_EXPORTER_OTLP_HEADERS"]}
+    secrets = {k: secret_def(name, k) for k in SECRETS.get(name, []) + ["OTEL_EXPORTER_OTLP_HEADERS"]}
     m = {
         "name": bname,
         "description": f"{a['description']} Runs on {platform}, with an event destination that sends it only the "
@@ -934,7 +981,8 @@ def readme(name, a, k8s):
     secrets = SECRETS.get(name, [])
     if secrets:
         lines += ["", "## Secrets", "", "| Secret | |", "|---|---|"]
-        lines += [f"| `{k}` | {SECRET_DEFS[k].get('description', SECRET_DEFS[k]['title'] + '.')} |" for k in secrets]
+        defs = {k: secret_def(name, k) for k in secrets}
+        lines += [f"| `{k}` | {d.get('description', d['title'] + '.')} |" for k, d in defs.items()]
     return "\n".join(lines) + "\n"
 
 

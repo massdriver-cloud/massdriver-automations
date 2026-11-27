@@ -1,0 +1,40 @@
+query PullRequests($owner: String!, $name: String!, $first: Int!) {
+  repository(owner: $owner, name: $name) {
+    open: pullRequests(states: OPEN, first: $first, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      nodes {
+        ...pr
+      }
+    }
+    merged: pullRequests(states: MERGED, first: $first, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      nodes {
+        ...pr
+      }
+    }
+  }
+}
+
+fragment pr on PullRequest {
+  number
+  title
+  url
+  isDraft
+  updatedAt
+  mergedAt
+  reviewDecision
+  isInMergeQueue
+  author {
+    login
+  }
+  autoMergeRequest {
+    enabledAt
+  }
+  commits(last: 1) {
+    nodes {
+      commit {
+        statusCheckRollup {
+          state
+        }
+      }
+    }
+  }
+}
