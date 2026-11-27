@@ -1,5 +1,5 @@
-// Package statuspage serves a public status site built from the alarms, instances, and deployments of
-// Massdriver environments.
+// Package statuspage serves a public status site built from the alarms, instances, deployments, and stash
+// entries of Massdriver environments.
 package statuspage
 
 import (
@@ -51,12 +51,14 @@ var events = []string{
 	"instance.deleted",
 	"instance.orphaned",
 	"instance.moved",
+	"stash_entry.set",
+	"stash_entry.deleted",
 }
 
 // Definition registers the automation.
 var Definition = automation.Definition{
 	Name:        "statuspage",
-	Description: "Serves a public status page from alarms, instances, and deployments.",
+	Description: "Serves a public status page from alarms, instances, deployments, and stash health and banners.",
 	Events:      events,
 	New: func() (automation.Automation, error) {
 		cfg, err := LoadConfig(automation.ConfigPath())
@@ -77,8 +79,12 @@ var Definition = automation.Definition{
 			return nil, err
 		}
 		go func() {
-			// Time alone changes the page: flap suppression ends, maintenance windows open and close, days roll over.
+			// Time alone changes the page: flap suppression ends, maintenance windows open and close, days roll
+			// over, stash entries expire.
 			for range time.Tick(30 * time.Second) {
+				ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+				s.refreshStash(ctx)
+				cancel()
 				s.render()
 			}
 		}()
@@ -99,6 +105,8 @@ type StatusPage struct {
 	mu        sync.Mutex
 	envs      map[string]bool
 	instances map[string]*instance
+	health    map[string]*stashEntry
+	banners   map[string]*stashEntry
 	hist      history
 	updatedAt time.Time
 	files     map[string]file
@@ -137,6 +145,8 @@ func New(api *massdriver.Client, cfg *Config, stateDir, outputDir string) (*Stat
 		run:       func(f func()) { go f() },
 		envs:      envs,
 		instances: map[string]*instance{},
+		health:    map[string]*stashEntry{},
+		banners:   map[string]*stashEntry{},
 		hist:      h,
 		files:     map[string]file{},
 	}, nil
@@ -202,6 +212,7 @@ func (s *StatusPage) Bootstrap(ctx context.Context) error {
 			s.mu.Unlock()
 		}
 	}
+	s.refreshStash(ctx)
 	s.render()
 	return nil
 }
@@ -320,6 +331,13 @@ type entity struct {
 	Message            string    `json:"message"`
 	OccurredAt         time.Time `json:"occurred_at"`
 	PackageAlarmID     string    `json:"package_alarm_id"`
+	Key                string    `json:"key"`
+	Scope              struct {
+		Kind string `json:"kind"`
+		ID   string `json:"id"`
+	} `json:"scope"`
+	Value     *string    `json:"value"`
+	ExpiresAt *time.Time `json:"expires_at"`
 }
 
 var deploymentStatus = map[string]string{
@@ -365,6 +383,10 @@ func (s *StatusPage) Handle(ctx context.Context, ev automation.Event) error {
 
 // apply returns the id of an instance that the API must fill in.
 func (s *StatusPage) apply(ev automation.Event, ent entity) string {
+	if strings.HasPrefix(ev.Type, "stash_entry.") {
+		s.applyStashEvent(ev, ent)
+		return ""
+	}
 	id := ev.Attribute("md-instance")
 	if strings.HasPrefix(ev.Type, "instance.") && ent.Identifier != "" {
 		id = ent.Identifier
@@ -374,6 +396,7 @@ func (s *StatusPage) apply(ev automation.Event, ent entity) string {
 	switch ev.Type {
 	case "instance.deleted":
 		delete(s.instances, id)
+		delete(s.health, id)
 		return ""
 	case "instance.moved":
 		delete(s.instances, ent.PreviousIdentifier)

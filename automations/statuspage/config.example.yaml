@@ -38,6 +38,15 @@ attributes:
   hidden: status_hidden  # "true" hides the instance
   impact: status_impact  # degraded, partial_outage, or major_outage when one of its alarms fires
 
+# Read the md/v1/ widget keys that stash-sync and other tools write. Off by default.
+stash:
+  # md/v1/health on each instance changes its row, together with its alarms. The worse status wins.
+  health: true
+  # md/v1/banner on each environment shows as a notice on the pages that have the environment.
+  banners: true
+  # The lowest banner level that shows: info, warning, or error.
+  min_level: warning
+
 announcements:
   - message: We are moving to a new data center on December 6.
     level: info          # info, warning, or critical

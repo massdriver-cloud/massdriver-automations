@@ -116,6 +116,8 @@ type announcementView struct {
 	Message string
 	Level   string
 	URL     string
+	// Environment is the title of the environment whose md/v1/banner this is. Empty for config announcements.
+	Environment string
 }
 
 // PageView is the data that the page template receives.
@@ -236,6 +238,7 @@ func (s *StatusPage) pageView(pages []pageState, idx int, r root, now time.Time)
 		}
 		v.Announcements = append(v.Announcements, announcementView{Message: a.Message, Level: a.Level, URL: a.URL})
 	}
+	v.Announcements = append(v.Announcements, s.stashBanners(p, now)...)
 
 	for _, e := range p.Envs {
 		ev := envView{Title: e.Cfg.Title, Description: e.Cfg.Description, Status: e.Status, StatusLabel: statusLabel(e.Status)}

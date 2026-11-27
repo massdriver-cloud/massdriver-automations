@@ -1,6 +1,7 @@
 name: massdriver-statuspage
-description: Serves a public status page from the alarms, instances, and deployments of the environments on its pages.
-  Runs on a Kubernetes cluster, with an event destination that sends it only the events it uses.
+description: Serves a public status page from the alarms, instances, deployments, and stash health and banners of the
+  environments on its pages. Runs on a Kubernetes cluster, with an event destination that sends it only the events it
+  uses.
 source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/massdriver-statuspage
 version: 0.1.0
 steps:
@@ -341,6 +342,32 @@ params:
                   title: Row title
                 default: []
           default: []
+        stash:
+          type: object
+          title: Stash
+          properties:
+            health:
+              type: boolean
+              title: Instance health
+              description: Reads `md/v1/health` of each instance. `degraded` shows degraded performance, and `down` shows
+                the row's impact. A firing alarm still wins over `healthy`. The service account needs `stash:view`.
+              default: false
+            banners:
+              type: boolean
+              title: Environment banners
+              description: Shows `md/v1/banner` of each environment as a notice. The service account needs `stash:view`.
+              default: false
+            min_level:
+              type: string
+              title: Lowest banner level
+              oneOf:
+              - const: info
+                title: Info
+              - const: warning
+                title: Warning
+              - const: error
+                title: Error
+              default: info
         attributes:
           type: object
           title: Instance attributes
@@ -447,6 +474,7 @@ ui:
     - deploys_as_maintenance
     - announcements
     - maintenance
+    - stash
     - attributes
     - output_dir
     site:

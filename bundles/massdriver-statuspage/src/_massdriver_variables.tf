@@ -59,6 +59,11 @@ variable "config" {
       timezone           = optional(string)
       title              = string
     })
+    stash = optional(object({
+      banners   = optional(bool)
+      health    = optional(bool)
+      min_level = optional(string)
+    }))
   })
 }
 variable "image" {

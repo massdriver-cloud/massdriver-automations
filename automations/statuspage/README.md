@@ -4,14 +4,16 @@ A public status site for your Massdriver environments. It needs no login.
 
 At startup, the service reads its config file. Then it loads each configured environment from the Massdriver
 API: its instances, their status, their alarms with the current state of each alarm, and the latest deployment
-of each instance. After that, events keep the site current. Each event renders the site again at once.
+of each instance. With [`stash`](#stash) on, it also reads the health of each instance and the banner of each
+environment from the stash. After that, events keep the site current. Each event renders the site again at
+once.
 
 The site has:
 
 - an overall status banner, and one section for each environment, with one row for each component
 - a bar for each day of the last 90 days, and the uptime of each component
 - active incidents, past incidents, and active or scheduled maintenance
-- announcements from the config
+- announcements from the config, and environment banners from the stash
 - `/api/status.json`, an Atom feed of incidents, and an SVG status badge for each page
 
 The site shows only the titles in the config and the names of instances. It does not show identifiers of
@@ -24,9 +26,9 @@ worst status of its rows, and a page takes the worst status of its environments.
 
 | Status | When |
 |---|---|
-| Major outage | An alarm fires on an instance whose impact is `major_outage`. |
-| Partial outage | The instance is `FAILED`: its last `PROVISION` or `DECOMMISSION` deployment failed. Or an alarm fires on an instance whose impact is `partial_outage`. |
-| Degraded performance | An alarm fires. This is the default impact of an alarm. |
+| Major outage | An alarm fires on an instance whose impact is `major_outage`. Or the stash health of an instance is down, and no impact is set. |
+| Partial outage | The instance is `FAILED`: its last `PROVISION` or `DECOMMISSION` deployment failed. Or an alarm fires, or the stash health is down, on an instance whose impact is `partial_outage`. |
+| Degraded performance | An alarm fires. This is the default impact of an alarm. Or the stash health of an instance is degraded. |
 | Under maintenance | A `PROVISION` or `DECOMMISSION` deployment of the instance runs, and `deploys_as_maintenance` is on. Or a scheduled maintenance window from the config is open. |
 | Operational | None of the above. |
 
@@ -34,11 +36,11 @@ An outage is worse than maintenance, so an alarm that fires during maintenance s
 
 An alarm counts only after it fires for `min_duration`. An alarm that clears before then leaves no incident.
 
-The impact of an alarm comes from, in order:
+The impact of an alarm and of a down stash health comes from, in order:
 
 1. the `status_impact` attribute of the instance (`degraded`, `partial_outage`, or `major_outage`)
 2. the `impact` of the component in the config
-3. `degraded`
+3. `degraded` for an alarm, and `major_outage` for a down stash health
 
 The site shows only instances that are `PROVISIONED` or `FAILED`. It hides instances that are `INITIALIZED` or
 `DECOMMISSIONED`, and instances with the attribute `status_hidden=true`.
@@ -60,7 +62,9 @@ are not downtime.
 
 `PORT`, `LOG_FORMAT`, and `LOG_LEVEL` are in the [common settings](../../README.md#common-settings).
 
-The service account needs view access to the projects of the configured environments.
+The service account needs view access to the projects of the configured environments. With `stash` on, it also
+needs `stash:view` on those environments and their instances. Without it, the stash reads fail, the logs say
+`stash read failed`, and the page shows the alarms and deployments only.
 
 ### Config file
 
@@ -92,6 +96,9 @@ pages:
 | `attributes.title` | `status_title` | The attribute that sets the row title of an instance. |
 | `attributes.hidden` | `status_hidden` | The attribute that hides an instance when its value is `true`. |
 | `attributes.impact` | `status_impact` | The attribute that sets the impact of the alarms of an instance. |
+| `stash.health` | `false` | Reads `md/v1/health` of each instance. See [Stash](#stash). |
+| `stash.banners` | `false` | Shows `md/v1/banner` of each environment as a notice. |
+| `stash.min_level` | `info` | The lowest banner level that shows: `info`, `warning`, or `error`. |
 | `announcements` | | Banners: `message`, `level` (`info`, `warning`, `critical`), `url`, `pages` (slugs), `starts_at`, `ends_at`. |
 | `maintenance` | | Windows: `title`, `description`, `starts_at`, `ends_at`, `environments` (ids), `components` (titles). |
 | `pages[].title` | | Required. |
@@ -107,6 +114,23 @@ instance does not appear. Without `components`, each instance has its own row. I
 `status_title`, or the instance name.
 
 Times in the config are RFC 3339, such as `2026-12-06T10:00:00Z`.
+
+### Stash
+
+[stash-sync](../stash-sync/README.md) and other tools write live state to the `md/v1/` keys in the stash. See its
+[key table](../stash-sync/README.md) for every key. statuspage reads two of them:
+
+| Key | Scope | On the page |
+|---|---|---|
+| `md/v1/health` | instance | `healthy`, `ok`, and `up` add nothing. `degraded`, `warning`, and `recovering` show degraded performance. `down`, `failed`, and `error` show the impact of the instance, or major outage. |
+| `md/v1/banner` | environment | A notice with the environment title, on every page that has the environment. `info` and `warning` show as those levels, and `error` as critical. A banner changes no status. |
+
+The stash adds to the alarms. A row takes the worse of the two, so a firing alarm still shows when the health
+is `healthy`. A missing, expired, or unknown health changes nothing: it is not healthy and not down. Uptime
+counts a stash outage as it counts an alarm.
+
+Events bring each change at once. Every 30 seconds the service also reads the keys again, to catch what an event
+missed, such as an entry set before it started. An entry that expires disappears within 30 seconds, without an event.
 
 ## Paths
 
@@ -135,10 +159,16 @@ mass event destination create \
   --event-type deployment.failed \
   --event-type deployment.aborted \
   --event-type 'instance.*' \
+  --event-type stash_entry.set \
+  --event-type stash_entry.deleted \
   --condition '(.data.attributes["md-project"] + "-" + .data.attributes["md-environment"]) as $env
     | ($env | IN("api-prod", "web-prod", "api-staging"))
-      and (.data.metadata.deployment_action // "PROVISION") != "PLAN"'
+      and (.data.metadata.deployment_action // "PROVISION") != "PLAN"
+      and ((.type | startswith("stash_entry.") | not) or (.data.entity.key | IN("md/v1/health", "md/v1/banner")))'
 ```
+
+Leave out the two `stash_entry` types when `stash` is off. The last line drops the other stash keys, such as
+`md/v1/usage`, which stash-sync writes every interval.
 
 List the environment identifiers of your config in `IN(...)`. When every environment is in one project, also
 add `--attribute md-project=<project>`.
@@ -172,4 +202,5 @@ The image runs as user `65532`. That user must be able to write to `STATE_DIR` a
   has a fixed list of values, so declare each `status_title` value on the attribute first.
 - Massdriver has no event for the end of an environment deployment. Each instance deployment is shown on its own.
 - A deployment shows as maintenance only while it runs. Queued and proposed deployments do not.
+- The page does not read `md/v1/traffic`. A high error rate shows only through an alarm or `md/v1/health`.
 - `output_dir` does not delete files of a page that you remove from the config.
