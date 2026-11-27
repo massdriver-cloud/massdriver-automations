@@ -1,0 +1,7 @@
+mutation RejectDeployment($org: ID!, $id: UUID!) {
+  rejectDeployment(organizationId: $org, id: $id) {
+    successful
+    messages { field message }
+    result { id }
+  }
+}
