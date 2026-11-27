@@ -39,6 +39,9 @@ type stashEntry struct {
 	SetAt   time.Time
 	Expires time.Time
 	Deleted bool
+	// seen is when this service stored the entry, by its own clock, so it compares with the start of a read
+	// without trusting that the two clocks agree.
+	seen time.Time
 }
 
 func (e *stashEntry) live(now time.Time) bool {
@@ -47,11 +50,12 @@ func (e *stashEntry) live(now time.Time) bool {
 
 // setStash keeps the newer of the stored entry and next. Since stays put while the value does not change,
 // because stash-sync writes the same value again on every interval.
-func setStash(m map[string]*stashEntry, id string, next stashEntry) {
+func setStash(m map[string]*stashEntry, id string, next stashEntry, now time.Time) {
 	old := m[id]
 	if old != nil && next.SetAt.Before(old.SetAt) {
 		return
 	}
+	next.seen = now
 	next.Since = next.SetAt
 	if old != nil && !old.Deleted && !next.Deleted && old.Value == next.Value && old.Level == next.Level {
 		next.Since = old.Since
@@ -190,6 +194,7 @@ func (s *StatusPage) stashEntries(ctx context.Context, scopes []map[string]any) 
 // applyStash replaces the entries of one environment with a read that started at start. An entry the read did
 // not return was deleted or has expired.
 func (s *StatusPage) applyStash(envID string, instances []string, entries []apiStashEntry, start time.Time) {
+	now := s.now()
 	found := map[string]bool{}
 	for _, e := range entries {
 		if e.Value == nil {
@@ -198,9 +203,9 @@ func (s *StatusPage) applyStash(envID string, instances []string, entries []apiS
 		kind := strings.ToLower(e.Scope.Kind)
 		switch {
 		case e.Key == healthKey && kind == "instance" && s.cfg.Stash.Health:
-			setStash(s.health, e.Scope.ID, newStashEntry(e.Key, *e.Value, e.UpdatedAt, e.ExpiresAt))
+			setStash(s.health, e.Scope.ID, newStashEntry(e.Key, *e.Value, e.UpdatedAt, e.ExpiresAt), now)
 		case e.Key == bannerKey && kind == "environment" && e.Scope.ID == envID && s.cfg.Stash.Banners:
-			setStash(s.banners, envID, newStashEntry(e.Key, *e.Value, e.UpdatedAt, e.ExpiresAt))
+			setStash(s.banners, envID, newStashEntry(e.Key, *e.Value, e.UpdatedAt, e.ExpiresAt), now)
 		default:
 			continue
 		}
@@ -208,14 +213,25 @@ func (s *StatusPage) applyStash(envID string, instances []string, entries []apiS
 	}
 	if s.cfg.Stash.Health {
 		for _, id := range instances {
-			if !found["instance/"+id] && s.health[id] != nil {
-				setStash(s.health, id, stashEntry{SetAt: start, Deleted: true})
+			if !found["instance/"+id] {
+				clearStash(s.health, id, start)
 			}
 		}
 	}
-	if s.cfg.Stash.Banners && !found["environment/"+envID] && s.banners[envID] != nil {
-		setStash(s.banners, envID, stashEntry{SetAt: start, Deleted: true})
+	if s.cfg.Stash.Banners && !found["environment/"+envID] {
+		clearStash(s.banners, envID, start)
 	}
+}
+
+// clearStash marks an entry that a read did not return as deleted, unless an event stored it after the read
+// started. The marker keeps the entry's write time: the read has no time of its own on Massdriver's clock, and
+// a later one would hide a newer set.
+func clearStash(m map[string]*stashEntry, id string, start time.Time) {
+	old := m[id]
+	if old == nil || old.Deleted || !old.seen.Before(start) {
+		return
+	}
+	m[id] = &stashEntry{SetAt: old.SetAt, Deleted: true, seen: start}
 }
 
 // applyStashEvent applies a stash_entry.set or stash_entry.deleted event.
@@ -237,14 +253,14 @@ func (s *StatusPage) applyStashEvent(ev automation.Event, ent entity) {
 		return
 	}
 	if ev.Type == "stash_entry.deleted" {
-		setStash(m, ent.Scope.ID, stashEntry{SetAt: ev.Time, Deleted: true})
+		setStash(m, ent.Scope.ID, stashEntry{SetAt: ev.Time, Deleted: true}, s.now())
 		return
 	}
 	// A sensitive entry has no value in the event, and the page cannot show what it cannot read.
 	if ent.Value == nil {
 		return
 	}
-	setStash(m, ent.Scope.ID, newStashEntry(ent.Key, *ent.Value, ev.Time, ent.ExpiresAt))
+	setStash(m, ent.Scope.ID, newStashEntry(ent.Key, *ent.Value, ev.Time, ent.ExpiresAt), s.now())
 }
 
 // --- page ------------------------------------------------------------------

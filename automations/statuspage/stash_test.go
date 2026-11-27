@@ -150,6 +150,7 @@ func TestExpiredAndMissingHealthChangeNothing(t *testing.T) {
 	fs.set(health("api-prod-database", "down", t0.Add(6*time.Minute)))
 	h.poll()
 	fs.set()
+	h.clock = h.clock.Add(30 * time.Second)
 	h.poll()
 	assertLines(t, summary(h.status())[:3], want)
 }
@@ -260,6 +261,33 @@ func TestStashOffByDefault(t *testing.T) {
 	}
 	if _, html := h.get("/foobar/"); strings.Contains(html, "Stash banner text") {
 		t.Errorf("banner shows with stash off")
+	}
+}
+
+// A read that started before an event was stored must not undo the event, whatever Massdriver's clock says.
+func TestStaleReadKeepsNewerEvent(t *testing.T) {
+	h, _ := newStashHarness(t, stashConfig)
+	// The event carries a time far behind this service's clock.
+	h.post("s1", "stash_entry.set", t0.Add(-time.Hour), stashEvent(healthKey, "instance", "api-prod-database", "down", nil),
+		attrs("api", "prod", "database"), nil)
+	h.sp.mu.Lock()
+	h.sp.applyStash("api-prod", []string{"api-prod-database"}, nil, t0.Add(-time.Second))
+	h.sp.mu.Unlock()
+	h.sp.render()
+	if got := summary(h.status())[1]; got != "foobar/Production/Database=partial_outage" {
+		t.Errorf("after stale read: %s", got)
+	}
+
+	// The next read, which starts after the event, clears it; then a newer set still applies.
+	h.clock = h.clock.Add(30 * time.Second)
+	h.poll()
+	if got := summary(h.status())[1]; got != "foobar/Production/Database=operational" {
+		t.Errorf("after read: %s", got)
+	}
+	h.post("s2", "stash_entry.set", t0.Add(-59*time.Minute), stashEvent(healthKey, "instance", "api-prod-database", "degraded", nil),
+		attrs("api", "prod", "database"), nil)
+	if got := summary(h.status())[1]; got != "foobar/Production/Database=degraded" {
+		t.Errorf("after newer set: %s", got)
 	}
 }
 
