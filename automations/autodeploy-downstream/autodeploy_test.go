@@ -175,7 +175,7 @@ func TestDeploysOptedInProvisionedDependents(t *testing.T) {
 		var step map[string]any
 		_ = json.Unmarshal([]byte(input["value"].(string)), &step)
 		if string(scope) != `{"deployment":"new-dep"}` || v["key"] != "md/v1/step/autodeploy" || input["label"] != "Autodeploy" ||
-			step["tool"] != "autodeploy-downstream" || step["status"] != "succeeded" ||
+			step["tool"] != "autodeploy-downstream" || step["action"] != "apply" || step["status"] != "succeeded" ||
 			step["message"] != "Deployed by rule autodeploy=true after upstream api-prod-db completed deployment dep-1" {
 			t.Errorf("stash write = %v", v)
 		}

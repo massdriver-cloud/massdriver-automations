@@ -310,8 +310,12 @@ func (c *Chaos) strike(ctx context.Context, id, strategy string) (bool, error) {
 	}
 	verb := map[string]string{ModePropose: "proposed", ModePlan: "planned", ModeDeploy: "deployed"}[c.cfg.Mode]
 	log.Info("chaos deployment created", "deployment_id", p.Result.ID, "detail", ms.Detail)
+	stepAction := "apply"
+	if c.cfg.Mode == ModePlan {
+		stepAction = "plan"
+	}
 	c.results.Write(ctx, "deployment", p.Result.ID, "step/chaos-monkey", "Chaos monkey", massdriver.Step{
-		Tool: "chaos-monkey", Status: "succeeded", FinishedAt: massdriver.Timestamp(time.Now()), Message: ms.Strategy + ": " + ms.Detail,
+		Tool: "chaos-monkey", Action: stepAction, Status: "succeeded", FinishedAt: massdriver.Timestamp(time.Now()), Message: ms.Strategy + ": " + ms.Detail,
 	})
 	text := fmt.Sprintf("Chaos monkey %s %s with %s: %s. Deployment %s.",
 		verb, link("", inst.ID), ms.Strategy, ms.Detail, link(p.Result.ID, p.Result.ID))

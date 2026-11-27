@@ -146,7 +146,7 @@ func (a *Autodeploy) deployDownstream(ctx context.Context, rules []Rule, upstrea
 
 func (a *Autodeploy) writeStep(ctx context.Context, deploymentID, message string) {
 	a.results.Write(ctx, "deployment", deploymentID, "step/autodeploy", "Autodeploy", massdriver.Step{
-		Tool: "autodeploy-downstream", Status: "succeeded", FinishedAt: massdriver.Timestamp(time.Now()), Message: message,
+		Tool: "autodeploy-downstream", Action: "apply", Status: "succeeded", FinishedAt: massdriver.Timestamp(time.Now()), Message: message,
 	})
 }
 

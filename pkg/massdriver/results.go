@@ -48,12 +48,12 @@ func (r Results) Write(ctx context.Context, scope, id, name, label string, value
 	log := automation.Logger(ctx).With("result", name, "scope", scope)
 	b, err := json.Marshal(value)
 	if err != nil {
-		log.Debug("result write failed", "err", err)
+		log.Warn("result write failed", "err", err)
 		return
 	}
 	err = r.API.SetStashEntry(ctx, StashEntry{Scope: scope, ID: id, Key: r.Key(name), Format: "JSON", Label: label, Value: string(b)})
 	if err != nil {
-		log.Debug("result write failed", "err", err)
+		log.Warn("result write failed", "err", err)
 		return
 	}
 	log.Info("result written")
@@ -64,7 +64,9 @@ func Timestamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
 // Step is the value of step/<step>: how a step ran. An automation's step is the part it played in a deployment.
 type Step struct {
-	Tool       string `json:"tool"`
+	Tool string `json:"tool"`
+	// Action is plan, apply, destroy, test, or scan. The server refuses a step without one.
+	Action     string `json:"action"`
 	Status     string `json:"status"`
 	FinishedAt string `json:"finished_at,omitempty"`
 	Message    string `json:"message,omitempty"`

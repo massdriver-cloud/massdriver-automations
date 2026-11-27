@@ -165,13 +165,13 @@ func checkStep(t *testing.T, c call, deploymentID, message string) {
 		t.Fatalf("stash write = %v", c.Variables)
 	}
 	var step struct {
-		Tool, Status, Message string
-		FinishedAt            time.Time `json:"finished_at"`
+		Tool, Action, Status, Message string
+		FinishedAt                    time.Time `json:"finished_at"`
 	}
 	if err := json.Unmarshal([]byte(input["value"].(string)), &step); err != nil {
 		t.Fatal(err)
 	}
-	if step.Tool != "rollback-on-failure" || step.Status != "succeeded" || step.Message != message || step.FinishedAt.IsZero() {
+	if step.Tool != "rollback-on-failure" || step.Action != "apply" || step.Status != "succeeded" || step.Message != message || step.FinishedAt.IsZero() {
 		t.Errorf("step = %+v", step)
 	}
 }

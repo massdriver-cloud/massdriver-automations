@@ -393,6 +393,7 @@ func (t *Trains) upgradeLocked(ctx context.Context, tr *Train, r *run, id string
 	automation.Logger(ctx).Info("train deployment created", "train", r.Train, "instance", id, "deployment_id", p.Result.ID, "mode", st.Mode)
 	t.results.Write(ctx, "deployment", p.Result.ID, "step/upgrade-train", "Upgrade train", massdriver.Step{
 		Tool:       "upgrade-train",
+		Action:     "apply",
 		Status:     "succeeded",
 		FinishedAt: massdriver.Timestamp(t.now()),
 		Message:    fmt.Sprintf("Stage %s of train %s: %s@%s", st.Name, r.Train, r.Bundle, r.Version),

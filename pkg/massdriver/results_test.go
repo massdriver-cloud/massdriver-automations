@@ -70,3 +70,25 @@ func TestResultWriteSurvivesARejection(t *testing.T) {
 		t.Errorf("calls = %d, want 1", calls)
 	}
 }
+
+// The server refuses a result without the fields its widget catalog requires. These are the catalog's lists.
+func TestResultsHaveTheFieldsTheCatalogRequires(t *testing.T) {
+	for _, c := range []struct {
+		value    any
+		required []string
+	}{
+		{Step{Tool: "rollback-on-failure", Action: "apply", Status: "succeeded"}, []string{"tool", "action", "status"}},
+		{Changes{Tool: "drift"}, []string{"tool", "add", "change", "destroy"}},
+		{Drift{Status: "none"}, []string{"status"}},
+		{Release{Version: "1.3.0"}, []string{"version"}},
+	} {
+		b, _ := json.Marshal(c.value)
+		var got map[string]any
+		_ = json.Unmarshal(b, &got)
+		for _, k := range c.required {
+			if _, ok := got[k]; !ok {
+				t.Errorf("%T has no %s: %s", c.value, k, b)
+			}
+		}
+	}
+}

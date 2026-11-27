@@ -537,7 +537,7 @@ func TestStageResultsGoToTheStash(t *testing.T) {
 
 	want := [][4]string{
 		{`{"deployment":"dep-1"}`, "md/v1/step/upgrade-train", "Upgrade train",
-			`{"tool":"upgrade-train","status":"succeeded","finished_at":"2026-11-27T09:00:00Z","message":"Stage dev of train db: api-db@1.3.0"}`},
+			`{"tool":"upgrade-train","action":"apply","status":"succeeded","finished_at":"2026-11-27T09:00:00Z","message":"Stage dev of train db: api-db@1.3.0"}`},
 		{`{"instance":"api-dev-db"}`, "md/v1/release", "Release", `{"version":"1.3.0","deployed_at":"2026-11-27T09:00:00Z"}`},
 	}
 	if got := e.api.stash(); !reflect.DeepEqual(got, want) {

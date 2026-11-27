@@ -201,6 +201,7 @@ func (r *Rollback) Handle(ctx context.Context, ev automation.Event) error {
 	log = log.With("rollback_deployment_id", proposalID)
 	step := massdriver.Step{
 		Tool:       "rollback-on-failure",
+		Action:     "apply",
 		Status:     "succeeded",
 		FinishedAt: massdriver.Timestamp(time.Now()),
 		Message:    fmt.Sprintf("Rolls back failed deployment %s to deployment %s (v%s)", failed.ID, target.ID, target.Version),

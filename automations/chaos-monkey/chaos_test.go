@@ -216,7 +216,7 @@ func TestRunProposesByDefault(t *testing.T) {
 	var step map[string]any
 	_ = json.Unmarshal([]byte(stashed["value"].(string)), &step)
 	if string(scope) != `{"deployment":"proposal-1"}` || writes[0].Vars["key"] != "md/v1/step/chaos-monkey" ||
-		stashed["label"] != "Chaos monkey" || step["tool"] != "chaos-monkey" || step["status"] != "succeeded" ||
+		stashed["label"] != "Chaos monkey" || step["tool"] != "chaos-monkey" || step["action"] != "apply" || step["status"] != "succeeded" ||
 		MessagePrefix+step["message"].(string) != in["message"] {
 		t.Errorf("stash write = %v, step = %v", writes[0].Vars, step)
 	}
@@ -236,6 +236,16 @@ func TestRunPlansAndDeploys(t *testing.T) {
 			}
 			if in, _ := input(t, muts[0]); in["action"] != action {
 				t.Errorf("action = %v, want %s", in["action"], action)
+			}
+			// The server refuses a step whose action is missing or not one of its own.
+			want := map[string]string{ModePlan: "plan", ModeDeploy: "apply"}[mode]
+			writes := e.api.stash()
+			var step map[string]any
+			if len(writes) == 1 {
+				_ = json.Unmarshal([]byte(writes[0].Vars["input"].(map[string]any)["value"].(string)), &step)
+			}
+			if step["action"] != want {
+				t.Errorf("step = %v, want action %s", step, want)
 			}
 		})
 	}
