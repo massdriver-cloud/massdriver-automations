@@ -116,7 +116,8 @@ rules:
       - (?P<tool>OpenTofu|Terraform) has been successfully initialized
       - (?:OpenTofu|Terraform) v(?:ersion:\s*)?(?P<tool_version>\d+\.\d+\.\d+)
       - (?P<message>(?:Apply|Destroy) complete! Resources:.*|Plan:.*|No changes\.)
-      - 'Error: (?P<error>.+)'
+      # OpenTofu boxes its errors. The provisioner's own last line, Error: exit status 1, has no box.
+      - '│ Error: (?P<error>.+)'
     key: step/src
     label: OpenTofu step
     value: >-

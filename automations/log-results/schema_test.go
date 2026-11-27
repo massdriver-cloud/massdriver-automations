@@ -86,7 +86,7 @@ func TestExampleRulesWriteValuesTheWidgetCatalogAccepts(t *testing.T) {
 
 func TestLongMessagesFitTheStepWidget(t *testing.T) {
 	cfg := exampleConfig(t)
-	logs := "OpenTofu has been successfully initialized!\nError: " + strings.Repeat("x", 600) + "\n"
+	logs := "OpenTofu has been successfully initialized!\n│ Error: " + strings.Repeat("x", 600) + "\n"
 	entries, _, err := cfg.Parse(t.Context(), strings.NewReader(logs), Deployment{Action: "PROVISION", Failed: true, Attributes: prod})
 	if err != nil {
 		t.Fatal(err)

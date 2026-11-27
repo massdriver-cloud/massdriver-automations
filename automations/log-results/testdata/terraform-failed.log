@@ -18,3 +18,5 @@ aws_db_instance.main: Modifying... [id=api-prod-database]
 [31m│[0m [0m  on main.tf line 12, in resource "aws_db_instance" "main":
 [31m│[0m [0m  12: resource "aws_db_instance" "main" {
 [31m╵[0m[0m
+time=2026-11-27T23:24:31.918Z level=INFO msg="sub-process exited" argo=true error="exit status 1"
+Error: exit status 1
