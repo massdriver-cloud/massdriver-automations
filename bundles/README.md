@@ -12,6 +12,7 @@ One Massdriver bundle for each automation and platform:
 | [drift](../automations/drift) | [massdriver-drift](massdriver-drift) | [massdriver-drift-ecs](massdriver-drift-ecs) |
 | [freeze-guard](../automations/freeze-guard) | [massdriver-freeze-guard](massdriver-freeze-guard) | [massdriver-freeze-guard-ecs](massdriver-freeze-guard-ecs) |
 | [github-deployments](../automations/github-deployments) | [massdriver-github-deployments](massdriver-github-deployments) | [massdriver-github-deployments-ecs](massdriver-github-deployments-ecs) |
+| [pr-sync](../automations/pr-sync) | [massdriver-pr-sync](massdriver-pr-sync) | [massdriver-pr-sync-ecs](massdriver-pr-sync-ecs) |
 | [proposal-chatops](../automations/proposal-chatops) | [massdriver-proposal-chatops](massdriver-proposal-chatops) | [massdriver-proposal-chatops-ecs](massdriver-proposal-chatops-ecs) |
 | [release-notes](../automations/release-notes) | [massdriver-release-notes](massdriver-release-notes) | [massdriver-release-notes-ecs](massdriver-release-notes-ecs) |
 | [rollback-on-failure](../automations/rollback-on-failure) | [massdriver-rollback-on-failure](massdriver-rollback-on-failure) | [massdriver-rollback-on-failure-ecs](massdriver-rollback-on-failure-ecs) |

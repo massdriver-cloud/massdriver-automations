@@ -1,0 +1,240 @@
+name: massdriver-pr-sync-ecs
+description: Writes the pull requests of a project's GitHub repositories to a JSON entry in the project's stash on an
+  interval, so a note on the project lists their review, check, and merge state. Set the `GITHUB_TOKEN` secret. Runs on
+  Amazon ECS with Fargate, with an event destination that sends it only the events it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/massdriver-pr-sync-ecs
+version: 0.1.0
+steps:
+- path: src
+  provisioner: opentofu:1.10
+params:
+  required:
+  - image
+  - ingress
+  - logs
+  - config
+  properties:
+    image:
+      type: object
+      title: Image
+      required:
+      - repository
+      - tag
+      properties:
+        repository:
+          type: string
+          title: Repository
+          description: The automations image. bundle-scanner adds `-scanner` to the tag, and router adds `-scripts` when
+            it runs commands.
+          default: ghcr.io/massdriver-cloud/massdriver-automations
+        tag:
+          type: string
+          title: Tag
+          description: The image tag, such as `0.2.0`. Pin a version so that a redeploy runs the same code.
+          default: '0.2'
+          pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
+          message:
+            pattern: Must be a valid image tag.
+    ingress:
+      type: object
+      title: Ingress
+      required:
+      - dns_records
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Where the automation is served. Empty uses `pr-sync.<domain of the cluster's hosted zone>`. The
+            load balancer's HTTPS listener needs a certificate for it. Massdriver sends events to `https://<host>/hooks/massdriver`.
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          message:
+            pattern: Must be a lowercase DNS name, such as drift.automations.acme.com.
+        dns_records:
+          type: boolean
+          title: Create a DNS record
+          description: Creates a CNAME record to the load balancer when the host is in the cluster's hosted zone.
+          default: true
+    logs:
+      type: object
+      title: Logs
+      required:
+      - retention_days
+      properties:
+        retention_days:
+          type: integer
+          title: Retention (days)
+          description: Days that CloudWatch Logs keeps the logs.
+          default: 90
+          enum:
+          - 1
+          - 3
+          - 5
+          - 7
+          - 14
+          - 30
+          - 60
+          - 90
+          - 120
+          - 150
+          - 180
+          - 365
+          - 400
+          - 545
+          - 731
+          - 1096
+          - 1827
+          - 2192
+          - 2557
+          - 2922
+          - 3288
+          - 3653
+    config:
+      type: object
+      title: Settings
+      required:
+      - projects
+      properties:
+        projects:
+          type: array
+          title: Projects
+          items:
+            type: object
+            title: Project
+            required:
+            - project
+            - repos
+            properties:
+              project:
+                type: string
+                title: Project
+                description: The project whose stash gets the entry.
+                $md.list:
+                  resource: project
+              repos:
+                type: array
+                title: Repositories
+                description: GitHub repositories, as `owner/name`.
+                items:
+                  type: string
+                  title: Repository
+                  pattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+                  message:
+                    pattern: Must be owner/name, such as acme/api.
+                minItems: 1
+          minItems: 1
+        interval:
+          type: string
+          title: Interval
+          description: How often to read GitHub. At least 30s.
+          default: 2m
+          pattern: ^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$
+          message:
+            pattern: Must be a duration, such as 90s, 10m, or 1h30m.
+        merged_window:
+          type: string
+          title: Merged window
+          description: How long a merged pull request stays in the list. `0s` lists only open pull requests.
+          default: 24h
+          pattern: ^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$
+          message:
+            pattern: Must be a duration, such as 90s, 10m, or 1h30m.
+        max_prs:
+          type: integer
+          title: Most pull requests
+          description: The most pull requests in one project's entry.
+          default: 20
+          minimum: 1
+          maximum: 50
+        key:
+          type: string
+          title: Stash key
+          description: The key in each project's stash.
+          default: github/prs
+          pattern: ^[A-Za-z0-9_./-]{1,255}$
+          message:
+            pattern: Must be letters, digits, and the characters _ . / -.
+        label:
+          type: string
+          title: Label
+          description: The entry's name in the Massdriver UI.
+          default: Pull requests
+        github:
+          type: object
+          title: GitHub
+          properties:
+            graphql_url:
+              type: string
+              title: GraphQL URL
+              description: 'For GitHub Enterprise Server: `https://<host>/api/graphql`.'
+              default: https://api.github.com/graphql
+              pattern: ^https?://[^\s]+$
+              message:
+                pattern: Must be a URL.
+    otel:
+      type: object
+      title: Tracing
+      description: Sends OpenTelemetry traces to an OTLP endpoint. Set the `OTEL_EXPORTER_OTLP_HEADERS` secret when the
+        endpoint needs credentials.
+      properties:
+        endpoint:
+          type: string
+          title: OTLP endpoint
+          description: The OTLP/HTTP base URL of a collector, such as `http://otel-collector.observability:4318`. Empty
+            turns tracing off.
+dependencies:
+  aws_authentication:
+    resource_type: aws-iam-role
+    required: true
+  ecs_cluster:
+    resource_type: aws-ecs-cluster
+    required: true
+  service_account:
+    resource_type: massdriver-service-account
+    required: true
+resources: {}
+app:
+  secrets:
+    GITHUB_TOKEN:
+      title: GitHub token
+      description: Needs `Pull requests`, `Commit statuses`, and `Contents` read, or the `repo` scope for private repositories.
+    OTEL_EXPORTER_OTLP_HEADERS:
+      title: OTLP headers
+      description: Headers for the OTLP endpoint, as `key=value` pairs separated by commas, such as `authorization=Bearer
+        abc123`.
+ui:
+  ui:order:
+  - image
+  - ingress
+  - logs
+  - config
+  - otel
+  - '*'
+  image:
+    ui:order:
+    - repository
+    - tag
+  ingress:
+    ui:order:
+    - host
+    - dns_records
+  logs:
+    ui:order:
+    - retention_days
+  config:
+    ui:order:
+    - projects
+    - interval
+    - merged_window
+    - max_prs
+    - key
+    - label
+    - github
+    projects:
+      ui:options:
+        itemTitle: '{{project}}'
+      items:
+        ui:order:
+        - project
+        - repos
+        repos:
+          ui:field: tagInput

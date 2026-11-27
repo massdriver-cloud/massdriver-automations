@@ -1,0 +1,208 @@
+name: massdriver-pr-sync
+description: Writes the pull requests of a project's GitHub repositories to a JSON entry in the project's stash on an
+  interval, so a note on the project lists their review, check, and merge state. Set the `GITHUB_TOKEN` secret. Runs on
+  a Kubernetes cluster, with an event destination that sends it only the events it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/massdriver-pr-sync
+version: 0.1.0
+steps:
+- path: src
+  provisioner: opentofu:1.10
+params:
+  required:
+  - image
+  - ingress
+  - config
+  properties:
+    image:
+      type: object
+      title: Image
+      required:
+      - repository
+      - tag
+      properties:
+        repository:
+          type: string
+          title: Repository
+          description: The automations image. bundle-scanner adds `-scanner` to the tag, and router adds `-scripts` when
+            it runs commands.
+          default: ghcr.io/massdriver-cloud/massdriver-automations
+        tag:
+          type: string
+          title: Tag
+          description: The image tag, such as `0.2.0`. Pin a version so that a redeploy runs the same code.
+          default: '0.2'
+          pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
+          message:
+            pattern: Must be a valid image tag.
+    ingress:
+      type: object
+      title: Ingress
+      required:
+      - host
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Where the automation is served, such as `pr-sync.automations.acme.com`. Point it at the ingress
+            controller. Massdriver sends events to `https://<host>/hooks/massdriver`.
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          message:
+            pattern: Must be a lowercase DNS name, such as drift.automations.acme.com.
+        class_name:
+          type: string
+          title: Ingress class
+          description: Empty uses the default class of the cluster.
+        cluster_issuer:
+          type: string
+          title: cert-manager ClusterIssuer
+          description: Issues a certificate for the host. Leave empty when TLS ends in front of the ingress controller,
+            or when you set a TLS secret.
+        tls_secret_name:
+          type: string
+          title: TLS secret
+          description: A Secret in the namespace with a certificate for the host. Ignored when a ClusterIssuer is set.
+    config:
+      type: object
+      title: Settings
+      required:
+      - projects
+      properties:
+        projects:
+          type: array
+          title: Projects
+          items:
+            type: object
+            title: Project
+            required:
+            - project
+            - repos
+            properties:
+              project:
+                type: string
+                title: Project
+                description: The project whose stash gets the entry.
+                $md.list:
+                  resource: project
+              repos:
+                type: array
+                title: Repositories
+                description: GitHub repositories, as `owner/name`.
+                items:
+                  type: string
+                  title: Repository
+                  pattern: ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$
+                  message:
+                    pattern: Must be owner/name, such as acme/api.
+                minItems: 1
+          minItems: 1
+        interval:
+          type: string
+          title: Interval
+          description: How often to read GitHub. At least 30s.
+          default: 2m
+          pattern: ^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$
+          message:
+            pattern: Must be a duration, such as 90s, 10m, or 1h30m.
+        merged_window:
+          type: string
+          title: Merged window
+          description: How long a merged pull request stays in the list. `0s` lists only open pull requests.
+          default: 24h
+          pattern: ^([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+$
+          message:
+            pattern: Must be a duration, such as 90s, 10m, or 1h30m.
+        max_prs:
+          type: integer
+          title: Most pull requests
+          description: The most pull requests in one project's entry.
+          default: 20
+          minimum: 1
+          maximum: 50
+        key:
+          type: string
+          title: Stash key
+          description: The key in each project's stash.
+          default: github/prs
+          pattern: ^[A-Za-z0-9_./-]{1,255}$
+          message:
+            pattern: Must be letters, digits, and the characters _ . / -.
+        label:
+          type: string
+          title: Label
+          description: The entry's name in the Massdriver UI.
+          default: Pull requests
+        github:
+          type: object
+          title: GitHub
+          properties:
+            graphql_url:
+              type: string
+              title: GraphQL URL
+              description: 'For GitHub Enterprise Server: `https://<host>/api/graphql`.'
+              default: https://api.github.com/graphql
+              pattern: ^https?://[^\s]+$
+              message:
+                pattern: Must be a URL.
+    otel:
+      type: object
+      title: Tracing
+      description: Sends OpenTelemetry traces to an OTLP endpoint. Set the `OTEL_EXPORTER_OTLP_HEADERS` secret when the
+        endpoint needs credentials.
+      properties:
+        endpoint:
+          type: string
+          title: OTLP endpoint
+          description: The OTLP/HTTP base URL of a collector, such as `http://otel-collector.observability:4318`. Empty
+            turns tracing off.
+dependencies:
+  kubernetes_cluster:
+    resource_type: massdriver-kubernetes-cluster
+    required: true
+  service_account:
+    resource_type: massdriver-service-account
+    required: true
+resources: {}
+app:
+  secrets:
+    GITHUB_TOKEN:
+      title: GitHub token
+      description: Needs `Pull requests`, `Commit statuses`, and `Contents` read, or the `repo` scope for private repositories.
+    OTEL_EXPORTER_OTLP_HEADERS:
+      title: OTLP headers
+      description: Headers for the OTLP endpoint, as `key=value` pairs separated by commas, such as `authorization=Bearer
+        abc123`.
+ui:
+  ui:order:
+  - image
+  - ingress
+  - config
+  - otel
+  - '*'
+  image:
+    ui:order:
+    - repository
+    - tag
+  ingress:
+    ui:order:
+    - host
+    - class_name
+    - cluster_issuer
+    - tls_secret_name
+  config:
+    ui:order:
+    - projects
+    - interval
+    - merged_window
+    - max_prs
+    - key
+    - label
+    - github
+    projects:
+      ui:options:
+        itemTitle: '{{project}}'
+      items:
+        ui:order:
+        - project
+        - repos
+        repos:
+          ui:field: tagInput

@@ -10,6 +10,7 @@ import (
 	"github.com/massdriver-cloud/massdriver-automations/automations/drift"
 	freezeguard "github.com/massdriver-cloud/massdriver-automations/automations/freeze-guard"
 	githubdeployments "github.com/massdriver-cloud/massdriver-automations/automations/github-deployments"
+	prsync "github.com/massdriver-cloud/massdriver-automations/automations/pr-sync"
 	proposalchatops "github.com/massdriver-cloud/massdriver-automations/automations/proposal-chatops"
 	releasenotes "github.com/massdriver-cloud/massdriver-automations/automations/release-notes"
 	rollbackonfailure "github.com/massdriver-cloud/massdriver-automations/automations/rollback-on-failure"
@@ -32,6 +33,7 @@ var All = []automation.Definition{
 	drift.Definition,
 	freezeguard.Definition,
 	githubdeployments.Definition,
+	prsync.Definition,
 	proposalchatops.Definition,
 	releasenotes.Definition,
 	rollbackonfailure.Definition,

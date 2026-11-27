@@ -1,0 +1,31 @@
+# pr-sync config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+
+# How often to read GitHub. Each write sets a TTL of three intervals, so the entries expire when the automation
+# stops. A Go duration, at least 30s. Default: 2m.
+interval: 2m
+# The stash key in each project. Letters, digits, and _ . / -. Default: github/prs.
+key: github/prs
+# The entry's name in the Massdriver UI. Default: Pull requests.
+label: Pull requests
+# How long a merged pull request stays in the list after it merges. 0s shows only open pull requests. Default: 24h.
+merged_window: 24h
+# The most pull requests in one project's entry, from 1 to 50. Default: 20.
+max_prs: 20
+
+github:
+  # The GitHub GraphQL endpoint. For GitHub Enterprise Server: https://<host>/api/graphql.
+  graphql_url: https://api.github.com/graphql
+  # The environment variable that holds the GitHub token. Default: GITHUB_TOKEN.
+  token_env: GITHUB_TOKEN
+
+# Each project gets one entry with the pull requests of its repositories. A repository can be in more than one
+# project. GitHub is read once for it each cycle.
+projects:
+  - project: visits                  # The project identifier.
+    repos:                           # Repositories as owner/name.
+      - tendwell-health/visits
+      - tendwell-health/infra
+  - project: billing
+    repos:
+      - tendwell-health/billing
+      - tendwell-health/infra
