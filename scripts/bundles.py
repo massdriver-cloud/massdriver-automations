@@ -575,6 +575,25 @@ def automations(k8s):
             "mentions": {"items": {"ui:order": ["match", "mentions"], "mentions": TAG}}},
     )
 
+    # ---------------------------------------------------------------- stash-sync
+    aws_creds = ("The `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets hold the AWS keys for CloudWatch."
+                 if k8s else "CloudWatch rules and presets use a task role that can read metrics and alarms, unless "
+                 "the `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets are set.")
+    out["stash-sync"] = dict(
+        title="Stash sync",
+        description="Copies CloudWatch and Prometheus metrics into Massdriver stash entries on an interval, so "
+                    "widgets show health, usage, traffic, and banners. In simulate mode it writes changing values "
+                    "from a scenario, for demos. " + aws_creds,
+        config=s("Settings (YAML)", f"The YAML config of stash-sync. See the [stash-sync README]"
+                 f"({README.format('stash-sync')}). Set `prometheus.token_env: PROMETHEUS_TOKEN` or "
+                 "`prometheus.password_env: PROMETHEUS_PASSWORD` to use the Prometheus secrets.",
+                 default="interval: 60s\npresets:\n  - preset: aws-alarm-health\n    instance: api-prod-database\n"
+                         "    with:\n      alarm: api-prod-database-cpu\n"),
+        extra={},
+        ui=None,
+        config_ui={"ui:widget": "textarea", "ui:options": {"rows": 16}},
+    )
+
     # ---------------------------------------------------------------- statuspage
     impact = choice("Impact", [("degraded", "Degraded performance"), ("partial_outage", "Partial outage"),
                                ("major_outage", "Major outage")],
@@ -747,6 +766,12 @@ SECRET_DEFS = {
     "AWS_SECRET_ACCESS_KEY": {"title": "AWS secret access key"},
     "SPLUNK_HEC_TOKEN": {"title": "Splunk HEC token"},
     "DD_API_KEY": {"title": "Datadog API key"},
+    "PROMETHEUS_TOKEN": {"title": "Prometheus token",
+                         "description": "A bearer token for the Prometheus HTTP API, for `prometheus.token_env: "
+                                        "PROMETHEUS_TOKEN`."},
+    "PROMETHEUS_PASSWORD": {"title": "Prometheus password",
+                            "description": "The basic auth password of `prometheus.username`, for "
+                                           "`prometheus.password_env: PROMETHEUS_PASSWORD`."},
     "COST_EXPLORER_PASSWORD": {"title": "Dashboard password",
                                "description": "The basic auth password. The user is the `username` in the settings, "
                                               "`massdriver` by default."},
@@ -789,6 +814,7 @@ SECRETS = {
     "router": ["ROUTER_ENV"],
     "upgrade-train": SLACK + ["UPGRADE_TRAIN_TOKEN"],
     "stale-proposals": SLACK + ["STALE_PROPOSALS_RUN_TOKEN"],
+    "stash-sync": ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "PROMETHEUS_TOKEN", "PROMETHEUS_PASSWORD"],
 }
 
 HOST = r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
