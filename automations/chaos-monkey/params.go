@@ -212,15 +212,21 @@ func (m *monkey) valueFor(s schema, current any) any {
 		}
 		return m.r.IntN(2) == 0
 	case "integer":
-		lo, hi := bounds(s, current)
-		ilo, ihi := int64(math.Ceil(lo)), int64(math.Floor(hi))
-		if ihi < ilo {
-			ihi = ilo
+		lo, hi := bounds(s, current, 1)
+		step := int64(1)
+		if v, ok := num(s["multipleOf"]); ok && v >= 1 && v == math.Trunc(v) {
+			step = int64(v)
 		}
-		return ilo + m.r.Int64N(ihi-ilo+1)
+		ilo := int64(math.Ceil(lo/float64(step))) * step
+		ihi := int64(math.Floor(hi/float64(step))) * step
+		if ihi < ilo {
+			return ilo
+		}
+		return ilo + m.r.Int64N((ihi-ilo)/step+1)*step
 	case "number":
-		lo, hi := bounds(s, current)
-		return math.Round((lo+m.r.Float64()*(hi-lo))*100) / 100
+		lo, hi := bounds(s, current, 0.01)
+		v := math.Round((lo+m.r.Float64()*(hi-lo))*100) / 100
+		return math.Min(math.Max(v, lo), hi)
 	case "string":
 		lo, hi := 3, 16
 		if v, ok := num(s["minLength"]); ok {
@@ -416,14 +422,15 @@ func choices(s schema) []any {
 	return out
 }
 
-func bounds(s schema, current any) (float64, float64) {
+// bounds is the range for a new number. step is the smallest gap that keeps an exclusive bound out.
+func bounds(s schema, current any, step float64) (float64, float64) {
 	lo, hasLo := num(s["minimum"])
 	hi, hasHi := num(s["maximum"])
 	if v, ok := num(s["exclusiveMinimum"]); ok {
-		lo, hasLo = v+1, true
+		lo, hasLo = v+step, true
 	}
 	if v, ok := num(s["exclusiveMaximum"]); ok {
-		hi, hasHi = v-1, true
+		hi, hasHi = v-step, true
 	}
 	c, _ := num(current)
 	spread := math.Max(10, math.Abs(c))

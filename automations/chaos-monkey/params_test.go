@@ -194,3 +194,21 @@ func TestSeedRepeatsTheRun(t *testing.T) {
 		t.Errorf("same seed, different runs:\n%v\n%v", a, b)
 	}
 }
+
+func TestMutateKeepsMultipleOfAndExclusiveBounds(t *testing.T) {
+	m := testMonkey(t, 10, "")
+	s := parseSchema(t, `{
+	  "size":  {"type": "integer", "minimum": 8, "maximum": 64, "multipleOf": 8},
+	  "ratio": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1}
+	}`)
+	for range 500 {
+		size := m.valueFor(s["size"].(map[string]any), nil).(int64)
+		if size%8 != 0 || size < 8 || size > 64 {
+			t.Fatalf("size = %d", size)
+		}
+		ratio := m.valueFor(s["ratio"].(map[string]any), nil).(float64)
+		if ratio <= 0 || ratio >= 1 {
+			t.Fatalf("ratio = %v", ratio)
+		}
+	}
+}

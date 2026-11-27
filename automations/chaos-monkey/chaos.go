@@ -53,7 +53,7 @@ var (
 var Definition = automation.Definition{
 	Name:        automationName,
 	Description: "Deploys presets, merged presets, mutated params, and gibberish to matching instances on a schedule.",
-	Events:      []string{"deployment.completed", "deployment.failed", "deployment.aborted"},
+	Events:      []string{"deployment.completed", "deployment.failed", "deployment.aborted", "deployment.rejected"},
 	New: func() (automation.Automation, error) {
 		var cfg Config
 		if err := automation.LoadConfig(&cfg); err != nil {
@@ -66,6 +66,9 @@ var Definition = automation.Definition{
 		sl := slack.FromEnv()
 		sl.WarnIgnoredChannels(slog.Default(), cfg.Slack.Channel)
 		c := New(api, sl, &cfg, os.Getenv("CHAOS_MONKEY_RUN_TOKEN"))
+		if cfg.Schedule == "" && c.runToken == "" {
+			slog.Warn("chaos-monkey will never run: set schedule or CHAOS_MONKEY_RUN_TOKEN")
+		}
 		if cfg.Schedule != "" {
 			cr := cron.New()
 			if _, err := cr.AddFunc(cfg.spec(), func() { c.runLogged(context.Background(), "") }); err != nil {
@@ -353,6 +356,8 @@ func (c *Chaos) Handle(ctx context.Context, ev automation.Event) error {
 		outcome = "failed"
 	case "deployment.aborted":
 		outcome = "was aborted"
+	case "deployment.rejected":
+		outcome = "was rejected"
 	default:
 		return nil
 	}
@@ -373,10 +378,20 @@ func (c *Chaos) Handle(ctx context.Context, ev automation.Event) error {
 	}
 	instance := ev.Attribute("md-instance")
 	automation.Logger(ctx).Info("chaos deployment finished", "instance", instance, "deployment_id", dep.ID, "outcome", outcome)
+	body, sig := splitSignature(strings.TrimPrefix(dep.Message, MessagePrefix), c.cfg.signatures)
 	c.notify(ctx, fmt.Sprintf("Chaos deployment %s of %s %s: %s",
-		c.link(attrs, dep.ID, dep.ID), c.link(attrs, "", instance), outcome,
-		strings.TrimPrefix(dep.Message, MessagePrefix)), "")
+		c.link(attrs, dep.ID, dep.ID), c.link(attrs, "", instance), outcome, body), sig)
 	return nil
+}
+
+// splitSignature takes the signature off the end of a deployment message, so the post puts it on its own line.
+func splitSignature(message string, signatures []string) (string, string) {
+	for _, sig := range signatures {
+		if body, ok := strings.CutSuffix(message, " "+sig); ok {
+			return body, sig
+		}
+	}
+	return message, ""
 }
 
 // link is a Slack link to the instance, or to one deployment in its history when deploymentID is set.
@@ -401,17 +416,17 @@ func (c *Chaos) link(attrs map[string]any, deploymentID, text string) string {
 	return "<" + u + "|" + text + ">"
 }
 
-// notify posts text and its signature to the channel, or logs them without one. A failed post is logged: the
-// deployment already exists, and a retry must not create another. An outcome's deployment message already ends
-// with its signature, so Handle passes none.
+// notify posts text and its signature to the channel, or logs the text without one. The signature comes from the
+// config, which never reaches the logs. A failed post is logged: the deployment already exists, and a retry must
+// not create another.
 func (c *Chaos) notify(ctx context.Context, text, sig string) {
 	log := automation.Logger(ctx)
-	if sig != "" {
-		text += "\n" + sig
-	}
 	if !c.slack.Sends(c.cfg.Slack.Channel) {
 		log.Info("chaos report logged", "text", text)
 		return
+	}
+	if sig != "" {
+		text += "\n" + sig
 	}
 	if _, err := c.slack.Post(ctx, slack.Message{Channel: c.cfg.Slack.Channel, Text: text}); err != nil {
 		log.Error("slack post failed", "err", err)

@@ -34,7 +34,8 @@ To run an automation against a real organization, see [Run locally](README.md#ru
 - Environment variables hold credentials and deployment wiring only. Behavior goes in the config file.
 - Never log or put in a span an environment variable, a config value, a token, a request body, or a full URL.
 - Logs are structured: short lowercase messages, `snake_case` keys, `info` when the automation changed
-  something and `debug` when it skipped something. No emoji in logs or in messages to Slack, Teams, or GitHub.
+  something and `debug` when it skipped something. No emoji in logs or in messages to Slack, Teams, or GitHub,
+  other than the sign-offs of chaos-monkey.
 - Return an error from `Handle` only when Massdriver should send the event again.
 - Massdriver delivers an event at least once. Handling the same event twice must not repeat side effects.
 
