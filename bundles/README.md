@@ -17,6 +17,7 @@ One Massdriver bundle for each automation and platform:
 | [rollback-on-failure](../automations/rollback-on-failure) | [massdriver-rollback-on-failure](massdriver-rollback-on-failure) | [massdriver-rollback-on-failure-ecs](massdriver-rollback-on-failure-ecs) |
 | [router](../automations/router) | [massdriver-router](massdriver-router) | [massdriver-router-ecs](massdriver-router-ecs) |
 | [sandbox-on-join](../automations/sandbox-on-join) | [massdriver-sandbox-on-join](massdriver-sandbox-on-join) | [massdriver-sandbox-on-join-ecs](massdriver-sandbox-on-join-ecs) |
+| [stale-proposals](../automations/stale-proposals) | [massdriver-stale-proposals](massdriver-stale-proposals) | [massdriver-stale-proposals-ecs](massdriver-stale-proposals-ecs) |
 | [statuspage](../automations/statuspage) | [massdriver-statuspage](massdriver-statuspage) | [massdriver-statuspage-ecs](massdriver-statuspage-ecs) |
 | [upgrade-train](../automations/upgrade-train) | [massdriver-upgrade-train](massdriver-upgrade-train) | [massdriver-upgrade-train-ecs](massdriver-upgrade-train-ecs) |
 
@@ -38,8 +39,7 @@ Publish the resource types that a bundle uses before you publish the bundle. See
 official, `website` and `aws-ecs-cluster` are examples in this repo, and `aws-iam-role` is the AWS credential type.
 
 An attribute value with commas, such as `api, web`, matches any of its values, where the config file accepts a
-list: the attributes of autodeploy-downstream rules, chaos-monkey's match, drift checks, freeze-guard windows, and
-upgrade-train stages.
+list: the attributes of autodeploy-downstream rules, chaos-monkey's match, drift checks, freeze-guard windows, upgrade-train stages, and stale-proposals' match, exclude, and mentions.
 
 ## Kubernetes
 

@@ -1,0 +1,46 @@
+# stale-proposals config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+# Every key is optional. Without a config file, nothing runs until POST /stale-proposals/run.
+
+slack:
+  # The channel for the digest, with SLACK_BOT_TOKEN. Empty writes the digest to the logs only. Ignored with only
+  # SLACK_WEBHOOK_URL.
+  channel: "#deploy-approvals"
+
+massdriver:
+  # The Massdriver UI, for the links in the digest. Default: https://app.massdriver.cloud.
+  app_url: https://app.massdriver.cloud
+
+# Standard cron: minute, hour, day of month, month, day of week. Also @daily, @every 4h.
+# Without a schedule, runs start only from POST /stale-proposals/run.
+schedule: "0 9 * * MON-FRI"
+# An IANA zone for the schedule. Default: UTC.
+timezone: America/Chicago
+
+# A proposal is in the digest once it has waited this long. A Go duration (36h, 90m) or days (2d). Default: 24h.
+remind_after: 24h
+# Reject proposals that have waited this long. Not shorter than remind_after. Default: never.
+reject_after: 14d
+# List the proposals that reject_after would reject, and reject none. Default: false.
+dry_run: true
+
+# environment (default): one heading for each project and environment. project: one heading for each project.
+group_by: environment
+
+# Effective attributes that a proposal's instance must have. A list matches any of its values. Default: every
+# proposal.
+match:
+  md-project: [api, web]
+
+# Skip the proposals whose instance has every one of these attributes.
+exclude:
+  md-environment: sandbox
+
+# Slack mentions added to the proposals that match each rule: users (<@U123>), groups (<!subteam^S123>), or
+# <!here>. A proposal gets the mentions of every rule that matches it.
+mentions:
+  - match:
+      md-environment: prod
+    mentions: ["<!subteam^S0123456789>"]
+  - match:
+      team: payments
+    mentions: ["<@U0123456789>"]

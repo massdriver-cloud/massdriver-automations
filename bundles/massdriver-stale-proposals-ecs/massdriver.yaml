@@ -1,0 +1,286 @@
+name: massdriver-stale-proposals-ecs
+description: Posts a digest of the proposed deployments that have waited too long for approval, with Slack mentions for
+  the people who can approve them, and can reject the oldest. Set the `STALE_PROPOSALS_RUN_TOKEN` secret to start runs
+  with `POST https://<host>/stale-proposals/run`. Runs on Amazon ECS with Fargate, with an event destination that sends
+  it only the events it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/massdriver-stale-proposals-ecs
+version: 0.1.0
+steps:
+- path: src
+  provisioner: opentofu:1.10
+params:
+  required:
+  - image
+  - ingress
+  - logs
+  - config
+  properties:
+    image:
+      type: object
+      title: Image
+      required:
+      - repository
+      - tag
+      properties:
+        repository:
+          type: string
+          title: Repository
+          description: The automations image. bundle-scanner adds `-scanner` to the tag, and router adds `-scripts` when
+            it runs commands.
+          default: ghcr.io/massdriver-cloud/massdriver-automations
+        tag:
+          type: string
+          title: Tag
+          description: The image tag, such as `0.2.0`. Pin a version so that a redeploy runs the same code.
+          default: '0.2'
+          pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
+          message:
+            pattern: Must be a valid image tag.
+    ingress:
+      type: object
+      title: Ingress
+      required:
+      - dns_records
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Where the automation is served. Empty uses `stale-proposals.<domain of the cluster's hosted zone>`.
+            The load balancer's HTTPS listener needs a certificate for it. Massdriver sends events to `https://<host>/hooks/massdriver`.
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          message:
+            pattern: Must be a lowercase DNS name, such as drift.automations.acme.com.
+        dns_records:
+          type: boolean
+          title: Create a DNS record
+          description: Creates a CNAME record to the load balancer when the host is in the cluster's hosted zone.
+          default: true
+    logs:
+      type: object
+      title: Logs
+      required:
+      - retention_days
+      properties:
+        retention_days:
+          type: integer
+          title: Retention (days)
+          description: Days that CloudWatch Logs keeps the logs.
+          default: 90
+          enum:
+          - 1
+          - 3
+          - 5
+          - 7
+          - 14
+          - 30
+          - 60
+          - 90
+          - 120
+          - 150
+          - 180
+          - 365
+          - 400
+          - 545
+          - 731
+          - 1096
+          - 1827
+          - 2192
+          - 2557
+          - 2922
+          - 3288
+          - 3653
+    config:
+      type: object
+      title: Settings
+      properties:
+        schedule:
+          type: string
+          title: Schedule
+          description: Standard cron (minute, hour, day of month, month, day of week), or `@daily`. Empty runs only from
+            `POST /stale-proposals/run`.
+          default: 0 9 * * MON-FRI
+        timezone:
+          type: string
+          title: Time zone
+          description: The time zone of the schedule.
+          default: UTC
+          examples:
+          - America/New_York
+          pattern: ^[A-Za-z_]+(/[A-Za-z0-9_+-]+)*$
+          message:
+            pattern: Must be an IANA time zone, such as America/New_York or UTC.
+        remind_after:
+          type: string
+          title: Remind after
+          description: How long a proposal waits before it is in the digest.
+          default: 24h
+          pattern: ^([0-9]+(\.[0-9]+)?d|([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+)$
+          message:
+            pattern: Must be a duration, such as 36h or 2d.
+        reject_after:
+          type: string
+          title: Reject after
+          description: Reject proposals that have waited this long. Empty rejects none.
+          examples:
+          - 14d
+          pattern: ^([0-9]+(\.[0-9]+)?d|([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+)$
+          message:
+            pattern: Must be a duration, such as 36h or 2d.
+        dry_run:
+          type: boolean
+          title: Dry run
+          description: List what would be rejected, and reject nothing.
+          default: false
+        group_by:
+          type: string
+          title: Group by
+          oneOf:
+          - const: environment
+            title: Project and environment
+          - const: project
+            title: Project
+          default: environment
+        match:
+          type: object
+          title: Instance attributes
+          description: Effective attributes that a proposal's instance must have. Empty matches every proposal. Separate
+            values with commas to match any of them, such as `api, web`.
+          default: {}
+          additionalProperties:
+            type: string
+        exclude:
+          type: object
+          title: Skip attributes
+          description: Skip the proposals whose instance has every one of these attributes. Separate values with commas
+            to match any of them, such as `api, web`.
+          default: {}
+          additionalProperties:
+            type: string
+        mentions:
+          type: array
+          title: Mentions
+          description: Slack mentions, such as `<@U123>`, `<!subteam^S123>`, or `<!here>`, added to the proposals each
+            rule matches.
+          items:
+            type: object
+            title: Mention rule
+            required:
+            - mentions
+            properties:
+              match:
+                type: object
+                title: Instance attributes
+                description: The proposals that get these mentions. Empty matches every proposal. Separate values with
+                  commas to match any of them, such as `api, web`.
+                default: {}
+                additionalProperties:
+                  type: string
+              mentions:
+                type: array
+                title: Mentions
+                items:
+                  type: string
+                  title: Mention
+                  examples:
+                  - <!subteam^S0123456789>
+                minItems: 1
+          default: []
+        slack:
+          type: object
+          title: Slack
+          properties:
+            channel:
+              type: string
+              title: Channel
+              description: The channel for the digest. Empty writes it to the logs only.
+              pattern: ^([#@]?[a-z0-9._-]+|[CG][A-Z0-9]+)$
+              message:
+                pattern: 'Must be a channel name, such as #infra, or a channel ID.'
+        massdriver:
+          type: object
+          title: Massdriver UI
+          properties:
+            app_url:
+              type: string
+              title: App URL
+              description: The Massdriver UI, for the links in messages. Empty uses https://app.massdriver.cloud.
+              pattern: ^https?://[^\s]+$
+              message:
+                pattern: Must be a URL.
+    otel:
+      type: object
+      title: Tracing
+      description: Sends OpenTelemetry traces to an OTLP endpoint. Set the `OTEL_EXPORTER_OTLP_HEADERS` secret when the
+        endpoint needs credentials.
+      properties:
+        endpoint:
+          type: string
+          title: OTLP endpoint
+          description: The OTLP/HTTP base URL of a collector, such as `http://otel-collector.observability:4318`. Empty
+            turns tracing off.
+dependencies:
+  aws_authentication:
+    resource_type: aws-iam-role
+    required: true
+  ecs_cluster:
+    resource_type: aws-ecs-cluster
+    required: true
+  service_account:
+    resource_type: massdriver-service-account
+    required: true
+resources: {}
+app:
+  secrets:
+    SLACK_BOT_TOKEN:
+      title: Slack bot token
+      description: The `xoxb-` token of the Slack app. Posts go to the channels in the settings.
+    SLACK_WEBHOOK_URL:
+      title: Slack webhook URL
+      description: An incoming webhook, for a workspace without the Slack app. Every post goes to its one channel. Ignored
+        when the bot token is set.
+    STALE_PROPOSALS_RUN_TOKEN:
+      title: Run token
+      description: 'Callers of `POST /stale-proposals/run` send it as `Authorization: Bearer <token>`.'
+    OTEL_EXPORTER_OTLP_HEADERS:
+      title: OTLP headers
+      description: Headers for the OTLP endpoint, as `key=value` pairs separated by commas, such as `authorization=Bearer
+        abc123`.
+ui:
+  ui:order:
+  - image
+  - ingress
+  - logs
+  - config
+  - otel
+  - '*'
+  image:
+    ui:order:
+    - repository
+    - tag
+  ingress:
+    ui:order:
+    - host
+    - dns_records
+  logs:
+    ui:order:
+    - retention_days
+  config:
+    ui:order:
+    - schedule
+    - timezone
+    - remind_after
+    - reject_after
+    - dry_run
+    - group_by
+    - match
+    - exclude
+    - mentions
+    - slack
+    - massdriver
+    mentions:
+      items:
+        ui:order:
+        - match
+        - mentions
+        mentions:
+          ui:field: tagInput

@@ -1,0 +1,17 @@
+query ProposedDeployments($org: ID!, $cursor: Cursor) {
+  deployments(
+    organizationId: $org
+    filter: { status: { eq: PROPOSED } }
+    sort: { field: CREATED_AT, order: ASC }
+    cursor: $cursor
+  ) {
+    cursor { next }
+    items {
+      id
+      createdAt
+      message
+      deployedBy
+      effectiveAttributes
+    }
+  }
+}
