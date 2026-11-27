@@ -1,0 +1,10 @@
+query StageInstances($org: ID!, $repo: OciRepoName!, $attributes: [AttributeFilter!], $cursor: Cursor) {
+  instances(
+    organizationId: $org
+    filter: { ociRepoName: { eq: $repo }, status: { eq: PROVISIONED }, attributes: $attributes }
+    cursor: $cursor
+  ) {
+    cursor { next }
+    items { id }
+  }
+}

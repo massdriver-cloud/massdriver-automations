@@ -1,0 +1,45 @@
+# upgrade-train config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+
+slack:
+  # The channel for the trains that do not name their own, with SLACK_BOT_TOKEN. Empty writes the posts to the logs
+  # only. Ignored with only SLACK_WEBHOOK_URL.
+  channel: "#releases"
+
+massdriver:
+  # The Massdriver UI, for the links in posts. Default: https://app.massdriver.cloud.
+  app_url: https://app.massdriver.cloud
+
+# Required: at least one train.
+trains:
+  - # Required. Unique. Posts, deployment messages, and POST /upgrade-train/run?train=<name> use it.
+    name: databases
+    # Required. The bundles (OCI repo names) whose new versions ride this train. Each bundle runs on its own.
+    bundles: [aws-aurora-postgres, aws-rds-mysql]
+    # Also run development versions, such as 1.3.1-dev.20261124T055403Z. Default: false.
+    include_development: false
+    # Replaces the default channel for this train.
+    slack:
+      channel: "#db-releases"
+    # Required: at least one stage. Stages run in order. An instance whose version constraint does not resolve to
+    # the new version, such as one pinned to another version, is left out and named in the post.
+    stages:
+      - # Required. Unique in the train.
+        name: dev
+        # Required. Effective attributes of the instances in this stage. A list matches any of its values.
+        match:
+          md-environment: dev
+        # deploy: deploy now. propose (default): create a proposal that a person approves.
+        mode: deploy
+        # How long the stage waits after its deployments complete, with no firing alarms on its instances, before
+        # the next stage starts. A Go duration, such as 30m or 24h. Default: 1h.
+        soak: 4h
+      - name: staging
+        match:
+          md-environment: staging
+        mode: deploy
+        soak: 24h
+      - name: prod
+        match:
+          md-environment: [prod, prod-eu]
+        mode: propose
+        soak: 1h

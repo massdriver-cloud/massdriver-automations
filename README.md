@@ -53,6 +53,7 @@ flowchart LR
 | 📣 [release-notes](automations/release-notes) | `repo.published` | Posts new bundle versions, and the instances that can upgrade, to Slack and Teams. |
 | 🔍 [bundle-scanner](automations/bundle-scanner) | `repo.published` | Scans each new bundle version with Trivy and Checkov. Uses the `-scanner` image tag. |
 | 🐒 [chaos-monkey](automations/chaos-monkey) | `deployment.completed`, `deployment.failed`, `deployment.aborted`, `deployment.rejected` | Sends random presets, merged presets, mutated params, and gibberish to the instances that match its attributes, as proposals, plans, or deployments. |
+| 🚂 [upgrade-train](automations/upgrade-train) | `repo.published`, `deployment.completed`, `deployment.failed`, `deployment.aborted`, `deployment.rejected` | Moves each new bundle version through stages of instances, such as dev, staging, and prod, with a soak time and an alarm check between stages. |
 | 💸 [cost-explorer](automations/cost-explorer) | `deployment.completed` | Serves a dashboard of instance costs that you can group, filter, and chart over time. |
 | 🏖️ [sandbox-on-join](automations/sandbox-on-join) | `group_membership.*`, `deployment.completed` | Forks a sandbox environment for each new group member, and removes it when they leave. |
 | 🚦 [statuspage](automations/statuspage) | `alarm.*`, `alarm_state.created`, `deployment.*`, `instance.*` | Serves a public status page from alarms, instances, and deployments. |
@@ -236,6 +237,7 @@ does not post to Slack. drift and rollback-on-failure reply in the thread of an 
 | stale-proposals | A digest of proposals that wait too long, and the ones it rejected | `slack.channel` |
 | release-notes | New bundle versions | `slack.channel` |
 | rollback-on-failure | Rollback notices, and the result of each rollback in the notice's thread | `slack.channel` |
+| upgrade-train | Each stage start, soak, and stop, and the end of each run | `slack.channel`, `trains[].slack.channel` |
 
 ### Webhook
 
