@@ -127,41 +127,6 @@ func (p *ParamsToGit) Handle(ctx context.Context, ev automation.Event) error {
 	ctx, cancel := context.WithTimeout(ctx, handleTimeout)
 	defer cancel()
 
-	var out struct {
-		Instance *instanceState `json:"instance"`
-	}
-	if err := p.api.Do(ctx, instanceQuery, map[string]any{"org": p.api.OrganizationID, "id": instance}, &out); err != nil {
-		return err
-	}
-	inst := out.Instance
-
-	// Events can arrive late or twice. Git follows the instance's current state, so an old event never overwrites
-	// the params of a newer deployment.
-	var content []byte
-	switch action {
-	case "PROVISION":
-		if inst == nil || inst.Status == "DECOMMISSIONED" || inst.Status == "INITIALIZED" {
-			log.Debug("sync skipped", "reason", "instance_not_deployed")
-			return nil
-		}
-		if inst.LatestProvision == nil || inst.LatestProvision.ID != dep.ID {
-			log.Debug("sync skipped", "reason", "newer_deployment")
-			return nil
-		}
-		red := &redactor{omit: rt.sensitive == SensitiveOmit, key: p.maskKey, scope: instance}
-		b, err := render(inst.LatestProvision.Params, inst.LatestProvision.Bundle.ParamsSchema, red)
-		if err != nil {
-			log.Error("params render failed", "err", err)
-			return nil
-		}
-		content = b
-	case "DECOMMISSION":
-		if inst != nil && inst.Status == "PROVISIONED" {
-			log.Debug("sync skipped", "reason", "redeployed")
-			return nil
-		}
-	}
-
 	data, err := eventData(ev)
 	if err != nil {
 		log.Error("event decode failed", "err", err)
@@ -174,13 +139,24 @@ func (p *ParamsToGit) Handle(ctx context.Context, ev automation.Event) error {
 	}
 	c := change{
 		path:    joinPath(rt.root, project, environment, component, fileName),
-		content: content,
 		message: message,
 		author:  p.author(rt, ev, dep),
 	}
 
-	switch rt.strategy {
-	case StrategyPullRequest:
+	// The instance is read under the branch's lock: a newer deployment's write that ran first is then visible, and
+	// this one stands down instead of overwriting it.
+	write := func(deliver func(change) error) func() error {
+		return func() error {
+			content, ok, err := p.content(ctx, log, rt, instance, action, dep.ID)
+			if err != nil || !ok {
+				return err
+			}
+			c.content = content
+			return deliver(c)
+		}
+	}
+
+	if rt.strategy == StrategyPullRequest {
 		head, err := rt.prBranch.eval(ctx, data)
 		if err == nil && !rt.rolling {
 			head += "-" + shortID(dep.ID)
@@ -194,10 +170,44 @@ func (p *ParamsToGit) Handle(ctx context.Context, ev automation.Event) error {
 			log.Error("pull request title failed", "err", err)
 			return nil
 		}
-		return p.locked(ctx, rt.repo, head, log, func() error { return p.viaPull(ctx, log, rt, head, title, c) })
-	default:
-		return p.locked(ctx, rt.repo, rt.branch, log, func() error { return p.viaPush(ctx, log, rt, c) })
+		return p.locked(ctx, rt.repo, head, log, write(func(c change) error { return p.viaPull(ctx, log, rt, head, title, c) }))
 	}
+	return p.locked(ctx, rt.repo, rt.branch, log, write(func(c change) error { return p.viaPush(ctx, log, rt, c) }))
+}
+
+// content returns the file to write, or nil to delete it. ok is false when the event is out of date: events can
+// arrive late or twice, and git follows the instance's current state.
+func (p *ParamsToGit) content(ctx context.Context, log *slog.Logger, rt *route, instance, action, deploymentID string) ([]byte, bool, error) {
+	var out struct {
+		Instance *instanceState `json:"instance"`
+	}
+	if err := p.api.Do(ctx, instanceQuery, map[string]any{"org": p.api.OrganizationID, "id": instance}, &out); err != nil {
+		return nil, false, err
+	}
+	inst := out.Instance
+
+	if action == "DECOMMISSION" {
+		if inst != nil && inst.Status == "PROVISIONED" {
+			log.Debug("sync skipped", "reason", "redeployed")
+			return nil, false, nil
+		}
+		return nil, true, nil
+	}
+	if inst == nil || inst.Status == "DECOMMISSIONED" || inst.Status == "INITIALIZED" {
+		log.Debug("sync skipped", "reason", "instance_not_deployed")
+		return nil, false, nil
+	}
+	if inst.LatestProvision == nil || inst.LatestProvision.ID != deploymentID {
+		log.Debug("sync skipped", "reason", "newer_deployment")
+		return nil, false, nil
+	}
+	red := &redactor{omit: rt.sensitive == SensitiveOmit, key: p.maskKey, scope: instance}
+	b, err := render(inst.LatestProvision.Params, inst.LatestProvision.Bundle.ParamsSchema, red)
+	if err != nil {
+		log.Error("params render failed", "err", err)
+		return nil, false, nil
+	}
+	return b, true, nil
 }
 
 // change is one file to write, or to delete when content is nil.
