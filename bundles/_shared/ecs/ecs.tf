@@ -225,6 +225,8 @@ resource "aws_ecs_service" "main" {
   deployment_maximum_percent         = 100
   health_check_grace_period_seconds  = 60
   wait_for_steady_state              = true
+  force_new_deployment               = local.image_moves
+  triggers                           = local.image_moves ? { image = plantimestamp() } : {}
 
   enable_ecs_managed_tags = true
   propagate_tags          = "SERVICE"

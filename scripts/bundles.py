@@ -994,7 +994,7 @@ HOST_MESSAGE = {"pattern": "Must be a lowercase DNS name, such as drift.automati
 IMAGE = obj("Image", {
     "repository": s("Repository", "The automations image. bundle-scanner adds `-scanner` to the tag, and router "
                     "adds `-scripts` when it runs commands.", default="ghcr.io/massdriver-cloud/massdriver-automations"),
-    "tag": s("Tag", "The image tag, such as `0.2.0`. Pin a version so that a redeploy runs the same code.",
+    "tag": s("Tag", "The image tag, such as `0.2.0`. Pin a version so that a redeploy runs the same code. A deploy of a tag that moves, such as `latest` or `0.2`, restarts the automation on the image the tag names then.",
              default="0.2", pattern="^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$",
              message={"pattern": "Must be a valid image tag."}),
 }, required=["repository", "tag"])

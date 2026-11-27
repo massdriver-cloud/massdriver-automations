@@ -10,7 +10,10 @@ locals {
   config_file = "config.yaml"
 
   image = "${var.image.repository}:${var.image.tag}"
-  host  = var.ingress.host
+  # A tag such as latest or 0.2 moves to new images. A deploy restarts the automation so it runs the image the tag
+  # names now, the same as a deploy of a full version such as 0.2.1.
+  image_moves = !can(regex("^v?[0-9]+\\.[0-9]+\\.[0-9]+$", var.image.tag))
+  host        = var.ingress.host
 
   massdriver_env = {
     MASSDRIVER_ORGANIZATION_ID = var.service_account.organization_id

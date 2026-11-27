@@ -30,7 +30,8 @@ params:
         tag:
           type: string
           title: Tag
-          description: The image tag, such as `0.2.0`. Pin a version so that a redeploy runs the same code.
+          description: The image tag, such as `0.2.0`. Pin a version so that a redeploy runs the same code. A deploy of
+            a tag that moves, such as `latest` or `0.2`, restarts the automation on the image the tag names then.
           default: '0.2'
           pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
           message:

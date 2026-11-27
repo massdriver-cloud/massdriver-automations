@@ -112,12 +112,12 @@ resource "kubernetes_deployment_v1" "main" {
     template {
       metadata {
         labels = merge(local.labels, { "app.kubernetes.io/name" = each.key })
-        annotations = {
+        annotations = merge({
           # Restarts the pod when its settings change. The files and the env are read only at start.
           "massdriver.cloud/config-hash" = sha256(jsonencode([
             local.env[each.key], each.value.files, each.value.scripts
           ]))
-        }
+        }, local.image_moves ? { "massdriver.cloud/deployed-at" = plantimestamp() } : {})
       }
 
       spec {
