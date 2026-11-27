@@ -4,6 +4,8 @@ On an interval, reads the pull requests of the GitHub repositories that belong t
 them to one JSON entry in the project's stash. A [note](https://docs.massdriver.cloud/guides/annotations/notes)
 pinned to the project can then list what is waiting for review, what is running checks, and what is merging.
 
+![A pull request note pinned on the visits canvas next to the environment's instances, with merged, checking and queued PRs](note.png)
+
 ## The entry
 
 The key is `github/prs` in each project's stash. The value:
