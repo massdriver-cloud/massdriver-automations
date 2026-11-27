@@ -64,9 +64,10 @@ The service account needs:
 - with the `copy*` options: `resource:view` and a resource grant for each copied environment default and remote
   reference, and `instance:configure` on each template instance with secrets
 
-If your organization declares custom attributes at the `ENVIRONMENT` scope, Massdriver accepts only declared
-keys with declared values. Declare `owner` with the email of every person who can get a sandbox, and `sandbox`
-with the value `true`. Without environment-scope custom attributes, any key and value is accepted.
+If your organization declares any custom attributes, at any scope, Massdriver accepts only declared keys with
+declared values on an environment. Declare `owner` at the `ENVIRONMENT` scope with the email of every person who can
+get a sandbox, and `sandbox` with the value `true`. Without them, every fork fails with the message `rollback`. An
+organization with no custom attributes accepts any key and value.
 
 ## Event destination
 
