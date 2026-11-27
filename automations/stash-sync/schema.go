@@ -34,7 +34,7 @@ func (c catalog) prepare(e Entry) (any, error) {
 		return nil, errors.New("no widget reads this key")
 	}
 	if w.Scope != e.Scope.Kind {
-		return nil, fmt.Errorf("the key can be set only on a %s", w.Scope)
+		return nil, fmt.Errorf("the key belongs in the stash of the %s, not of the %s", w.Scope, e.Scope.Kind)
 	}
 	if w.Format != e.Format {
 		return nil, fmt.Errorf("the key needs format %s", w.Format)

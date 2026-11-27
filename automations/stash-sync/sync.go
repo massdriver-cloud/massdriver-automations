@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"strconv"
 	"sync"
@@ -52,7 +53,7 @@ func readings(ctx context.Context, groups []*group, sources map[string]Source) [
 		if g.whole {
 			res := results[gi][0]
 			if res.err != nil {
-				log.Error("query failed", append(attrs, "err", res.err)...)
+				logQueryError(log, res.err, attrs...)
 				continue
 			}
 			e.Data = res.value
@@ -63,7 +64,7 @@ func readings(ctx context.Context, groups []*group, sources map[string]Source) [
 		for ri, r := range g.rules {
 			res := results[gi][ri]
 			if res.err != nil {
-				log.Error("query failed", append(attrs, "field", r.Target.Field, "err", res.err)...)
+				logQueryError(log, res.err, append(attrs, "field", r.Target.Field)...)
 				continue
 			}
 			fields[r.Target.Field] = res.value
@@ -75,6 +76,15 @@ func readings(ctx context.Context, groups []*group, sources map[string]Source) [
 		entries = append(entries, e)
 	}
 	return entries
+}
+
+// logQueryError logs a query with no data at debug, because a quiet metric is normal, and other errors at error.
+func logQueryError(log *slog.Logger, err error, attrs ...any) {
+	if errors.Is(err, ErrNoData) {
+		log.Debug("query has no data", attrs...)
+		return
+	}
+	log.Error("query failed", append(attrs, "err", err)...)
 }
 
 // evaluate returns a rule's value: its fixed value, or its query's number after scale, default, and text.
