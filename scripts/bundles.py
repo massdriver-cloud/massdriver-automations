@@ -536,6 +536,45 @@ def automations(k8s):
             "copySecrets", "copyRemoteReferences"]}}},
     )
 
+    # ---------------------------------------------------------------- stale-proposals
+    wait = dict(pattern=r"^([0-9]+(\.[0-9]+)?d|([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+)$",
+                message={"pattern": "Must be a duration, such as 36h or 2d."})
+    out["stale-proposals"] = dict(
+        title="Stale proposals",
+        description="Posts a digest of the proposed deployments that have waited too long for approval, with Slack "
+                    "mentions for the people who can approve them, and can reject the oldest. Set the "
+                    "`STALE_PROPOSALS_RUN_TOKEN` secret to start runs with `POST https://<host>/stale-proposals/run`.",
+        config=obj("Digest", {
+            "schedule": s("Schedule", "Standard cron (minute, hour, day of month, month, day of week), or "
+                          "`@daily`. Empty runs only from `POST /stale-proposals/run`.",
+                          default="0 9 * * MON-FRI"),
+            "timezone": s("Time zone", "The time zone of the schedule.", default="UTC", **TIMEZONE),
+            "remind_after": s("Remind after", "How long a proposal waits before it is in the digest.",
+                              default="24h", **wait),
+            "reject_after": s("Reject after", "Reject proposals that have waited this long. Empty rejects none.",
+                              examples=["14d"], **wait),
+            "dry_run": b("Dry run", "List what would be rejected, and reject nothing."),
+            "group_by": choice("Group by", [("environment", "Project and environment"), ("project", "Project")],
+                               default="environment"),
+            "match": values_map("Instance attributes", "Effective attributes that a proposal's instance must "
+                                "have. Empty matches every proposal."),
+            "exclude": values_map("Skip attributes", "Skip the proposals whose instance has every one of these "
+                                  "attributes."),
+            "mentions": arr("Mentions", obj("Mention rule", {
+                "match": values_map("Instance attributes", "The proposals that get these mentions. Empty "
+                                    "matches every proposal."),
+                "mentions": arr("Mentions", s("Mention", examples=["<!subteam^S0123456789>"]), minItems=1),
+            }, required=["mentions"]), "Slack mentions, such as `<@U123>`, `<!subteam^S123>`, or `<!here>`, "
+               "added to the proposals each rule matches.", default=[]),
+            "slack": slack("The channel for the digest. Empty writes it to the logs only."),
+            "massdriver": massdriver_ui(),
+        }),
+        extra={},
+        ui={"ui:order": ["schedule", "timezone", "remind_after", "reject_after", "dry_run", "group_by", "match",
+                         "exclude", "mentions", "slack", "massdriver"],
+            "mentions": {"items": {"ui:order": ["match", "mentions"], "mentions": TAG}}},
+    )
+
     # ---------------------------------------------------------------- statuspage
     impact = choice("Impact", [("degraded", "Degraded performance"), ("partial_outage", "Partial outage"),
                                ("major_outage", "Major outage")],
@@ -669,6 +708,9 @@ SECRET_DEFS = {
     "CHAOS_MONKEY_RUN_TOKEN": {"title": "Run token",
                                "description": "Callers of `POST /chaos-monkey/run` send it as "
                                               "`Authorization: Bearer <token>`."},
+    "STALE_PROPOSALS_RUN_TOKEN": {"title": "Run token",
+                                  "description": "Callers of `POST /stale-proposals/run` send it as "
+                                                 "`Authorization: Bearer <token>`."},
     "DRIFT_RUN_TOKEN": {"title": "Run token",
                         "description": "Callers of `POST /drift/run` send it as `Authorization: Bearer <token>`."},
     "FREEZE_ADMIN_TOKEN": {"title": "Admin token",
@@ -697,6 +739,7 @@ SECRETS = {
     "release-notes": SLACK + ["TEAMS_WEBHOOK_URL"],
     "rollback-on-failure": SLACK,
     "router": ["ROUTER_ENV"],
+    "stale-proposals": SLACK + ["STALE_PROPOSALS_RUN_TOKEN"],
 }
 
 HOST = r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"

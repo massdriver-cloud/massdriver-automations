@@ -48,6 +48,7 @@ flowchart LR
 | 🧭 [drift](automations/drift) | `deployment.completed`, `deployment.failed`, `deployment.aborted` | Plans instances on a schedule, alerts Slack about drift, and can re-apply the deployed configuration. |
 | 🥶 [freeze-guard](automations/freeze-guard) | `group.created`, `group.updated`, `group.deleted` | Adds deny policies for deployment actions to groups during change freeze windows. |
 | 💬 [proposal-chatops](automations/proposal-chatops) | `deployment.proposed`, `deployment.approved`, `deployment.rejected` | Approve or reject proposed deployments from Slack. |
+| ⏰ [stale-proposals](automations/stale-proposals) | none (reads the API on a schedule) | Posts a digest of proposed deployments that wait too long for approval, with Slack mentions, and can reject the oldest. |
 | 🐙 [github-deployments](automations/github-deployments) | `deployment.*` | Shows Massdriver deployments as GitHub Deployments. |
 | 📣 [release-notes](automations/release-notes) | `repo.published` | Posts new bundle versions, and the instances that can upgrade, to Slack and Teams. |
 | 🔍 [bundle-scanner](automations/bundle-scanner) | `repo.published` | Scans each new bundle version with Trivy and Checkov. Uses the `-scanner` image tag. |
@@ -232,6 +233,7 @@ does not post to Slack. drift and rollback-on-failure reply in the thread of an 
 | drift | Drift alerts, the outcome of each resolution in the alert's thread, and run totals | `slack.channel`, `checks[].slack.channel` |
 | freeze-guard | Window starts, ends, and lifts | `slack.channel`, `windows[].slack.channel` |
 | proposal-chatops | Proposals with Approve and Reject buttons | `slack.channel`, `slack.channel_attribute` |
+| stale-proposals | A digest of proposals that wait too long, and the ones it rejected | `slack.channel` |
 | release-notes | New bundle versions | `slack.channel` |
 | rollback-on-failure | Rollback notices, and the result of each rollback in the notice's thread | `slack.channel` |
 
