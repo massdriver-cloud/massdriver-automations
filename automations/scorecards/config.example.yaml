@@ -58,3 +58,9 @@ scorecards:
       gold: 100
       silver: 80
       bronze: 50
+
+results:
+  # The start of the stash keys that scorecards writes. Default: md/v1. The server rejects an md/ key until its
+  # widget catalog has it; a prefix outside md/, such as results/v1, shows each value as a labeled metadata row
+  # until then. Checks name their keys in full, so they are not changed by it.
+  prefix: md/v1

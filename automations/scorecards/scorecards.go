@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -26,22 +25,27 @@ const workers = 4
 // jobTimeout bounds one job.
 const jobTimeout = 5 * time.Minute
 
-// Fact keys.
+// Facts are the names of the fact keys, after the prefix.
 const (
-	KeyDelivery    = "md/v1/delivery"
-	KeyReliability = "md/v1/reliability"
-	KeyCurrency    = "md/v1/currency"
-	KeyPending     = "md/v1/pending"
-	KeyParity      = "md/v1/parity"
-	KeyOwnership   = "md/v1/ownership"
+	FactDelivery    = "delivery"
+	FactReliability = "reliability"
+	FactCurrency    = "currency"
+	FactPending     = "pending"
+	FactParity      = "parity"
+	FactOwnership   = "ownership"
 )
 
-// ownKey matches the keys that scorecards writes. A change to one of them is not a reason to compute again.
-var ownKey = regexp.MustCompile(`^md/v1/(scorecard/.+|delivery|reliability|currency|pending|parity|ownership)$`)
+var facts = []string{FactDelivery, FactReliability, FactCurrency, FactPending, FactParity, FactOwnership}
 
-// Condition is the jq condition of the event destination. It drops the stash events of the keys scorecards writes.
-const Condition = `(.type | startswith("stash_entry.") | not) or ` +
-	`(.data.entity.key | test("^md/v1/(scorecard/|(delivery|reliability|currency|pending|parity|ownership)$)") | not)`
+// The keys with the default prefix.
+const (
+	KeyDelivery    = massdriver.DefaultResultPrefix + "/" + FactDelivery
+	KeyReliability = massdriver.DefaultResultPrefix + "/" + FactReliability
+	KeyCurrency    = massdriver.DefaultResultPrefix + "/" + FactCurrency
+	KeyPending     = massdriver.DefaultResultPrefix + "/" + FactPending
+	KeyParity      = massdriver.DefaultResultPrefix + "/" + FactParity
+	KeyOwnership   = massdriver.DefaultResultPrefix + "/" + FactOwnership
+)
 
 // Events are the event types that start a computation.
 var Events = []string{
@@ -89,7 +93,7 @@ type Scorecards struct {
 
 // New returns the automation. now is the clock.
 func New(cfg *Config, api API, stash Stash, now func() time.Time) *Scorecards {
-	return &Scorecards{cfg: cfg, api: api, out: newWriter(stash, api), now: now, queue: newQueue()}
+	return &Scorecards{cfg: cfg, api: api, out: newWriter(stash, api, now, time.Duration(cfg.Interval)), now: now, queue: newQueue()}
 }
 
 // Job keys.
@@ -136,7 +140,7 @@ func (s *Scorecards) Handle(ctx context.Context, ev automation.Event) error {
 				ID   string `json:"id"`
 			} `json:"scope"`
 		}
-		if err := ev.DecodeEntity(&entry); err != nil || ownKey.MatchString(entry.Key) {
+		if err := ev.DecodeEntity(&entry); err != nil || s.cfg.ownKey(entry.Key) {
 			log.Debug("event skipped", "reason", "own_key")
 			return nil
 		}
@@ -159,6 +163,16 @@ func (s *Scorecards) Handle(ctx context.Context, ev automation.Event) error {
 		}
 	}
 	return nil
+}
+
+// live reports whether an instance has infrastructure to score: it was deployed and not decommissioned. An empty
+// status is an instance from a list that does not say, which counts.
+func live(status string) bool {
+	switch status {
+	case "INITIALIZED", "DECOMMISSIONED":
+		return false
+	}
+	return true
 }
 
 // environmentID is an environment's ID from its project and its identifier in the project.
@@ -255,7 +269,7 @@ func (s *Scorecards) queueInstances(ctx context.Context, f InstanceFilter) error
 		return err
 	}
 	for _, r := range refs {
-		if len(s.cfg.matching(r.EffectiveAttributes)) > 0 {
+		if live(r.Status) && len(s.cfg.matching(r.EffectiveAttributes)) > 0 {
 			s.queue.add(jobInstance + r.ID)
 		}
 	}
@@ -272,6 +286,10 @@ func (s *Scorecards) instance(ctx context.Context, id string) error {
 	}
 	if err != nil {
 		return err
+	}
+	if !live(inst.Status) {
+		log.Debug("instance skipped", "reason", "not_deployed")
+		return nil
 	}
 	cards := s.cfg.matching(inst.EffectiveAttributes)
 	if len(cards) == 0 {
@@ -292,7 +310,7 @@ func (s *Scorecards) instance(ctx context.Context, id string) error {
 		return err
 	}
 	for _, sc := range cards {
-		s.write(ctx, scope, scorecardKey(sc.Name), score(ctx, sc, in))
+		s.write(ctx, scope, s.cfg.scorecardKey(sc.Name), score(ctx, sc, in))
 	}
 	s.queueRollups(inst.Environment.ID, inst.Environment.Project.ID)
 	return nil
@@ -317,7 +335,7 @@ func (s *Scorecards) facts(ctx context.Context, now time.Time, inst *Instance) m
 			}
 		}
 		if err == nil {
-			out[KeyDelivery] = delivery(window, deps, automated, inst.LatestProvision)
+			out[s.cfg.key(FactDelivery)] = delivery(window, deps, automated, inst.LatestProvision)
 		}
 	}
 	if err != nil {
@@ -330,7 +348,7 @@ func (s *Scorecards) facts(ctx context.Context, now time.Time, inst *Instance) m
 		var changes []AuditEvent
 		changes, err = s.api.AuditEvents(ctx, inst.ID, []string{"alarm_state.created"}, "", now.Add(-window))
 		if err == nil {
-			out[KeyReliability] = reliability(now, window, alarms, changes)
+			out[s.cfg.key(FactReliability)] = reliability(now, window, alarms, changes)
 		}
 	}
 	if err != nil {
@@ -338,15 +356,20 @@ func (s *Scorecards) facts(ctx context.Context, now time.Time, inst *Instance) m
 	}
 
 	if inst.Bundle != nil && inst.DeployedVersion != "" {
-		tags, err := s.api.Tags(ctx, inst.Bundle.Name)
+		tags, err := s.api.Tags(ctx, inst.Bundle.Name, "STABLE")
+		if err == nil && strings.Contains(inst.DeployedVersion, "-") {
+			var dev []Tag
+			dev, err = s.api.Tags(ctx, inst.Bundle.Name, "DEV")
+			tags = append(tags, dev...)
+		}
 		if err != nil {
 			failed("currency", err)
 		} else if c, ok := currency(now, inst.DeployedVersion, tags); ok {
-			out[KeyCurrency] = c
+			out[s.cfg.key(FactCurrency)] = c
 		}
 	}
 
-	out[KeyPending] = pending(inst)
+	out[s.cfg.key(FactPending)] = pending(inst)
 	return out
 }
 
@@ -441,14 +464,14 @@ func (s *Scorecards) rollups(ctx context.Context, scope Scope) error {
 		sc := &s.cfg.Scorecards[i]
 		var scopes []Scope
 		for _, r := range refs {
-			if sc.Match.Matches(r.EffectiveAttributes) {
+			if live(r.Status) && sc.Match.Matches(r.EffectiveAttributes) {
 				scopes = append(scopes, Scope{Kind: "instance", ID: r.ID})
 			}
 		}
 		if len(scopes) == 0 {
 			continue
 		}
-		entries, err := s.api.StashEntries(ctx, scopes, []string{scorecardKey(sc.Name)})
+		entries, err := s.api.StashEntries(ctx, scopes, []string{s.cfg.scorecardKey(sc.Name)})
 		if err != nil {
 			return err
 		}
@@ -460,7 +483,7 @@ func (s *Scorecards) rollups(ctx context.Context, scope Scope) error {
 			}
 		}
 		if r, ok := rollup(now, sc, scores); ok {
-			s.write(ctx, scope, scorecardKey(sc.Name), r)
+			s.write(ctx, scope, s.cfg.scorecardKey(sc.Name), r)
 		}
 	}
 	return nil
@@ -476,7 +499,7 @@ func (s *Scorecards) parity(ctx context.Context, env string) error {
 	if err != nil {
 		return err
 	}
-	s.write(ctx, Scope{Kind: "environment", ID: env}, KeyParity, parity(s.now().UTC().Truncate(time.Second), reference, comparisons))
+	s.write(ctx, Scope{Kind: "environment", ID: env}, s.cfg.key(FactParity), parity(s.now().UTC().Truncate(time.Second), reference, comparisons))
 	return nil
 }
 
@@ -490,7 +513,7 @@ func (s *Scorecards) ownership(ctx context.Context) error {
 	}
 	envsByProject := map[string]map[string]bool{}
 	for _, r := range refs {
-		if len(s.cfg.matching(r.EffectiveAttributes)) == 0 {
+		if !live(r.Status) || len(s.cfg.matching(r.EffectiveAttributes)) == 0 {
 			continue
 		}
 		p := r.Environment.Project.ID
@@ -560,7 +583,7 @@ func (s *Scorecards) ownership(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
-			s.write(ctx, Scope{Kind: "environment", ID: env}, KeyOwnership, o)
+			s.write(ctx, Scope{Kind: "environment", ID: env}, s.cfg.key(FactOwnership), o)
 		}
 		var pg []Group
 		for _, id := range sortedKeys(projectOwners) {
@@ -570,7 +593,7 @@ func (s *Scorecards) ownership(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		s.write(ctx, Scope{Kind: "project", ID: project}, KeyOwnership, o)
+		s.write(ctx, Scope{Kind: "project", ID: project}, s.cfg.key(FactOwnership), o)
 	}
 	return nil
 }
@@ -578,7 +601,7 @@ func (s *Scorecards) ownership(ctx context.Context) error {
 // write sets an entry when it changed. A failed write is logged; the next event or interval writes it again.
 func (s *Scorecards) write(ctx context.Context, scope Scope, key string, v any) {
 	log := automation.Logger(ctx).With("scope", scope.Kind, "scope_id", scope.ID, "key", key)
-	wrote, err := s.out.write(ctx, scope, key, v)
+	wrote, err := s.out.write(ctx, scope, key, strings.TrimPrefix(key, s.cfg.key("")), v)
 	switch {
 	case err != nil:
 		log.Error("stash entry write failed", "err", err)

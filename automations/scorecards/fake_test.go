@@ -103,8 +103,14 @@ func (f *fakeMassdriver) AuditEvents(_ context.Context, instance string, types [
 	return out, nil
 }
 
-func (f *fakeMassdriver) Tags(_ context.Context, repo string) ([]Tag, error) {
-	return f.tags[repo], f.err("Tags")
+func (f *fakeMassdriver) Tags(_ context.Context, repo, channel string) ([]Tag, error) {
+	var out []Tag
+	for _, t := range f.tags[repo] {
+		if strings.Contains(t.Tag, "-") == (channel == "DEV") {
+			out = append(out, t)
+		}
+	}
+	return out, f.err("Tags")
 }
 
 func (f *fakeMassdriver) StashEntries(_ context.Context, scopes []Scope, keys []string) ([]StashValue, error) {
@@ -133,7 +139,7 @@ func (f *fakeMassdriver) Instances(_ context.Context, filter InstanceFilter) ([]
 			filter.Repo != "" && (inst.Bundle == nil || inst.Bundle.Name != filter.Repo) {
 			continue
 		}
-		r := InstanceRef{ID: inst.ID, EffectiveAttributes: inst.EffectiveAttributes}
+		r := InstanceRef{ID: inst.ID, Status: inst.Status, EffectiveAttributes: inst.EffectiveAttributes}
 		r.Environment.ID = inst.Environment.ID
 		r.Environment.Project.ID = inst.Environment.Project.ID
 		out = append(out, r)
@@ -172,7 +178,7 @@ func (f *fakeMassdriver) Set(_ context.Context, w Write) error {
 	defer f.mu.Unlock()
 	f.writes = append(f.writes, w)
 	v := w.Value
-	f.stash[w.Scope.Kind+"/"+w.Scope.ID+"/"+w.Key] = stashValue(w.Scope, w.Key, v, "JSON", time.Time{})
+	f.stash[w.Scope.Kind+"/"+w.Scope.ID+"/"+w.Key] = stashValue(w.Scope, w.Key, v, "JSON", now)
 	return nil
 }
 

@@ -165,11 +165,27 @@ func TestRestartWritesNothingThatDidNotChange(t *testing.T) {
 	e.s.Drain(context.Background())
 	first := len(e.md.written())
 
-	restarted := New(e.s.cfg, e.md, e.md, func() time.Time { return now.Add(time.Hour) })
+	restarted := New(e.s.cfg, e.md, e.md, func() time.Time { return now.Add(30 * time.Minute) })
 	restarted.Pass()
 	restarted.Drain(context.Background())
 	if n := len(e.md.written()); n != first {
 		t.Errorf("writes = %d after a restart, want %d", n, first)
+	}
+}
+
+// An unchanged value is set again once an interval has passed, so evaluated_at stays within an interval of now.
+func TestUnchangedValuesAreRefreshedEachInterval(t *testing.T) {
+	e := setup(t, readiness)
+	prodApp(e)
+	e.s.Pass()
+	e.s.Drain(context.Background())
+	first := len(e.md.written())
+
+	later := New(e.s.cfg, e.md, e.md, func() time.Time { return now.Add(time.Hour) })
+	later.Pass()
+	later.Drain(context.Background())
+	if n := len(e.md.written()); n != 2*first {
+		t.Errorf("writes = %d an interval later, want %d", n, 2*first)
 	}
 }
 
@@ -485,8 +501,43 @@ func TestDestinationConditionDropsOwnKeys(t *testing.T) {
 		"md/v1/scorecard/production-readiness": true, "md/v1/delivery": true, "md/v1/ownership": true,
 		"md/v1/drift": false, "md/v1/tests": false, "md/v1/delivery-extra": false,
 	} {
-		if ownKey.MatchString(key) != own {
+		if (&Config{}).ownKey(key) != own {
 			t.Errorf("%s own = %v", key, !own)
 		}
+	}
+}
+
+// An instance that was never deployed has nothing to score, and does not count in the roll-ups.
+func TestUndeployedInstancesAreNotScored(t *testing.T) {
+	e := setup(t, readiness)
+	prodApp(e)
+	e.md.addInstance("billing", "prod", "ledger", nil).Status = "INITIALIZED"
+	e.s.Pass()
+	e.s.Drain(context.Background())
+	if _, ok := e.md.value("instance", "billing-prod-ledger", "md/v1/scorecard/production-readiness"); ok {
+		t.Error("an undeployed instance was scored")
+	}
+	if r := e.decode(t, "environment", "billing-prod", "md/v1/scorecard/production-readiness"); r["instances"] != float64(1) {
+		t.Errorf("roll-up = %v", r)
+	}
+}
+
+// With a prefix outside md/, every key that scorecards writes moves, and the server shows each as a labeled row.
+func TestResultsPrefix(t *testing.T) {
+	e := setup(t, readiness+"results: {prefix: results/v1}\n")
+	prodApp(e)
+	e.s.Pass()
+	e.s.Drain(context.Background())
+	for _, w := range e.md.written() {
+		if !strings.HasPrefix(w.Key, "results/v1/") || w.Label == "" || strings.HasPrefix(w.Label, "results/") {
+			t.Errorf("write %s label %q", w.Key, w.Label)
+		}
+	}
+	if _, ok := e.md.value("environment", "billing-prod", "results/v1/scorecard/production-readiness"); !ok {
+		t.Error("no roll-up under the prefix")
+	}
+	cfg := e.s.cfg
+	if !cfg.ownKey("results/v1/scorecard/x") || !cfg.ownKey("results/v1/delivery") || cfg.ownKey("md/v1/delivery") {
+		t.Error("ownKey does not follow the prefix")
 	}
 }

@@ -36,14 +36,14 @@ func TestDeliveryCountsRollbacksAndLastStatus(t *testing.T) {
 func TestReliabilityFromAlarmChanges(t *testing.T) {
 	change := func(name, status string, at time.Time) AuditEvent {
 		return AuditEvent{Type: "alarm_state.created", OccurredAt: at,
-			Data: map[string]any{"entity": map[string]any{"alarm_name": name, "status": status}}}
+			Data: map[string]any{"entity": map[string]any{"alarm_id": name, "status": status}}}
 	}
 	alarms := []Alarm{
-		{DisplayName: "cpu", CurrentState: &AlarmState{Status: "ALARM", OccurredAt: ago(time.Hour)}},
-		{DisplayName: "disk", CurrentState: &AlarmState{Status: "OK", OccurredAt: ago(5 * day)}},
+		{ID: "cpu", CurrentState: &AlarmState{Status: "ALARM", OccurredAt: ago(time.Hour)}},
+		{ID: "disk", CurrentState: &AlarmState{Status: "OK", OccurredAt: ago(5 * day)}},
 		// latency fired before the window and has not changed since.
-		{DisplayName: "latency", CurrentState: &AlarmState{Status: "ALARM", OccurredAt: ago(40 * day)}},
-		{DisplayName: "new"},
+		{ID: "latency", CurrentState: &AlarmState{Status: "ALARM", OccurredAt: ago(40 * day)}},
+		{ID: "new"},
 	}
 	changes := []AuditEvent{
 		// disk was firing when the window started, and recovered.
@@ -76,6 +76,14 @@ func TestCurrency(t *testing.T) {
 	}
 	if c, _ := currency(now, "2.0.0-dev.20261101T000000Z", tags); c.Behind != 1 {
 		t.Errorf("pre-release = %+v", c)
+	}
+	dev := []Tag{{Tag: "1.0.0", CreatedAt: ago(10 * day)}, {Tag: "1.0.0-dev.20261120T000000Z", CreatedAt: ago(7 * day)},
+		{Tag: "1.0.0-dev.20261124T000000Z", CreatedAt: ago(3 * day)}, {Tag: "1.0.0-dev.20261126T000000Z", CreatedAt: ago(day)}}
+	days = 3
+	if c, _ := currency(now, "1.0.0-dev.20261120T000000Z", dev); !reflect.DeepEqual(c, Currency{Tool: "scorecards",
+		Version: "1.0.0-dev.20261120T000000Z", Latest: "1.0.0-dev.20261126T000000Z", Behind: 2,
+		LatestPublishedAt: "2026-11-26T12:00:00Z", DaysBehind: &days}) {
+		t.Errorf("development build = %+v", c)
 	}
 	if _, ok := currency(now, "", tags); ok {
 		t.Error("never deployed has currency")

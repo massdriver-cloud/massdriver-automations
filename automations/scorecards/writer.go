@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"time"
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
 )
@@ -12,6 +13,8 @@ import (
 type Write struct {
 	Scope Scope
 	Key   string
+	// Label names the entry in the UI while no widget draws its key.
+	Label string
 	Value string
 }
 
@@ -28,29 +31,37 @@ type GraphQLStash struct {
 // Set writes one entry with alphaSetStashEntry.
 func (s *GraphQLStash) Set(ctx context.Context, w Write) error {
 	return s.API.SetStashEntry(ctx, massdriver.StashEntry{
-		Scope: w.Scope.Kind, ID: w.Scope.ID, Key: w.Key, Format: "JSON", Value: w.Value,
+		Scope: w.Scope.Kind, ID: w.Scope.ID, Key: w.Key, Format: "JSON", Label: w.Label, Value: w.Value,
 	})
 }
 
 // volatile are the fields that say when a value was computed. A value that differs only in them has not changed.
 var volatile = []string{"evaluated_at", "checked_at"}
 
-// writer sets an entry only when its value changed. It remembers what it wrote, and before its first write of an
+// writer sets an entry when its value changed, or when it was last set more than refresh ago, so its evaluated_at
+// is never much older than the last computation. It remembers what it wrote, and before its first write of an
 // entry it reads the entry, so a restart does not rewrite every entry.
 type writer struct {
-	stash Stash
-	api   API
+	stash   Stash
+	api     API
+	now     func() time.Time
+	refresh time.Duration
 
 	mu   sync.Mutex
-	last map[string]string
+	last map[string]written
 }
 
-func newWriter(stash Stash, api API) *writer {
-	return &writer{stash: stash, api: api, last: map[string]string{}}
+type written struct {
+	stable string
+	at     time.Time
 }
 
-// write sets the entry when it changed, and reports whether it wrote.
-func (w *writer) write(ctx context.Context, scope Scope, key string, v any) (bool, error) {
+func newWriter(stash Stash, api API, now func() time.Time, refresh time.Duration) *writer {
+	return &writer{stash: stash, api: api, now: now, refresh: refresh, last: map[string]written{}}
+}
+
+// write sets the entry when it changed or is due, and reports whether it wrote.
+func (w *writer) write(ctx context.Context, scope Scope, key, label string, v any) (bool, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return false, err
@@ -66,25 +77,26 @@ func (w *writer) write(ctx context.Context, scope Scope, key string, v any) (boo
 		if current, err := w.api.StashEntries(ctx, []Scope{scope}, []string{key}); err == nil {
 			for _, e := range current {
 				if e.Key == key && e.Value != nil {
-					last, known = stableForm(*e.Value), true
+					last, known = written{stable: stableForm(*e.Value), at: e.UpdatedAt}, true
 				}
 			}
 		}
 	}
-	if known && last == stable {
-		w.remember(id, stable)
+	now := w.now()
+	if known && last.stable == stable && now.Sub(last.at) < w.refresh {
+		w.remember(id, last)
 		return false, nil
 	}
-	if err := w.stash.Set(ctx, Write{Scope: scope, Key: key, Value: value}); err != nil {
+	if err := w.stash.Set(ctx, Write{Scope: scope, Key: key, Label: label, Value: value}); err != nil {
 		return false, err
 	}
-	w.remember(id, stable)
+	w.remember(id, written{stable: stable, at: now})
 	return true, nil
 }
 
-func (w *writer) remember(id, stable string) {
+func (w *writer) remember(id string, v written) {
 	w.mu.Lock()
-	w.last[id] = stable
+	w.last[id] = v
 	w.mu.Unlock()
 }
 

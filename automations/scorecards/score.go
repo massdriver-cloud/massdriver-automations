@@ -172,6 +172,3 @@ func rollup(now time.Time, sc *ScorecardConfig, scores []InstanceScore) (Rollup,
 	r.Level = sc.levelOf(r.Score)
 	return r, true
 }
-
-// scorecardKey is the stash key of a scorecard.
-func scorecardKey(name string) string { return "md/v1/scorecard/" + name }

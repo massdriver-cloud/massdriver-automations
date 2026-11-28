@@ -22,6 +22,7 @@ One Massdriver bundle for each automation and platform:
 | [rollback-on-failure](../automations/rollback-on-failure) | [massdriver-rollback-on-failure](massdriver-rollback-on-failure) | [massdriver-rollback-on-failure-ecs](massdriver-rollback-on-failure-ecs) |
 | [router](../automations/router) | [massdriver-router](massdriver-router) | [massdriver-router-ecs](massdriver-router-ecs) |
 | [sandbox-on-join](../automations/sandbox-on-join) | [massdriver-sandbox-on-join](massdriver-sandbox-on-join) | [massdriver-sandbox-on-join-ecs](massdriver-sandbox-on-join-ecs) |
+| [scorecards](../automations/scorecards) | [massdriver-scorecards](massdriver-scorecards) | [massdriver-scorecards-ecs](massdriver-scorecards-ecs) |
 | [stale-proposals](../automations/stale-proposals) | [massdriver-stale-proposals](massdriver-stale-proposals) | [massdriver-stale-proposals-ecs](massdriver-stale-proposals-ecs) |
 | [stash-sync](../automations/stash-sync) | [massdriver-stash-sync](massdriver-stash-sync) | [massdriver-stash-sync-ecs](massdriver-stash-sync-ecs) |
 | [statuspage](../automations/statuspage) | [massdriver-statuspage](massdriver-statuspage) | [massdriver-statuspage-ecs](massdriver-statuspage-ecs) |

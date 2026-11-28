@@ -4,6 +4,7 @@ query ScorecardAlarms($org: ID!, $instance: ID!, $cursor: Cursor) {
       next
     }
     items {
+      id
       displayName
       currentState {
         status

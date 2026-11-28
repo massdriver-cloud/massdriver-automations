@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
+	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
 )
 
 const (
@@ -44,6 +46,8 @@ type Config struct {
 	Ownership   OwnershipConfig   `yaml:"ownership"`
 	Parity      []ParityConfig    `yaml:"parity"`
 	Scorecards  []ScorecardConfig `yaml:"scorecards"`
+	// Results.Prefix replaces md/v1 in the keys that scorecards writes, until the server's widget catalog has them.
+	Results massdriver.ResultsConfig `yaml:"results"`
 
 	// checkKeys are the stash keys that any check reads.
 	checkKeys map[string]bool
@@ -334,6 +338,26 @@ func (ch *CheckConfig) compile() error {
 	}
 	ch.pass = code
 	return nil
+}
+
+// key is the stash key that scorecards writes for a fact or a scorecard, such as delivery or scorecard/gold.
+func (c *Config) key(name string) string {
+	return massdriver.Results{Prefix: c.Results.Prefix}.Key(name)
+}
+
+// scorecardKey is the stash key of a scorecard.
+func (c *Config) scorecardKey(name string) string { return c.key("scorecard/" + name) }
+
+// ownKey reports whether scorecards writes key. A change to one of them is not a reason to compute again.
+func (c *Config) ownKey(key string) bool {
+	name, ok := strings.CutPrefix(key, c.key(""))
+	if !ok {
+		return false
+	}
+	if sc, ok := strings.CutPrefix(name, "scorecard/"); ok {
+		return sc != ""
+	}
+	return slices.Contains(facts, name)
 }
 
 // matching returns the scorecards whose match the attributes meet.

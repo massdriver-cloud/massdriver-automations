@@ -84,6 +84,7 @@ type Deployment struct {
 
 // Alarm is one alarm of an instance, with its current state.
 type Alarm struct {
+	ID           string      `json:"id"`
 	DisplayName  string      `json:"displayName"`
 	CurrentState *AlarmState `json:"currentState"`
 }
@@ -123,6 +124,7 @@ type StashValue struct {
 // InstanceRef is an instance in a list: where it is and its attributes.
 type InstanceRef struct {
 	ID                  string         `json:"id"`
+	Status              string         `json:"status"`
 	EffectiveAttributes map[string]any `json:"effectiveAttributes"`
 	Environment         struct {
 		ID      string `json:"id"`
@@ -176,8 +178,8 @@ type API interface {
 	Alarms(ctx context.Context, instance string) ([]Alarm, error)
 	// AuditEvents returns the events of the types on the instance since `since`, oldest first.
 	AuditEvents(ctx context.Context, instance string, types []string, actorType string, since time.Time) ([]AuditEvent, error)
-	// Tags returns the stable versions of a bundle, newest first.
-	Tags(ctx context.Context, repo string) ([]Tag, error)
+	// Tags returns the published versions of a bundle in a channel: STABLE or DEV.
+	Tags(ctx context.Context, repo, channel string) ([]Tag, error)
 	StashEntries(ctx context.Context, scopes []Scope, keys []string) ([]StashValue, error)
 	// Instances lists instances: every one, or those of an environment, a project, or a bundle.
 	Instances(ctx context.Context, f InstanceFilter) ([]InstanceRef, error)
@@ -301,15 +303,15 @@ func (a *GraphQLAPI) AuditEvents(ctx context.Context, instance string, types []s
 	}, nil)
 }
 
-// Tags reads a bundle's stable versions, newest first.
-func (a *GraphQLAPI) Tags(ctx context.Context, repo string) ([]Tag, error) {
+// Tags reads a bundle's versions in a channel.
+func (a *GraphQLAPI) Tags(ctx context.Context, repo, channel string) ([]Tag, error) {
 	return pages[Tag](ctx, func(cursor map[string]any) (*page, error) {
 		var out struct {
 			Repo *struct {
 				Tags *page `json:"tags"`
 			} `json:"ociRepo"`
 		}
-		err := a.Client.Do(ctx, tagsQuery, a.vars(map[string]any{"repo": repo, "cursor": cursor}), &out)
+		err := a.Client.Do(ctx, tagsQuery, a.vars(map[string]any{"repo": repo, "channel": channel, "cursor": cursor}), &out)
 		if err != nil || out.Repo == nil {
 			return nil, err
 		}

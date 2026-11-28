@@ -708,6 +708,25 @@ def automations(k8s):
             "copySecrets", "copyRemoteReferences"]}}},
     )
 
+    # ---------------------------------------------------------------- scorecards
+    out["scorecards"] = dict(
+        title="Scorecards",
+        description="Scores instances against scorecards of jq checks over stash results and the API, rolls the "
+                    "scores up to environments and projects, and writes the facts they use: delivery, "
+                    "reliability, currency, pending changes, parity, and ownership.",
+        config=s("Settings (YAML)", f"The YAML config of scorecards. See the [scorecards README]"
+                 f"({README.format('scorecards')}).",
+                 default="interval: 1h\nscorecards:\n  - name: production-readiness\n"
+                         "    match: {md-environment: prod}\n    checks:\n      - id: no-drift\n"
+                         "        stash: md/v1/drift\n        pass: .status == \"none\"\n        max_age: 7d\n"
+                         "      - id: has-alarms\n        stash: md/v1/reliability\n        pass: .alarms > 0\n"
+                         "      - id: recently-deployed\n        stash: md/v1/delivery\n"
+                         "        pass: .deployments > 0\n"),
+        extra={},
+        ui=None,
+        config_ui={"ui:widget": "textarea", "ui:options": {"rows": 24}},
+    )
+
     # ---------------------------------------------------------------- stale-proposals
     wait = dict(pattern=r"^([0-9]+(\.[0-9]+)?d|([0-9]+(\.[0-9]+)?(ns|us|ms|s|m|h))+)$",
                 message={"pattern": "Must be a duration, such as 36h or 2d."})

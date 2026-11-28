@@ -5,6 +5,7 @@ query ScorecardInstances($org: ID!, $filter: InstancesFilter, $cursor: Cursor) {
     }
     items {
       id
+      status
       effectiveAttributes
       environment {
         id

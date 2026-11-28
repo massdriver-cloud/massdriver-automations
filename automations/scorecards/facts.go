@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -168,7 +169,7 @@ func reliability(now time.Time, window time.Duration, alarms []Alarm, changes []
 	byAlarm := map[string][]AuditEvent{}
 	var names []string
 	for _, c := range changes {
-		name := entityString(c.Data, "alarm_name")
+		name := entityString(c.Data, "alarm_id")
 		if _, ok := byAlarm[name]; !ok {
 			names = append(names, name)
 		}
@@ -206,7 +207,7 @@ func reliability(now time.Time, window time.Duration, alarms []Alarm, changes []
 	}
 	// An alarm that has fired since before the window, with no change in it, was in alarm the whole window.
 	for _, a := range alarms {
-		if _, changed := byAlarm[a.DisplayName]; changed || a.CurrentState == nil {
+		if _, changed := byAlarm[a.ID]; changed || a.CurrentState == nil {
 			continue
 		}
 		if a.CurrentState.Status == "ALARM" && a.CurrentState.OccurredAt.Before(start) {
@@ -230,28 +231,48 @@ func entityString(data map[string]any, key string) string {
 	return s
 }
 
-// currency compares the version an instance runs with the stable versions of its bundle, newest first. ok is
-// false for an instance that was never deployed or a bundle with no stable version.
+// currency compares the version an instance runs with the published versions of its bundle. A stable version is
+// compared with the stable versions by semantic version. A development build is compared by publish time with every
+// version published after it, because a build of 1.2.0-dev is newer work than the 1.2.0 it is named after. ok is
+// false for an instance that was never deployed or a bundle with no version.
 func currency(now time.Time, deployed string, tags []Tag) (Currency, bool) {
 	if deployed == "" || len(tags) == 0 {
 		return Currency{}, false
 	}
-	c := Currency{Tool: tool, Version: deployed, Latest: tags[0].Tag, LatestPublishedAt: timestamp(tags[0].CreatedAt)}
+	newest := tags[0]
+	for _, t := range tags {
+		if t.CreatedAt.After(newest.CreatedAt) {
+			newest = t
+		}
+	}
+	newer := func(t Tag) bool { return compareVersions(t.Tag, deployed) > 0 }
+	if i := slices.IndexFunc(tags, func(t Tag) bool { return t.Tag == deployed }); i >= 0 && strings.Contains(deployed, "-") {
+		at := tags[i].CreatedAt
+		newer = func(t Tag) bool { return t.CreatedAt.After(at) }
+	} else {
+		for _, t := range tags {
+			if compareVersions(t.Tag, newest.Tag) > 0 {
+				newest = t
+			}
+		}
+	}
+	c := Currency{Tool: tool, Version: clip(deployed, 128), Latest: clip(newest.Tag, 128),
+		LatestPublishedAt: timestamp(newest.CreatedAt)}
 	var oldestNewer time.Time
 	for _, t := range tags {
-		if compareVersions(t.Tag, deployed) > 0 {
+		if newer(t) {
 			c.Behind++
-			oldestNewer = t.CreatedAt
+			if oldestNewer.IsZero() || t.CreatedAt.Before(oldestNewer) {
+				oldestNewer = t.CreatedAt
+			}
 		}
 	}
 	// days_behind is how long a newer version has been out: since the first version after the deployed one.
+	days := 0
 	if c.Behind > 0 {
-		days := max(0, int(now.Sub(oldestNewer)/(24*time.Hour)))
-		c.DaysBehind = &days
-	} else {
-		zero := 0
-		c.DaysBehind = &zero
+		days = max(0, int(now.Sub(oldestNewer)/(24*time.Hour)))
 	}
+	c.DaysBehind = &days
 	return c, true
 }
 

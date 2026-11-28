@@ -1,6 +1,6 @@
-query ScorecardTags($org: ID!, $repo: ID!, $cursor: Cursor) {
+query ScorecardTags($org: ID!, $repo: ID!, $channel: OciRepoChannel!, $cursor: Cursor) {
   ociRepo(organizationId: $org, id: $repo) {
-    tags(filter: { channel: STABLE }, cursor: $cursor) {
+    tags(filter: { channel: $channel }, cursor: $cursor) {
       cursor {
         next
       }

@@ -11,21 +11,22 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
 //go:embed widget-schemas.json
 var catalogJSON []byte
 
-// Widget is one key of the widget catalog.
+// Widget is one key of the widget catalog on one kind of entity. A key can have a different schema on each kind.
 type Widget struct {
 	Scope  string         `json:"scope"`
 	Format string         `json:"format"`
 	Schema map[string]any `json:"schema"`
 }
 
-var catalog = func() map[string]Widget {
-	var c map[string]Widget
+var catalog = func() map[string][]Widget {
+	var c map[string][]Widget
 	if err := json.Unmarshal(catalogJSON, &c); err != nil {
 		panic(err)
 	}
@@ -35,24 +36,30 @@ var catalog = func() map[string]Widget {
 // A named segment, such as {step}, after regexp.QuoteMeta.
 var keySegment = regexp.MustCompile(`\\\{[a-z_]+\\\}`)
 
-// For returns the catalog key whose pattern matches key. A segment such as {step} is a bundle step path.
-func For(key string) (Widget, bool) {
-	for pattern, w := range catalog {
+// For returns the widgets of the catalog key whose pattern matches key, one for each kind of entity. A segment
+// such as {step} is a bundle step path.
+func For(key string) ([]Widget, bool) {
+	for pattern, ws := range catalog {
 		re := "^" + keySegment.ReplaceAllString(regexp.QuoteMeta(pattern), `[a-z0-9][a-z0-9_-]{0,62}`) + "$"
 		if regexp.MustCompile(re).MatchString(key) {
-			return w, true
+			return ws, true
 		}
 	}
-	return Widget{}, false
+	return nil, false
 }
 
 // Check validates a stash entry against the widget that reads its key.
 func Check(scope, key, format, value string) error {
-	w, ok := For(key)
+	ws, ok := For(key)
 	if !ok {
 		return fmt.Errorf("no widget reads %s", key)
 	}
-	if w.Scope != scope || !strings.EqualFold(w.Format, format) {
+	i := slices.IndexFunc(ws, func(w Widget) bool { return w.Scope == scope })
+	if i < 0 {
+		return fmt.Errorf("%s: no widget reads it on a %s", key, scope)
+	}
+	w := ws[i]
+	if !strings.EqualFold(w.Format, format) {
 		return fmt.Errorf("%s: the widget wants a %s entry on a %s", key, w.Format, w.Scope)
 	}
 	var v any
@@ -80,6 +87,9 @@ func Validate(schema map[string]any, v any, path string) error {
 		if mn, ok := schema["minProperties"].(float64); ok && float64(len(m)) < mn {
 			return fmt.Errorf("%s: fewer than %v properties", path, mn)
 		}
+		if mx, ok := schema["maxProperties"].(float64); ok && float64(len(m)) > mx {
+			return fmt.Errorf("%s: more than %v properties", path, mx)
+		}
 		props, _ := schema["properties"].(map[string]any)
 		required, _ := schema["required"].([]any)
 		for _, r := range required {
@@ -88,10 +98,22 @@ func Validate(schema map[string]any, v any, path string) error {
 			}
 		}
 		for k, x := range m {
+			if names, ok := schema["propertyNames"].(map[string]any); ok {
+				if err := Validate(names, k, path+" name "+k); err != nil {
+					return err
+				}
+			}
 			p, ok := props[k].(map[string]any)
 			if !ok {
-				if schema["additionalProperties"] == false {
-					return fmt.Errorf("%s: %s is not allowed", path, k)
+				switch extra := schema["additionalProperties"].(type) {
+				case bool:
+					if !extra {
+						return fmt.Errorf("%s: %s is not allowed", path, k)
+					}
+				case map[string]any:
+					if err := Validate(extra, x, path+"."+k); err != nil {
+						return err
+					}
 				}
 				continue
 			}
@@ -130,6 +152,11 @@ func Validate(schema map[string]any, v any, path string) error {
 		if p, ok := schema["pattern"].(string); ok && !pattern(p).MatchString(s) {
 			return fmt.Errorf("%s: %q does not match %s", path, s, p)
 		}
+		if schema["format"] == "date-time" {
+			if _, err := time.Parse(time.RFC3339, s); err != nil {
+				return fmt.Errorf("%s: %q is not an RFC 3339 date-time", path, s)
+			}
+		}
 	case "integer", "number":
 		f, ok := v.(float64)
 		if !ok || (schema["type"] == "integer" && f != math.Trunc(f)) {
@@ -137,6 +164,9 @@ func Validate(schema map[string]any, v any, path string) error {
 		}
 		if mn, ok := schema["minimum"].(float64); ok && f < mn {
 			return fmt.Errorf("%s: less than %v", path, mn)
+		}
+		if mx, ok := schema["maximum"].(float64); ok && f > mx {
+			return fmt.Errorf("%s: more than %v", path, mx)
 		}
 	case "boolean":
 		if _, ok := v.(bool); !ok {

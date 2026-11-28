@@ -3,135 +3,21 @@ package scorecards
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"reflect"
 	"regexp"
 	"strings"
 	"sync"
 	"testing"
-	"time"
-	"unicode/utf8"
 
+	"github.com/massdriver-cloud/massdriver-automations/internal/widgetschema"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
 )
 
-// check validates v against the keywords that the widget catalog's scorecard schemas use.
-func check(schema map[string]any, v any, path string) error {
-	if enum, ok := schema["enum"].([]any); ok {
-		for _, e := range enum {
-			if reflect.DeepEqual(e, v) {
-				return nil
-			}
-		}
-		return fmt.Errorf("%s: %v is not in %v", path, v, enum)
-	}
-	switch schema["type"] {
-	case "object":
-		m, ok := v.(map[string]any)
-		if !ok {
-			return fmt.Errorf("%s: not an object", path)
-		}
-		for _, r := range asList(schema["required"]) {
-			if _, ok := m[r.(string)]; !ok {
-				return fmt.Errorf("%s.%s: required", path, r)
-			}
-		}
-		if n, ok := schema["maxProperties"].(float64); ok && float64(len(m)) > n {
-			return fmt.Errorf("%s: too many properties", path)
-		}
-		props, _ := schema["properties"].(map[string]any)
-		for k, x := range m {
-			if names, ok := schema["propertyNames"].(map[string]any); ok {
-				if err := check(names, k, path+" name"); err != nil {
-					return err
-				}
-			}
-			switch p := props[k].(type) {
-			case map[string]any:
-				if err := check(p, x, path+"."+k); err != nil {
-					return err
-				}
-				continue
-			}
-			switch extra := schema["additionalProperties"].(type) {
-			case bool:
-				return fmt.Errorf("%s.%s: not allowed", path, k)
-			case map[string]any:
-				if err := check(extra, x, path+"."+k); err != nil {
-					return err
-				}
-			}
-		}
-	case "array":
-		list, ok := v.([]any)
-		if !ok {
-			return fmt.Errorf("%s: not an array", path)
-		}
-		if n, ok := schema["maxItems"].(float64); ok && float64(len(list)) > n {
-			return fmt.Errorf("%s: too many items", path)
-		}
-		for i, x := range list {
-			if err := check(schema["items"].(map[string]any), x, fmt.Sprintf("%s[%d]", path, i)); err != nil {
-				return err
-			}
-		}
-	case "string":
-		s, ok := v.(string)
-		if !ok {
-			return fmt.Errorf("%s: not a string", path)
-		}
-		n := float64(utf8.RuneCountInString(s))
-		if m, ok := schema["minLength"].(float64); ok && n < m {
-			return fmt.Errorf("%s: too short", path)
-		}
-		if m, ok := schema["maxLength"].(float64); ok && n > m {
-			return fmt.Errorf("%s: too long", path)
-		}
-		if schema["format"] == "date-time" {
-			if _, err := time.Parse(time.RFC3339, s); err != nil {
-				return fmt.Errorf("%s: not a date-time", path)
-			}
-		}
-	case "integer", "number":
-		f, ok := v.(float64)
-		if !ok || (schema["type"] == "integer" && f != math.Trunc(f)) {
-			return fmt.Errorf("%s: not a %s", path, schema["type"])
-		}
-		if m, ok := schema["minimum"].(float64); ok && f < m {
-			return fmt.Errorf("%s: below minimum", path)
-		}
-		if m, ok := schema["maximum"].(float64); ok && f > m {
-			return fmt.Errorf("%s: above maximum", path)
-		}
-	case "boolean":
-		if _, ok := v.(bool); !ok {
-			return fmt.Errorf("%s: not a boolean", path)
-		}
-	}
-	return nil
-}
-
-func asList(v any) []any {
-	l, _ := v.([]any)
-	return l
-}
-
 // Every value written in the end-to-end tests matches the schema of its key in massdriver-cloud/massdriver#3881.
 func TestWrittenValuesMatchTheCatalog(t *testing.T) {
-	b, err := os.ReadFile("testdata/schemas.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var schemas map[string]map[string]any
-	if err := json.Unmarshal(b, &schemas); err != nil {
-		t.Fatal(err)
-	}
-
 	e := setup(t, readiness+`
 parity:
   - {environment: billing-prod, reference: billing-staging}
@@ -148,30 +34,56 @@ parity:
 
 	seen := map[string]bool{}
 	for _, w := range e.md.written() {
-		name := w.Key
-		if strings.HasPrefix(w.Key, "md/v1/scorecard/") {
-			name = "instance.scorecard"
-			if w.Scope.Kind != "instance" {
-				name = "scorecard-rollup"
-			}
-		}
-		schema, ok := schemas[name]
-		if !ok {
-			t.Fatalf("no schema for %s", name)
-		}
-		var v any
-		if err := json.Unmarshal([]byte(w.Value), &v); err != nil {
-			t.Fatal(err)
-		}
-		if err := check(schema, v, "value"); err != nil {
+		if err := widgetschema.Check(w.Scope.Kind, w.Key, "JSON", w.Value); err != nil {
 			t.Errorf("%s on %s %s: %v\n%s", w.Key, w.Scope.Kind, w.Scope.ID, err, w.Value)
 		}
-		seen[name] = true
+		seen[w.Scope.Kind+" "+w.Key] = true
 	}
-	for name := range schemas {
-		if !seen[name] {
-			t.Errorf("nothing wrote %s", name)
+	card := "md/v1/scorecard/production-readiness"
+	for _, want := range []string{"instance " + KeyDelivery, "instance " + KeyReliability, "instance " + KeyCurrency,
+		"instance " + KeyPending, "environment " + KeyParity, "environment " + KeyOwnership, "project " + KeyOwnership,
+		"instance " + card, "environment " + card, "project " + card} {
+		if !seen[want] {
+			t.Errorf("nothing wrote %s", want)
 		}
+	}
+}
+
+// A roll-up is not an instance scorecard, and the other way around.
+func TestScorecardShapesDependOnTheScope(t *testing.T) {
+	card := "md/v1/scorecard/production-readiness"
+	instance := `{"level":"silver","score":82,"passed":9,"failed":2,"unknown":1,"checks":[{"id":"no-drift","status":"passed"}],"evaluated_at":"2026-11-27T22:40:03Z"}`
+	rollup := `{"level":"silver","instances":3,"levels":{"gold":1,"silver":2},"lowest_level":"silver","evaluated_at":"2026-11-27T22:40:03Z"}`
+	if err := widgetschema.Check("instance", card, "JSON", instance); err != nil {
+		t.Error(err)
+	}
+	for _, scope := range []string{"environment", "project"} {
+		if err := widgetschema.Check(scope, card, "JSON", rollup); err != nil {
+			t.Error(err)
+		}
+		if err := widgetschema.Check(scope, card, "JSON", instance); err == nil {
+			t.Errorf("an instance scorecard on a %s: want an error", scope)
+		}
+	}
+	if err := widgetschema.Check("instance", card, "JSON", rollup); err == nil {
+		t.Error("a roll-up on an instance: want an error")
+	}
+	if err := widgetschema.Check("instance", KeyParity, "JSON", `{"reference_environment":"a","differences":0,"checked_at":"2026-11-27T22:40:03Z"}`); err == nil {
+		t.Error("parity on an instance: want an error")
+	}
+	for name, v := range map[string]string{
+		"score over 100":  strings.Replace(instance, `"score":82`, `"score":101`, 1),
+		"empty message":   strings.Replace(instance, `"status":"passed"}`, `"status":"passed","message":""}`, 1),
+		"bad status":      strings.Replace(instance, `"status":"passed"`, `"status":"skipped"`, 1),
+		"not a date-time": strings.Replace(instance, `2026-11-27T22:40:03Z`, `yesterday`, 1),
+		"extra field":     strings.Replace(instance, `"level"`, `"grade":"a","level"`, 1),
+	} {
+		if err := widgetschema.Check("instance", card, "JSON", v); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
+	}
+	if err := widgetschema.Check("project", card, "JSON", strings.Replace(rollup, `"gold":1`, `"gold":-1`, 1)); err == nil {
+		t.Error("negative level count: want an error")
 	}
 }
 
