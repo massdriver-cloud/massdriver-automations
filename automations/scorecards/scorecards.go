@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -268,8 +269,9 @@ func (s *Scorecards) queueInstances(ctx context.Context, f InstanceFilter) error
 	if err != nil {
 		return err
 	}
+	// An instance that is not deployed is queued too, so that what it had when it was is deleted.
 	for _, r := range refs {
-		if live(r.Status) && len(s.cfg.matching(r.EffectiveAttributes)) > 0 {
+		if len(s.cfg.matching(r.EffectiveAttributes)) > 0 {
 			s.queue.add(jobInstance + r.ID)
 		}
 	}
@@ -287,17 +289,23 @@ func (s *Scorecards) instance(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	scope := Scope{Kind: "instance", ID: inst.ID}
+	cards := s.cfg.matching(inst.EffectiveAttributes)
 	if !live(inst.Status) {
+		// An instance that was decommissioned, or reset, keeps nothing that describes infrastructure it no longer
+		// has.
+		s.clear(ctx, scope, s.instanceKeys(nil))
+		s.queueRollups(inst.Environment.ID, inst.Environment.Project.ID)
 		log.Debug("instance skipped", "reason", "not_deployed")
 		return nil
 	}
-	cards := s.cfg.matching(inst.EffectiveAttributes)
+	// A scorecard that no longer matches the instance's attributes leaves no score behind.
+	s.clear(ctx, scope, s.unmatchedKeys(cards))
 	if len(cards) == 0 {
 		log.Debug("instance skipped", "reason", "no_scorecard")
 		return nil
 	}
 	now := s.now().UTC().Truncate(time.Second)
-	scope := Scope{Kind: "instance", ID: inst.ID}
 
 	facts := s.facts(ctx, now, inst)
 	keys := sortedKeys(facts)
@@ -469,6 +477,7 @@ func (s *Scorecards) rollups(ctx context.Context, scope Scope) error {
 			}
 		}
 		if len(scopes) == 0 {
+			s.clear(ctx, scope, []string{s.cfg.scorecardKey(sc.Name)})
 			continue
 		}
 		entries, err := s.api.StashEntries(ctx, scopes, []string{s.cfg.scorecardKey(sc.Name)})
@@ -484,6 +493,8 @@ func (s *Scorecards) rollups(ctx context.Context, scope Scope) error {
 		}
 		if r, ok := rollup(now, sc, scores); ok {
 			s.write(ctx, scope, s.cfg.scorecardKey(sc.Name), r)
+		} else {
+			s.clear(ctx, scope, []string{s.cfg.scorecardKey(sc.Name)})
 		}
 	}
 	return nil
@@ -596,6 +607,49 @@ func (s *Scorecards) ownership(ctx context.Context) error {
 		s.write(ctx, Scope{Kind: "project", ID: project}, s.cfg.key(FactOwnership), o)
 	}
 	return nil
+}
+
+// instanceKeys are the keys that scorecards writes on an instance: its facts, and the scorecards in cards, or
+// every scorecard when cards is nil.
+func (s *Scorecards) instanceKeys(cards []*ScorecardConfig) []string {
+	keys := []string{s.cfg.key(FactDelivery), s.cfg.key(FactReliability), s.cfg.key(FactCurrency),
+		s.cfg.key(FactPending)}
+	if cards == nil {
+		for i := range s.cfg.Scorecards {
+			cards = append(cards, &s.cfg.Scorecards[i])
+		}
+	}
+	for _, sc := range cards {
+		keys = append(keys, s.cfg.scorecardKey(sc.Name))
+	}
+	return keys
+}
+
+// unmatchedKeys are the keys of the scorecards that are not in cards.
+func (s *Scorecards) unmatchedKeys(cards []*ScorecardConfig) []string {
+	var keys []string
+	for i := range s.cfg.Scorecards {
+		if !slices.Contains(cards, &s.cfg.Scorecards[i]) {
+			keys = append(keys, s.cfg.scorecardKey(s.cfg.Scorecards[i].Name))
+		}
+	}
+	return keys
+}
+
+// clear deletes entries that scorecards wrote and that no longer apply. A failure is logged; the next event or
+// interval tries again.
+func (s *Scorecards) clear(ctx context.Context, scope Scope, keys []string) {
+	if len(keys) == 0 {
+		return
+	}
+	log := automation.Logger(ctx).With("scope", scope.Kind, "scope_id", scope.ID)
+	n, err := s.out.clear(ctx, scope, keys)
+	if err != nil {
+		log.Error("stash entry delete failed", "err", err)
+	}
+	if n > 0 {
+		log.Info("stash entries deleted", "entries", n)
+	}
 }
 
 // write sets an entry when it changed. A failed write is logged; the next event or interval writes it again.

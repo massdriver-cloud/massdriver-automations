@@ -19,6 +19,7 @@ type fakeMassdriver struct {
 	tags        map[string][]Tag
 	stash       map[string]StashValue // by kind/id/key
 	writes      []Write
+	deletes     []string                        // kind/id/key
 	compare     map[string][]InstanceComparison // by source/target
 	groups      []Group
 	members     map[string][]string
@@ -167,6 +168,18 @@ func (f *fakeMassdriver) GroupMembers(_ context.Context, group string) ([]string
 
 func (f *fakeMassdriver) EnvironmentActions(_ context.Context, env, group string) ([]string, error) {
 	return f.actions[env+"/"+group], nil
+}
+
+// Delete removes an entry and records it.
+func (f *fakeMassdriver) Delete(_ context.Context, scope Scope, key string) error {
+	if err := f.err("Delete"); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deletes = append(f.deletes, scope.Kind+"/"+scope.ID+"/"+key)
+	delete(f.stash, scope.Kind+"/"+scope.ID+"/"+key)
+	return nil
 }
 
 // Set stores a write.

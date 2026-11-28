@@ -21,6 +21,7 @@ type Write struct {
 // Stash writes stash entries.
 type Stash interface {
 	Set(ctx context.Context, w Write) error
+	Delete(ctx context.Context, scope Scope, key string) error
 }
 
 // GraphQLStash calls the alpha stash API of Massdriver.
@@ -33,6 +34,11 @@ func (s *GraphQLStash) Set(ctx context.Context, w Write) error {
 	return s.API.SetStashEntry(ctx, massdriver.StashEntry{
 		Scope: w.Scope.Kind, ID: w.Scope.ID, Key: w.Key, Format: "JSON", Label: w.Label, Value: w.Value,
 	})
+}
+
+// Delete deletes one entry with alphaDeleteStashEntry.
+func (s *GraphQLStash) Delete(ctx context.Context, scope Scope, key string) error {
+	return s.API.DeleteStashEntry(ctx, scope.Kind, scope.ID, key)
 }
 
 // volatile are the fields that say when a value was computed. A value that differs only in them has not changed.
@@ -51,9 +57,11 @@ type writer struct {
 	last map[string]written
 }
 
+// written is what the writer knows of an entry. An entry it deleted, or found missing, is absent.
 type written struct {
 	stable string
 	at     time.Time
+	absent bool
 }
 
 func newWriter(stash Stash, api API, now func() time.Time, refresh time.Duration) *writer {
@@ -83,7 +91,7 @@ func (w *writer) write(ctx context.Context, scope Scope, key, label string, v an
 		}
 	}
 	now := w.now()
-	if known && last.stable == stable && now.Sub(last.at) < w.refresh {
+	if known && !last.absent && last.stable == stable && now.Sub(last.at) < w.refresh {
 		w.remember(id, last)
 		return false, nil
 	}
@@ -114,4 +122,39 @@ func stableForm(value string) string {
 		return value
 	}
 	return string(b)
+}
+
+// clear deletes the entries of keys that scope has, and returns how many it deleted. An entry the writer knows is
+// absent is not read again.
+func (w *writer) clear(ctx context.Context, scope Scope, keys []string) (int, error) {
+	var unknown []string
+	w.mu.Lock()
+	for _, key := range keys {
+		if last, ok := w.last[scope.Kind+"/"+scope.ID+"/"+key]; !ok || !last.absent {
+			unknown = append(unknown, key)
+		}
+	}
+	w.mu.Unlock()
+	if len(unknown) == 0 {
+		return 0, nil
+	}
+	current, err := w.api.StashEntries(ctx, []Scope{scope}, unknown)
+	if err != nil {
+		return 0, err
+	}
+	present := map[string]bool{}
+	for _, e := range current {
+		present[e.Key] = e.Value != nil
+	}
+	deleted := 0
+	for _, key := range unknown {
+		if present[key] {
+			if err := w.stash.Delete(ctx, scope, key); err != nil {
+				return deleted, err
+			}
+			deleted++
+		}
+		w.remember(scope.Kind+"/"+scope.ID+"/"+key, written{absent: true})
+	}
+	return deleted, nil
 }

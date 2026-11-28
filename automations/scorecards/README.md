@@ -126,6 +126,8 @@ project counts the instances it has that the scorecard scores.
 - An entry is set when its value changes, and again once an interval has passed, so `evaluated_at` is never more
   than one interval old. Entries have no TTL.
 - Before its first write of an entry, the automation reads it, so a restart does not rewrite every entry.
+- What no longer applies is deleted: the scores and facts of an instance that is decommissioned or not deployed,
+  a scorecard whose `match` the instance's attributes stopped meeting, and a roll-up with no scored instance left.
 - A failed read leaves out the fact it was for, and the other facts and the scores are still written. A failed
   write is logged, and the next event or interval writes it again. Neither makes Massdriver send the event again.
 - The automation answers each event at once, and computes in the background. An instance named by many events

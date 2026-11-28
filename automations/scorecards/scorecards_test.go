@@ -541,3 +541,48 @@ func TestResultsPrefix(t *testing.T) {
 		t.Error("ownKey does not follow the prefix")
 	}
 }
+
+// A decommissioned instance loses its scores and facts, and its environment's roll-up goes when nothing is left.
+func TestDecommissionDeletesWhatNoLongerApplies(t *testing.T) {
+	e := setup(t, readiness)
+	app := prodApp(e)
+	e.s.Pass()
+	e.s.Drain(context.Background())
+	card := "md/v1/scorecard/production-readiness"
+	if _, ok := e.md.value("environment", "billing-prod", card); !ok {
+		t.Fatal("no roll-up")
+	}
+
+	app.Status = "DECOMMISSIONED"
+	e.handle(t, deployed(app.ID))
+	for _, key := range []string{card, KeyDelivery, KeyReliability, KeyCurrency, KeyPending} {
+		if _, ok := e.md.value("instance", app.ID, key); ok {
+			t.Errorf("%s is still on the instance", key)
+		}
+	}
+	for _, kind := range []string{"environment", "project"} {
+		if _, ok := e.md.value(kind, map[string]string{"environment": "billing-prod", "project": "billing"}[kind], card); ok {
+			t.Errorf("the %s roll-up is still there", kind)
+		}
+	}
+
+	// Once deleted, an entry is not read or deleted again.
+	deletes := len(e.md.deletes)
+	e.handle(t, deployed(app.ID))
+	if len(e.md.deletes) != deletes {
+		t.Errorf("deletes = %d, want %d", len(e.md.deletes), deletes)
+	}
+}
+
+// An instance whose attributes stop matching a scorecard loses that scorecard.
+func TestUnmatchedScorecardIsDeleted(t *testing.T) {
+	e := setup(t, readiness)
+	app := prodApp(e)
+	e.s.Pass()
+	e.s.Drain(context.Background())
+	app.EffectiveAttributes["md-environment"] = "staging"
+	e.handle(t, deployed(app.ID))
+	if _, ok := e.md.value("instance", app.ID, "md/v1/scorecard/production-readiness"); ok {
+		t.Error("the scorecard is still on the instance")
+	}
+}

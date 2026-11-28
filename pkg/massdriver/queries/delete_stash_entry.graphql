@@ -1,0 +1,9 @@
+mutation DeleteStashEntry($org: ID!, $scope: AlphaStashScope!, $key: String!) {
+  alphaDeleteStashEntry(organizationId: $org, scope: $scope, key: $key) {
+    successful
+    messages {
+      field
+      message
+    }
+  }
+}

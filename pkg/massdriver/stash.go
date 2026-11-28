@@ -8,8 +8,12 @@ import (
 	"time"
 )
 
-//go:embed queries/set_stash_entry.graphql
-var setStashEntryMutation string
+var (
+	//go:embed queries/set_stash_entry.graphql
+	setStashEntryMutation string
+	//go:embed queries/delete_stash_entry.graphql
+	deleteStashEntryMutation string
+)
 
 // StashEntry is one stash entry to set.
 type StashEntry struct {
@@ -65,4 +69,20 @@ func (c *Client) SetStashEntry(ctx context.Context, e StashEntry) error {
 		return err
 	}
 	return nil
+}
+
+// DeleteStashEntry deletes one entry with alphaDeleteStashEntry. Deleting a key that has no value is not an error.
+func (c *Client) DeleteStashEntry(ctx context.Context, scope, id, key string) error {
+	var out struct {
+		Delete Payload[struct{}] `json:"alphaDeleteStashEntry"`
+	}
+	err := c.Do(ctx, deleteStashEntryMutation, map[string]any{
+		"org":   c.OrganizationID,
+		"scope": map[string]any{scope: id},
+		"key":   key,
+	}, &out)
+	if err != nil {
+		return err
+	}
+	return out.Delete.Err()
 }
