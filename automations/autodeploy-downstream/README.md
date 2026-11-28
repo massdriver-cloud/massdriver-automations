@@ -99,6 +99,8 @@ Custom attribute keys allow only letters, digits, and underscores.
 
 ## Results in the stash
 
+Entries in a deployment's stash are immutable: they record what already happened, and when Massdriver sends an event again, the first value stays.
+
 On each downstream deployment it creates or proposes, the automation writes:
 
 | Key | Stash | Label | Value |

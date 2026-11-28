@@ -413,7 +413,7 @@ func TestHandleWritesTheSameEntriesForTheSameDeployment(t *testing.T) {
 	}
 	w := first[1]
 	if !reflect.DeepEqual(w["scope"], map[string]any{"deployment": "dep-1"}) || w["key"] != "md/v1/changes/src" ||
-		!reflect.DeepEqual(w["input"], map[string]any{"format": "JSON", "label": "OpenTofu changes",
+		!reflect.DeepEqual(w["input"], map[string]any{"format": "JSON", "immutable": true, "label": "OpenTofu changes",
 			"value": `{"add":2,"change":1,"destroy":0,"tool":"opentofu"}`}) {
 		t.Fatalf("write = %v", w)
 	}

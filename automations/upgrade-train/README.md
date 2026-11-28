@@ -83,6 +83,8 @@ The service account needs these permissions on the instances of every stage:
 
 ## Results in the stash
 
+Entries in a deployment's stash are immutable: they record what already happened, and when Massdriver sends an event again, the first value stays.
+
 | Key | Stash | Label | Value |
 |---|---|---|---|
 | `md/v1/step/upgrade-train` | Each deployment a stage creates or proposes | Upgrade train | `{"tool": "upgrade-train", "status": "succeeded", "finished_at": "...", "message": "Stage dev of train db: api-db@1.3.0"}` |

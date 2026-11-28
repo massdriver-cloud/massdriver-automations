@@ -109,6 +109,8 @@ The response is `202`. A request for a check that does not exist gets `404`.
 
 ## Results in the stash
 
+Entries in a deployment's stash are immutable: they record what already happened, and when Massdriver sends an event again, the first value stays.
+
 When a plan completes, drift writes two JSON entries:
 
 | Key | Stash | Label | Value |

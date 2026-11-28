@@ -57,6 +57,8 @@ Every key is optional.
 
 ## Results in the stash
 
+Entries in a deployment's stash are immutable: they record what already happened, and when Massdriver sends an event again, the first value stays.
+
 With `MASSDRIVER_API_KEY` set, the automation writes the commit that GitHub resolved the ref to, for each
 Massdriver deployment:
 

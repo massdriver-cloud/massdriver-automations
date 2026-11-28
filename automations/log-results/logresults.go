@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
@@ -97,7 +98,15 @@ func (l *LogResults) Handle(ctx context.Context, ev automation.Event) error {
 
 	// A failed write is logged and not returned: a redelivery would read the same logs and fail the same way.
 	for _, e := range entries {
-		if err := setDeploymentEntry(ctx, l.api, d.ID, e); err != nil {
+		err := l.api.SetStashEntry(ctx, massdriver.StashEntry{
+			Scope: "deployment", ID: d.ID, Key: e.Key, Format: strings.ToUpper(e.Format), Label: e.Label, Value: e.Value,
+			Immutable: true,
+		})
+		if errors.Is(err, massdriver.ErrAlreadySet) {
+			log.Debug("stash entry already written", "rule", e.Rule, "key", e.Key)
+			continue
+		}
+		if err != nil {
 			log.Warn("stash write failed", "rule", e.Rule, "key", e.Key, "err", err)
 			continue
 		}

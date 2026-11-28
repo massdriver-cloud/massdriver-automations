@@ -3,6 +3,7 @@ package massdriver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -39,8 +40,9 @@ func (r Results) Key(name string) string {
 	return prefix + "/" + name
 }
 
-// Write sets a JSON result with a label, so it shows as a metadata row while no widget draws it. A failed write is
-// only logged: the result adds to what the automation did, and must not make Massdriver send the event again.
+// Write sets a JSON result with a label, so it shows as a metadata row while no widget draws it. A deployment's
+// result is immutable, because it records what already happened. A failed write is only logged: the result adds to
+// what the automation did, and must not make Massdriver send the event again.
 func (r Results) Write(ctx context.Context, scope, id, name, label string, value any) {
 	if r.API == nil || id == "" {
 		return
@@ -51,7 +53,14 @@ func (r Results) Write(ctx context.Context, scope, id, name, label string, value
 		log.Warn("result write failed", "err", err)
 		return
 	}
-	err = r.API.SetStashEntry(ctx, StashEntry{Scope: scope, ID: id, Key: r.Key(name), Format: "JSON", Label: label, Value: string(b)})
+	err = r.API.SetStashEntry(ctx, StashEntry{
+		Scope: scope, ID: id, Key: r.Key(name), Format: "JSON", Label: label, Value: string(b),
+		Immutable: scope == "deployment",
+	})
+	if errors.Is(err, ErrAlreadySet) {
+		log.Debug("result already written")
+		return
+	}
 	if err != nil {
 		log.Warn("result write failed", "err", err)
 		return

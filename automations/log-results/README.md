@@ -330,5 +330,6 @@ docker run -p 8080:8080 \
 - The Massdriver Bicep provisioner skips what-if, and prints `provisioningState` only with `show_output: true`.
 - Checkov's logs do not say whether `halt_on_failure` is on, so the examples leave out `blocking`.
 - A failed stash write is logged as `stash write failed`, with the server's message, and does not fail the event.
+- Every entry is immutable. A second event for the same deployment leaves the first values, and logs `stash entry already written` at debug.
 - A line longer than 64 KiB is cut to its first 64 KiB, and a text capture to its first 1 KiB.
 - Duplicate events are dropped by id for one hour, in memory.

@@ -433,9 +433,10 @@ func TestSourceGoesToTheDeploymentStash(t *testing.T) {
 			"scope": map[string]any{"deployment": "5c1de0a7-92b4-4f1e-8d3a-6e27c9f0b815"},
 			"key":   "md/v1/source",
 			"input": map[string]any{
-				"format": "JSON",
-				"label":  "Source",
-				"value":  `{"repo":"acme/api","ref":"trunk","commit":"a41c9e2","url":"` + srv.URL + `/acme/api/commit/a41c9e2"}`,
+				"format":    "JSON",
+				"immutable": true,
+				"label":     "Source",
+				"value":     `{"repo":"acme/api","ref":"trunk","commit":"a41c9e2","url":"` + srv.URL + `/acme/api/commit/a41c9e2"}`,
 			},
 		}}
 		stash.mu.Lock()

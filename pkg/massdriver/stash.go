@@ -3,6 +3,8 @@ package massdriver
 import (
 	"context"
 	_ "embed"
+	"errors"
+	"strings"
 	"time"
 )
 
@@ -21,7 +23,14 @@ type StashEntry struct {
 	Value  string
 	// TTL of 0 keeps the entry until it is set again or deleted.
 	TTL time.Duration
+	// Immutable entries can't be changed or deleted until they expire. A deployment's results describe what
+	// already happened, so nothing should rewrite them afterwards.
+	Immutable bool
 }
+
+// ErrAlreadySet is returned when the key already has an immutable value, or a live value that an immutable write
+// can't replace. For a write that is repeated because Massdriver sent an event again, the first write already won.
+var ErrAlreadySet = errors.New("the key already has a value that cannot be changed")
 
 // SetStashEntry sets one entry with alphaSetStashEntry. An entry the server rejects returns its messages.
 func (c *Client) SetStashEntry(ctx context.Context, e StashEntry) error {
@@ -31,6 +40,9 @@ func (c *Client) SetStashEntry(ctx context.Context, e StashEntry) error {
 	}
 	if e.Label != "" {
 		input["label"] = e.Label
+	}
+	if e.Immutable {
+		input["immutable"] = true
 	}
 	var out struct {
 		Set Payload[struct {
@@ -46,5 +58,11 @@ func (c *Client) SetStashEntry(ctx context.Context, e StashEntry) error {
 	if err != nil {
 		return err
 	}
-	return out.Set.Err()
+	if err := out.Set.Err(); err != nil {
+		if strings.Contains(err.Error(), "cannot be changed") {
+			return ErrAlreadySet
+		}
+		return err
+	}
+	return nil
 }

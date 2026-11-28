@@ -92,6 +92,8 @@ The service account needs these permissions on the matching instances:
 
 ## Results in the stash
 
+Entries in a deployment's stash are immutable: they record what already happened, and when Massdriver sends an event again, the first value stays.
+
 On each deployment it creates or proposes, the automation writes:
 
 | Key | Stash | Label | Value |
