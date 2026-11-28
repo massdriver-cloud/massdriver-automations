@@ -1,0 +1,12 @@
+query ScorecardAuditLogs($org: ID!, $filter: AuditLogsFilter, $cursor: Cursor) {
+  auditLogs(organizationId: $org, filter: $filter, sort: { field: OCCURRED_AT, order: ASC }, cursor: $cursor) {
+    cursor {
+      next
+    }
+    items {
+      occurredAt
+      type
+      data
+    }
+  }
+}

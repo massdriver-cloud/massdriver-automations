@@ -1,0 +1,12 @@
+query ScorecardProjectEnvironments($org: ID!, $id: ID!, $cursor: Cursor) {
+  project(organizationId: $org, id: $id) {
+    environments(cursor: $cursor) {
+      cursor {
+        next
+      }
+      items {
+        id
+      }
+    }
+  }
+}

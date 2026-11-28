@@ -20,6 +20,7 @@ import (
 	rollbackonfailure "github.com/massdriver-cloud/massdriver-automations/automations/rollback-on-failure"
 	"github.com/massdriver-cloud/massdriver-automations/automations/router"
 	sandboxonjoin "github.com/massdriver-cloud/massdriver-automations/automations/sandbox-on-join"
+	"github.com/massdriver-cloud/massdriver-automations/automations/scorecards"
 	staleproposals "github.com/massdriver-cloud/massdriver-automations/automations/stale-proposals"
 	stashsync "github.com/massdriver-cloud/massdriver-automations/automations/stash-sync"
 	"github.com/massdriver-cloud/massdriver-automations/automations/statuspage"
@@ -47,6 +48,7 @@ var All = []automation.Definition{
 	rollbackonfailure.Definition,
 	router.Definition,
 	sandboxonjoin.Definition,
+	scorecards.Definition,
 	staleproposals.Definition,
 	stashsync.Definition,
 	statuspage.Definition,

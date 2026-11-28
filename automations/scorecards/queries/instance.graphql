@@ -1,0 +1,28 @@
+query ScorecardInstance($org: ID!, $id: ID!) {
+  instance(organizationId: $org, id: $id) {
+    id
+    status
+    params
+    deployedVersion
+    resolvedVersion
+    firingAlarmCount
+    effectiveAttributes
+    environment {
+      id
+      project {
+        id
+      }
+    }
+    bundle {
+      name
+    }
+    latestProvision {
+      id
+      status
+      version
+      params
+      createdAt
+      lastTransitionedAt
+    }
+  }
+}

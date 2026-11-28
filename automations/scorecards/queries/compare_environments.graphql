@@ -1,0 +1,25 @@
+query ScorecardCompareEnvironments($org: ID!, $source: ID!, $target: ID!) {
+  compareEnvironments(organizationId: $org, sourceId: $source, targetId: $target) {
+    instances {
+      component {
+        id
+      }
+      source {
+        id
+      }
+      target {
+        id
+      }
+      version {
+        source
+        target
+        equal
+      }
+      params {
+        path
+        equal
+      }
+      equal
+    }
+  }
+}

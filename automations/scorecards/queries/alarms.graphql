@@ -1,0 +1,14 @@
+query ScorecardAlarms($org: ID!, $instance: ID!, $cursor: Cursor) {
+  instanceAlarms(organizationId: $org, filter: { instanceId: { eq: $instance } }, cursor: $cursor) {
+    cursor {
+      next
+    }
+    items {
+      displayName
+      currentState {
+        status
+        occurredAt
+      }
+    }
+  }
+}

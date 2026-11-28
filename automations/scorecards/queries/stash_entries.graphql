@@ -1,0 +1,18 @@
+query ScorecardStashEntries($org: ID!, $scopes: [AlphaStashScope!]!, $filter: AlphaStashEntriesFilter, $cursor: Cursor) {
+  alphaStashEntriesForScopes(organizationId: $org, scopes: $scopes, filter: $filter, cursor: $cursor) {
+    cursor {
+      next
+    }
+    items {
+      scope {
+        kind
+        id
+      }
+      key
+      value
+      format
+      expiresAt
+      updatedAt
+    }
+  }
+}

@@ -1,0 +1,5 @@
+query ScorecardEnvironmentActions($org: ID!, $id: ID!, $group: UUID!) {
+  environment(organizationId: $org, id: $id) {
+    groupAllowedActions(groupId: $group)
+  }
+}

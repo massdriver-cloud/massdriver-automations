@@ -1,0 +1,13 @@
+query ScorecardTags($org: ID!, $repo: ID!, $cursor: Cursor) {
+  ociRepo(organizationId: $org, id: $repo) {
+    tags(filter: { channel: STABLE }, cursor: $cursor) {
+      cursor {
+        next
+      }
+      items {
+        tag
+        createdAt
+      }
+    }
+  }
+}
