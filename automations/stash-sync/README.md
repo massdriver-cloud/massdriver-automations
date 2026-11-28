@@ -169,9 +169,7 @@ of Tendwell Health.
 
 The service account needs:
 
-- `instance:configure` on the instances it writes to
-- `environment:update` on the environments it writes to
-- `project:update` on a project, and `project:design` for a component, if it writes to their stashes
+- `stash:write` on the instances, environments, components and projects it writes to
 
 With CloudWatch rules or presets, the AWS credentials need `cloudwatch:GetMetricData` and, for alarms,
 `cloudwatch:DescribeAlarms`. CloudWatch bills `GetMetricData` for each metric it returns.

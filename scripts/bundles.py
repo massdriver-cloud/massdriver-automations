@@ -991,13 +991,23 @@ SECRETS = {
 HOST = r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$"
 HOST_MESSAGE = {"pattern": "Must be a lowercase DNS name, such as drift.automations.acme.com."}
 
-IMAGE = obj("Image", {
-    "repository": s("Repository", "The automations image. bundle-scanner adds `-scanner` to the tag, and router "
-                    "adds `-scripts` when it runs commands.", default="ghcr.io/massdriver-cloud/massdriver-automations"),
-    "tag": s("Tag", "The image tag, such as `0.2.0`. Pin a version so that a redeploy runs the same code. A deploy of a tag that moves, such as `latest` or `0.2`, restarts the automation on the image the tag names then.",
-             default="0.2", pattern="^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$",
-             message={"pattern": "Must be a valid image tag."}),
-}, required=["repository", "tag"])
+# The newest release. Automations it does not have default to `latest` until a release has them.
+RELEASE_TAG = "0.2"
+RELEASED = {
+    "audit-archiver", "autodeploy-downstream", "bundle-scanner", "cost-explorer", "drift", "freeze-guard",
+    "github-deployments", "proposal-chatops", "release-notes", "rollback-on-failure", "router",
+    "sandbox-on-join", "statuspage",
+}
+
+
+def image(name):
+    return obj("Image", {
+        "repository": s("Repository", "The automations image. bundle-scanner adds `-scanner` to the tag, and router "
+                        "adds `-scripts` when it runs commands.", default="ghcr.io/massdriver-cloud/massdriver-automations"),
+        "tag": s("Tag", "The image tag, such as `0.2.0`. Pin a version so that a redeploy runs the same code. A deploy of a tag that moves, such as `latest` or `0.2`, restarts the automation on the image the tag names then.",
+                 default=RELEASE_TAG if name in RELEASED else "latest", pattern="^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$",
+                 message={"pattern": "Must be a valid image tag."}),
+    }, required=["repository", "tag"])
 
 OTEL = obj("Tracing", {"endpoint": s(
     "OTLP endpoint", "The OTLP/HTTP base URL of a collector, such as `http://otel-collector.observability:4318`. "
@@ -1038,7 +1048,7 @@ def bundle_name(name, k8s):
 def manifest(name, a, k8s):
     bname = bundle_name(name, k8s)
     platform = "a Kubernetes cluster" if k8s else "Amazon ECS with Fargate"
-    props = {"image": IMAGE, "ingress": ingress(k8s, name)}
+    props = {"image": image(name), "ingress": ingress(k8s, name)}
     if not k8s:
         props["logs"] = LOGS
     props["config"] = a["config"] if a["config"]["type"] != "object" else {**a["config"], "title": "Settings"}
