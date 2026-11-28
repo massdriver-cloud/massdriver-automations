@@ -62,17 +62,17 @@ func (f *fakeGitHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if base, ok := v["base"].(string); ok && pr["_base"] != base {
 			continue
 		}
-		if labels, ok := v["labels"].([]any); ok && !slices.ContainsFunc(labels, func(l any) bool {
-			return slices.Contains(pr["_labels"].([]string), l.(string))
-		}) {
-			continue
-		}
 		node := map[string]any{}
 		for k, val := range pr {
 			if !strings.HasPrefix(k, "_") && (k != "files" || v["files"] == true) {
 				node[k] = val
 			}
 		}
+		labels := []any{}
+		for _, l := range pr["_labels"].([]string) {
+			labels = append(labels, map[string]any{"name": l})
+		}
+		node["labels"] = map[string]any{"nodes": labels}
 		match = append(match, node)
 	}
 	from := 0
@@ -291,7 +291,7 @@ routes:
       paths: [services/billing/]
       exclude_authors: [Renovate]
 `)
-	in := func(n map[string]any) { n["_labels"] = []string{"fix"} }
+	in := func(n map[string]any) { n["_labels"] = []string{"docs", "fix"} }
 	e.gh.add("tendwell-health/monorepo",
 		pr("jo", day, in, files("services/billing/api.go")),
 		pr("jo", day, in, files("docs/a.md", "services/billing/db.go")),
@@ -306,7 +306,7 @@ routes:
 		t.Errorf("players = %v", got)
 	}
 	q := e.gh.calls()[0]
-	if q["base"] != "main" || !reflect.DeepEqual(q["labels"], []any{"feature", "fix"}) || q["files"] != true {
+	if q["base"] != "main" || q["labels"] != nil || q["files"] != true {
 		t.Errorf("query = %v", q)
 	}
 }

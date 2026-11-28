@@ -31,7 +31,6 @@ type Query struct {
 	// States is MERGED, or empty for every state.
 	States []string
 	Base   string
-	Labels []string
 	// Files asks for the paths that each pull request changes.
 	Files bool
 	Since time.Time
@@ -39,7 +38,7 @@ type Query struct {
 
 // key is the same for queries that GitHub answers the same, so routes that share one run it once.
 func (q Query) key() string {
-	return fmt.Sprintf("%s|%v|%s|%v|%t|%d", q.Repo, q.States, q.Base, q.Labels, q.Files, q.Since.Unix())
+	return fmt.Sprintf("%s|%v|%s|%t|%d", q.Repo, q.States, q.Base, q.Files, q.Since.Unix())
 }
 
 // GitHub reads pull requests.
@@ -54,8 +53,13 @@ type PullRequest struct {
 	MergedAt  *time.Time `json:"mergedAt"`
 	Additions int        `json:"additions"`
 	Deletions int        `json:"deletions"`
-	Author    *Author    `json:"author"`
-	Files     *struct {
+	Labels    struct {
+		Nodes []struct {
+			Name string `json:"name"`
+		} `json:"nodes"`
+	} `json:"labels"`
+	Author *Author `json:"author"`
+	Files  *struct {
 		Nodes []struct {
 			Path string `json:"path"`
 		} `json:"nodes"`
@@ -88,9 +92,6 @@ func (g *GraphQLGitHub) PullRequests(ctx context.Context, q Query) ([]PullReques
 	if q.Base != "" {
 		vars["base"] = q.Base
 	}
-	if len(q.Labels) > 0 {
-		vars["labels"] = q.Labels
-	}
 	var out []PullRequest
 	for range maxPages {
 		page, err := g.page(ctx, vars)
@@ -100,10 +101,11 @@ func (g *GraphQLGitHub) PullRequests(ctx context.Context, q Query) ([]PullReques
 		out = append(out, page.Nodes...)
 		n := len(page.Nodes)
 		if !page.PageInfo.HasNextPage || n == 0 || page.Nodes[n-1].UpdatedAt.Before(q.Since) {
-			break
+			return out, nil
 		}
 		vars["after"] = page.PageInfo.EndCursor
 	}
+	automation.Logger(ctx).Warn("github query truncated", "repo", q.Repo, "pull_requests", len(out))
 	return out, nil
 }
 

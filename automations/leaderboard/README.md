@@ -160,7 +160,7 @@ docker run -p 8080:8080 \
 
 - The stash API is alpha. Its names start with `alpha` and can change.
 - One query reads at most 1,000 pull requests of a repository. A busy repository with a long window can score
-  fewer pull requests than it merged.
+  fewer pull requests than it merged. The automation then logs `github query truncated` at `warn`.
 - `paths` looks at the first 100 files of each pull request.
 - Each page costs about one point of GitHub's GraphQL rate limit, out of 5,000 an hour. Ten repositories with 100
   merged pull requests a month, read every 15 minutes, use about 120 an hour.

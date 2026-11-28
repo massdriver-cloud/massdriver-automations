@@ -151,7 +151,6 @@ func (p *PullRequests) query(repo string, now time.Time) Query {
 	if p.Score != ScoreOpened {
 		q.States = []string{"MERGED"}
 	}
-	q.Labels = slices.Sorted(slices.Values(p.Labels))
 	return q
 }
 
@@ -262,6 +261,9 @@ func (l *Leaderboard) players(r Route, now time.Time, results map[string]queryRe
 
 // points is what one pull request adds to its author's score: 0 when it is outside the window or the filters.
 func (p *PullRequests) points(pr PullRequest, since time.Time) int {
+	if len(p.Labels) > 0 && !labeled(pr, p.Labels) {
+		return 0
+	}
 	if len(p.Paths) > 0 && !touches(pr, p.Paths) {
 		return 0
 	}
@@ -295,6 +297,17 @@ func touches(pr PullRequest, prefixes []string) bool {
 			if strings.HasPrefix(f.Path, prefix) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// labeled reports whether the pull request has any of the labels. The filter runs here, not in the query, so
+// that the rule is any of them whatever GitHub's labels argument does with several.
+func labeled(pr PullRequest, labels []string) bool {
+	for _, l := range pr.Labels.Nodes {
+		if slices.Contains(labels, l.Name) {
+			return true
 		}
 	}
 	return false

@@ -5,7 +5,6 @@ query PullRequests(
   $after: String
   $states: [PullRequestState!]
   $base: String
-  $labels: [String!]
   $files: Boolean!
 ) {
   repository(owner: $owner, name: $name) {
@@ -14,7 +13,6 @@ query PullRequests(
       after: $after
       states: $states
       baseRefName: $base
-      labels: $labels
       orderBy: {field: UPDATED_AT, direction: DESC}
     ) {
       pageInfo {
@@ -27,6 +25,11 @@ query PullRequests(
         mergedAt
         additions
         deletions
+        labels(first: 50) {
+          nodes {
+            name
+          }
+        }
         author {
           __typename
           login
