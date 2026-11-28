@@ -123,7 +123,7 @@ projects:
 
 ## Permissions
 
-The service account needs `project:update` on each project in `projects`.
+The service account needs `stash:write` on each project in `projects`.
 
 ## Event destination
 
