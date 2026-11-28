@@ -58,6 +58,16 @@ func TestCloudWatchMetric(t *testing.T) {
 		t.Errorf("window = %v to %v, %v", in.StartTime, in.EndTime, in.ScanBy)
 	}
 
+	// Mid-minute, the window stops at the minute's start: its partial count would read as a drop in traffic.
+	cw.now = func() time.Time { return start.Add(34 * time.Second) }
+	if _, err := cw.Query(context.Background(), q); err != nil {
+		t.Fatal(err)
+	}
+	if in := fake.metricIn; !in.EndTime.Equal(start) || !in.StartTime.Equal(start.Add(-3*time.Minute)) {
+		t.Errorf("mid-period window = %v to %v, want %v to %v", in.StartTime, in.EndTime, start.Add(-3*time.Minute), start)
+	}
+	cw.now = func() time.Time { return start }
+
 	fake.values = nil
 	if _, err := cw.Query(context.Background(), q); !errors.Is(err, ErrNoData) {
 		t.Errorf("no values: err = %v", err)

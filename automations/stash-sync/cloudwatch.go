@@ -85,7 +85,9 @@ func (c *CloudWatch) Query(ctx context.Context, query Query) (float64, error) {
 
 func (c *CloudWatch) metric(ctx context.Context, q *CloudWatchQuery) (float64, error) {
 	period := time.Duration(q.Period)
-	end := c.now()
+	// The current period is still filling: a count or sum there is partial, often zero. The window ends where it
+	// starts, so the latest data point is a whole period.
+	end := c.now().Truncate(period)
 	names := make([]string, 0, len(q.Dimensions))
 	for k := range q.Dimensions {
 		names = append(names, k)
@@ -96,7 +98,7 @@ func (c *CloudWatch) metric(ctx context.Context, q *CloudWatchQuery) (float64, e
 		dims = append(dims, types.Dimension{Name: aws.String(k), Value: aws.String(q.Dimensions[k])})
 	}
 	out, err := c.api.GetMetricData(ctx, &cloudwatch.GetMetricDataInput{
-		// Three periods cover the delay before CloudWatch has the latest one.
+		// Three whole periods cover the delay before CloudWatch has the latest one.
 		StartTime: aws.Time(end.Add(-3 * period)),
 		EndTime:   aws.Time(end),
 		ScanBy:    types.ScanByTimestampDescending,
