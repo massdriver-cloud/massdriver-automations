@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
@@ -48,6 +49,24 @@ const (
 // ErrNotFound is an instance or environment that the API does not return, because it is gone or the service
 // account cannot view it.
 var ErrNotFound = errors.New("not found")
+
+// errTruncated is a list longer than maxPages pages.
+var errTruncated = errors.New("the list is longer than the automation reads")
+
+// notFound turns the API's NOT_FOUND error for one kind of entity, such as "Instance not found", into ErrNotFound.
+// The client returns GraphQL errors as "graphql: <messages>" and HTTP errors as "graphql: HTTP <code>"; an HTTP
+// error, or a missing organization or group, is a real failure and stays an error.
+func notFound(err error, kind string) error {
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.HasPrefix(msg, "graphql: ") && !strings.HasPrefix(msg, "graphql: http ") &&
+		strings.Contains(msg, kind+" not found") {
+		return ErrNotFound
+	}
+	return err
+}
 
 // Instance is the state of one instance that facts and checks read.
 type Instance struct {
@@ -212,8 +231,10 @@ type page struct {
 	Items json.RawMessage `json:"items"`
 }
 
-// pages reads every page of a list. get runs one query and returns the list's page; done stops early.
-func pages[T any](ctx context.Context, get func(cursor map[string]any) (*page, error), done func(T) bool) ([]T, error) {
+// pages reads every page of a list, up to maxPages. get runs one query and returns the list's page; done stops
+// early. With strict, a list longer than maxPages pages is errTruncated, for a caller whose result would be wrong
+// without the rest.
+func pages[T any](ctx context.Context, get func(cursor map[string]any) (*page, error), done func(T) bool, strict ...bool) ([]T, error) {
 	var out []T
 	var next *string
 	for i := 0; i < maxPages; i++ {
@@ -241,6 +262,9 @@ func pages[T any](ctx context.Context, get func(cursor map[string]any) (*page, e
 			return nil, ctx.Err()
 		}
 	}
+	if len(strict) > 0 && strict[0] {
+		return nil, errTruncated
+	}
 	return out, nil
 }
 
@@ -250,7 +274,7 @@ func (a *GraphQLAPI) Instance(ctx context.Context, id string) (*Instance, error)
 		Instance *Instance `json:"instance"`
 	}
 	if err := a.Client.Do(ctx, instanceQuery, a.vars(map[string]any{"id": id}), &out); err != nil {
-		return nil, err
+		return nil, notFound(err, "instance")
 	}
 	if out.Instance == nil {
 		return nil, ErrNotFound
@@ -300,7 +324,7 @@ func (a *GraphQLAPI) AuditEvents(ctx context.Context, instance string, types []s
 		}
 		err := a.Client.Do(ctx, auditLogsQuery, a.vars(map[string]any{"filter": filter, "cursor": cursor}), &out)
 		return out.Logs, err
-	}, nil)
+	}, nil, true)
 }
 
 // Tags reads a bundle's versions in a channel.
@@ -401,7 +425,7 @@ func (a *GraphQLAPI) CompareEnvironments(ctx context.Context, source, target str
 	}
 	err := a.Client.Do(ctx, compareEnvironmentsQuery, a.vars(map[string]any{"source": source, "target": target}), &out)
 	if err != nil {
-		return nil, err
+		return nil, notFound(err, "environment")
 	}
 	if out.Comparison == nil {
 		return nil, ErrNotFound
@@ -453,7 +477,7 @@ func (a *GraphQLAPI) EnvironmentActions(ctx context.Context, environment, group 
 	}
 	err := a.Client.Do(ctx, environmentActionsQuery, a.vars(map[string]any{"id": environment, "group": group}), &out)
 	if err != nil {
-		return nil, err
+		return nil, notFound(err, "environment")
 	}
 	if out.Environment == nil {
 		return nil, ErrNotFound

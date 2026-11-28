@@ -163,10 +163,16 @@ func (f *fakeMassdriver) CompareEnvironments(_ context.Context, source, target s
 func (f *fakeMassdriver) Groups(context.Context) ([]Group, error) { return f.groups, nil }
 
 func (f *fakeMassdriver) GroupMembers(_ context.Context, group string) ([]string, error) {
+	if err := f.err("GroupMembers"); err != nil {
+		return nil, err
+	}
 	return f.members[group], nil
 }
 
 func (f *fakeMassdriver) EnvironmentActions(_ context.Context, env, group string) ([]string, error) {
+	if err := f.err("EnvironmentActions:" + env); err != nil {
+		return nil, err
+	}
 	return f.actions[env+"/"+group], nil
 }
 

@@ -40,18 +40,22 @@ func (q *queue) add(key string) {
 	}
 }
 
-// take returns the next key that is not running, or false when there is none.
+// take returns the next key that is not running, or false when there is none. A roll-up waits until no other job
+// waits, so a pass over many instances runs each roll-up after them, a few times at most, and not once for each
+// instance.
 func (q *queue) take() (string, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for i, key := range q.order {
-		if q.running[key] {
-			continue
+	for _, rollups := range []bool{false, true} {
+		for i, key := range q.order {
+			if q.running[key] || isRollup(key) != rollups {
+				continue
+			}
+			q.order = append(q.order[:i], q.order[i+1:]...)
+			delete(q.waiting, key)
+			q.running[key] = true
+			return key, true
 		}
-		q.order = append(q.order[:i], q.order[i+1:]...)
-		delete(q.waiting, key)
-		q.running[key] = true
-		return key, true
 	}
 	return "", false
 }

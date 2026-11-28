@@ -102,6 +102,14 @@ func (w *writer) write(ctx context.Context, scope Scope, key, label string, v an
 	return true, nil
 }
 
+// forget drops what the writer remembers, so the next write of each entry reads it first. A pass calls it, so an
+// entry that someone deleted or changed is written again.
+func (w *writer) forget() {
+	w.mu.Lock()
+	w.last = map[string]written{}
+	w.mu.Unlock()
+}
+
 func (w *writer) remember(id string, v written) {
 	w.mu.Lock()
 	w.last[id] = v

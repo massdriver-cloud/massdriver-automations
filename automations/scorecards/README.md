@@ -123,15 +123,17 @@ project counts the instances it has that the scorecard scores.
 
 ## How it writes
 
-- An entry is set when its value changes, and again once an interval has passed, so `evaluated_at` is never more
+- An entry is set when its value changes, and again on each interval pass, so `evaluated_at` is never much more
   than one interval old. Entries have no TTL.
-- Before its first write of an entry, the automation reads it, so a restart does not rewrite every entry.
+- Before its first write of an entry, the automation reads it, so a restart does not rewrite every entry. Each
+  interval reads every entry again, so an entry that someone deleted or changed is written again.
 - What no longer applies is deleted: the scores and facts of an instance that is decommissioned or not deployed,
   a scorecard whose `match` the instance's attributes stopped meeting, and a roll-up with no scored instance left.
 - A failed read leaves out the fact it was for, and the other facts and the scores are still written. A failed
   write is logged, and the next event or interval writes it again. Neither makes Massdriver send the event again.
 - The automation answers each event at once, and computes in the background. An instance named by many events
-  while its computation waits is computed once.
+  while its computation waits is computed once. Roll-ups and parity wait until no instance waits, so a pass over
+  many instances runs each of them a few times at most.
 
 ## Configuration
 
@@ -209,6 +211,9 @@ docker run -p 8080:8080 \
 ## Limits
 
 - The stash API is alpha. Its names start with `alpha` and can change.
-- A list reads at most 5,000 items, such as instances, deployments in the window, or versions of a bundle.
+- A list reads at most 5,000 items, such as instances, deployments in the window, or versions of a bundle. When an
+  instance has more than 5,000 audit records of one kind in the window, delivery or reliability is skipped, because
+  a cut list would undercount.
 - Ownership asks the API once for each environment and group that is not an organization admin group, each
-  interval and each `group_membership.*` event.
+  interval and each `group_membership.*` event. An environment it cannot read is logged with `ownership skipped`
+  and keeps its last value, and so does its project.

@@ -165,7 +165,7 @@ func TestRestartWritesNothingThatDidNotChange(t *testing.T) {
 	e.s.Drain(context.Background())
 	first := len(e.md.written())
 
-	restarted := New(e.s.cfg, e.md, e.md, func() time.Time { return now.Add(30 * time.Minute) })
+	restarted := New(e.s.cfg, e.md, e.md, func() time.Time { return now.Add(20 * time.Minute) })
 	restarted.Pass()
 	restarted.Drain(context.Background())
 	if n := len(e.md.written()); n != first {
@@ -584,5 +584,89 @@ func TestUnmatchedScorecardIsDeleted(t *testing.T) {
 	e.handle(t, deployed(app.ID))
 	if _, ok := e.md.value("instance", app.ID, "md/v1/scorecard/production-readiness"); ok {
 		t.Error("the scorecard is still on the instance")
+	}
+}
+
+func TestPassRewritesAnEntrySomeoneDeleted(t *testing.T) {
+	e := setup(t, readiness)
+	app := prodApp(e)
+	e.s.Pass()
+	e.s.Drain(context.Background())
+	e.md.mu.Lock()
+	delete(e.md.stash, "instance/"+app.ID+"/"+KeyDelivery)
+	e.md.mu.Unlock()
+
+	// An event trusts what the automation remembers; the next pass reads the stash again.
+	e.handle(t, deployed(app.ID))
+	if _, ok := e.md.value("instance", app.ID, KeyDelivery); ok {
+		t.Fatal("an event rewrote an unchanged entry")
+	}
+	e.s.Pass()
+	e.s.Drain(context.Background())
+	if _, ok := e.md.value("instance", app.ID, KeyDelivery); !ok {
+		t.Error("the pass did not write the deleted entry again")
+	}
+}
+
+func TestRollupsRunAfterInstanceJobs(t *testing.T) {
+	q := newQueue()
+	for _, k := range []string{"environment/billing-prod", "instance/a", "project/billing", "instance/b", "parity/billing-prod", "instance/c"} {
+		q.add(k)
+	}
+	var order []string
+	q.drain(context.Background(), func(_ context.Context, key string) {
+		order = append(order, key)
+		if key == "instance/a" {
+			// Another instance of the environment finishes, and names the roll-up again while it waits.
+			q.add("environment/billing-prod")
+		}
+	})
+	want := []string{"instance/a", "instance/b", "instance/c", "environment/billing-prod", "project/billing", "parity/billing-prod"}
+	if !reflect.DeepEqual(order, want) {
+		t.Errorf("order = %v", order)
+	}
+}
+
+func TestOwnershipContinuesPastAnEnvironmentItCannotRead(t *testing.T) {
+	e := setup(t, readiness)
+	prodApp(e)
+	e.md.addInstance("care", "prod", "api", nil)
+	e.md.groups = []Group{{ID: "g1", Name: "Platform", Role: "CUSTOM"}}
+	e.md.members = map[string][]string{"g1": {"a1"}}
+	e.md.actions = map[string][]string{"care-prod/g1": {"environment:deploy", "project:update"}}
+	e.md.failing["EnvironmentActions:billing-prod"] = ErrNotFound
+	e.s.Pass()
+	e.s.Drain(context.Background())
+	if _, ok := e.md.value("environment", "billing-prod", KeyOwnership); ok {
+		t.Error("billing-prod has owners")
+	}
+	if _, ok := e.md.value("project", "billing", KeyOwnership); ok {
+		t.Error("billing has owners from a partial read")
+	}
+	for _, s := range []Scope{{"environment", "care-prod"}, {"project", "care"}} {
+		if o := e.decode(t, s.Kind, s.ID, KeyOwnership); o["members"] != float64(1) {
+			t.Errorf("%s ownership = %v", s.ID, o)
+		}
+	}
+}
+
+// A failed member read is not remembered, so the next owner list that needs the group reads it again.
+func TestFailedMemberReadIsNotCached(t *testing.T) {
+	e := setup(t, readiness)
+	prodApp(e)
+	e.md.groups = []Group{{ID: "g1", Name: "Billing", Role: "CUSTOM"}}
+	e.md.members = map[string][]string{"g1": {"a1", "a2"}}
+	e.md.actions = map[string][]string{"billing-prod/g1": {"environment:deploy", "project:update"}}
+	e.md.failing["GroupMembers"] = errors.New("timeout")
+	e.s.Pass()
+	e.s.Drain(context.Background())
+	if _, ok := e.md.value("environment", "billing-prod", KeyOwnership); ok {
+		t.Fatal("ownership written from a failed member read")
+	}
+	delete(e.md.failing, "GroupMembers")
+	e.s.Pass()
+	e.s.Drain(context.Background())
+	if o := e.decode(t, "project", "billing", KeyOwnership); o["members"] != float64(2) {
+		t.Errorf("ownership = %v", o)
 	}
 }
