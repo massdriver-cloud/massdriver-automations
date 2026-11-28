@@ -3,6 +3,7 @@ package scorecards
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -249,6 +250,20 @@ func TestGraphQLAPIPagesAndFilters(t *testing.T) {
 
 	if _, err := api.Instance(ctx, "gone"); err != ErrNotFound {
 		t.Errorf("missing instance: err = %v", err)
+	}
+}
+
+func TestOnlyAMissingEntityIsNotFound(t *testing.T) {
+	for msg, want := range map[string]bool{
+		"graphql: Instance not found":            true,
+		"graphql: HTTP 404: 404 page not found":  false,
+		"graphql: Organization not found":        false,
+		"graphql: Group not found":               false,
+		"Post \"https://x\": instance not found": false,
+	} {
+		if got := notFound(errors.New(msg), "instance") == ErrNotFound; got != want {
+			t.Errorf("%q: not found = %v", msg, got)
+		}
 	}
 }
 

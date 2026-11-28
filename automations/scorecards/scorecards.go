@@ -525,8 +525,11 @@ func (s *Scorecards) ownership(ctx context.Context) error {
 			return m, nil
 		}
 		m, err := s.api.GroupMembers(ctx, g.ID)
+		if err != nil {
+			return nil, err
+		}
 		members[g.ID] = m
-		return m, err
+		return m, nil
 	}
 	owners := func(gs []Group) (Ownership, error) {
 		o := Ownership{Tool: tool, Groups: []GroupOwner{}}

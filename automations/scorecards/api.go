@@ -53,9 +53,16 @@ var ErrNotFound = errors.New("not found")
 // errTruncated is a list longer than maxPages pages.
 var errTruncated = errors.New("the list is longer than the automation reads")
 
-// notFound turns the API's NOT_FOUND error into ErrNotFound. The client returns GraphQL errors as their messages.
-func notFound(err error) error {
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "not found") {
+// notFound turns the API's NOT_FOUND error for one kind of entity, such as "instance not found", into ErrNotFound.
+// The client returns GraphQL errors as "graphql: <messages>" and HTTP errors as "graphql: HTTP <code>"; an HTTP
+// error, or a missing organization or group, is a real failure and stays an error.
+func notFound(err error, kind string) error {
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.HasPrefix(msg, "graphql: ") && !strings.HasPrefix(msg, "graphql: http ") &&
+		strings.Contains(msg, kind+" not found") {
 		return ErrNotFound
 	}
 	return err
@@ -265,7 +272,7 @@ func (a *GraphQLAPI) Instance(ctx context.Context, id string) (*Instance, error)
 		Instance *Instance `json:"instance"`
 	}
 	if err := a.Client.Do(ctx, instanceQuery, a.vars(map[string]any{"id": id}), &out); err != nil {
-		return nil, notFound(err)
+		return nil, notFound(err, "instance")
 	}
 	if out.Instance == nil {
 		return nil, ErrNotFound
@@ -416,7 +423,7 @@ func (a *GraphQLAPI) CompareEnvironments(ctx context.Context, source, target str
 	}
 	err := a.Client.Do(ctx, compareEnvironmentsQuery, a.vars(map[string]any{"source": source, "target": target}), &out)
 	if err != nil {
-		return nil, notFound(err)
+		return nil, notFound(err, "environment")
 	}
 	if out.Comparison == nil {
 		return nil, ErrNotFound
@@ -468,7 +475,7 @@ func (a *GraphQLAPI) EnvironmentActions(ctx context.Context, environment, group 
 	}
 	err := a.Client.Do(ctx, environmentActionsQuery, a.vars(map[string]any{"id": environment, "group": group}), &out)
 	if err != nil {
-		return nil, notFound(err)
+		return nil, notFound(err, "environment")
 	}
 	if out.Environment == nil {
 		return nil, ErrNotFound
