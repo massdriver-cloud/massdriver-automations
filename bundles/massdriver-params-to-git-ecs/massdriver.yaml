@@ -8,6 +8,23 @@ steps:
 - path: src
   provisioner: opentofu:1.10
 params:
+  examples:
+  - __name: Development
+    image:
+      repository: ghcr.io/massdriver-cloud/massdriver-automations
+      tag: latest
+    ingress:
+      dns_records: true
+    logs:
+      retention_days: 7
+  - __name: Production
+    image:
+      repository: ghcr.io/massdriver-cloud/massdriver-automations
+      tag: latest
+    ingress:
+      dns_records: true
+    logs:
+      retention_days: 365
   required:
   - image
   - ingress
