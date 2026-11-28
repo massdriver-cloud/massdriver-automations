@@ -1,0 +1,12 @@
+query ScorecardGroupMembers($org: ID!, $id: UUID!, $cursor: Cursor) {
+  group(organizationId: $org, id: $id) {
+    members(cursor: $cursor) {
+      cursor {
+        next
+      }
+      items {
+        id
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+query ScorecardInstances($org: ID!, $filter: InstancesFilter, $cursor: Cursor) {
+  instances(organizationId: $org, filter: $filter, cursor: $cursor) {
+    cursor {
+      next
+    }
+    items {
+      id
+      effectiveAttributes
+      environment {
+        id
+        project {
+          id
+        }
+      }
+    }
+  }
+}

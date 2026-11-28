@@ -1,0 +1,21 @@
+query ScorecardDeployments($org: ID!, $instance: ID!, $cursor: Cursor) {
+  deployments(
+    organizationId: $org
+    filter: { instanceId: { eq: $instance }, action: { in: [PROVISION, DECOMMISSION] } }
+    sort: { field: CREATED_AT, order: DESC }
+    cursor: $cursor
+  ) {
+    cursor {
+      next
+    }
+    items {
+      id
+      status
+      action
+      version
+      createdAt
+      lastTransitionedAt
+      elapsedTime
+    }
+  }
+}

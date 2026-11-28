@@ -1,0 +1,60 @@
+# scorecards config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+
+# How often every scored instance is computed again, besides the events. A Go duration, at least 1m. Default: 1h.
+interval: 1h
+
+delivery:
+  # The days of deployments that md/v1/delivery counts. Whole days. Default: 30d.
+  window: 30d
+
+reliability:
+  # The days of alarm changes that md/v1/reliability counts. Whole days. Default: 30d.
+  window: 30d
+
+ownership:
+  # A group owns an environment when its policies allow this action there. Default: environment:deploy.
+  environment_action: environment:deploy
+  # A group owns a project when its policies allow this action. Default: project:update.
+  project_action: project:update
+
+# Each environment is compared with its reference, and the differences go to md/v1/parity on the environment.
+parity:
+  - environment: api-prod
+    reference: api-staging
+
+scorecards:
+  # Required. Unique. The scores go to md/v1/scorecard/<name>: lowercase letters, digits, _, and -.
+  - name: production-readiness
+    # Effective attributes that an instance must have to be scored. A list matches any of its values. Empty scores
+    # every instance.
+    match:
+      md-environment: [prod, staging]
+    # 1 to 50 checks. Each reads one input and passes when pass, a jq expression, is not false or null.
+    checks:
+      # stash: a key on the instance. The value is the input: JSON as an object, TEXT as a string.
+      - id: no-drift
+        stash: md/v1/drift
+        pass: .status == "none"
+        # An input older than this is unknown. Optional.
+        max_age: 2d
+      - id: has-alarms
+        stash: md/v1/reliability
+        pass: .alarms > 0
+      # A key on the instance's latest provision, its environment, or its project.
+      - id: tests-passed
+        stash: {key: md/v1/tests, scope: deployment}
+        pass: .failed == 0
+      - id: owned
+        stash: {key: md/v1/ownership, scope: environment}
+        pass: (.groups | length) > 0
+      # query: instance reads the instance: id, status, deployedVersion, resolvedVersion, firingAlarmCount,
+      # effectiveAttributes, params, environment, and project.
+      - id: not-firing
+        query: instance
+        pass: .firingAlarmCount == 0
+    # Level names and the score each one needs, from 0 to 100. Up to 9 levels. Default: gold 100, silver 80,
+    # bronze 50.
+    levels:
+      gold: 100
+      silver: 80
+      bronze: 50
