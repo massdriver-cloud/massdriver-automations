@@ -43,28 +43,28 @@ flowchart LR
 
 | Automation | Events | Does |
 |---|---|---|
+| 🗄️ [audit-archiver](automations/audit-archiver) | every event | Archives every event, unchanged, in S3, Splunk, Datadog, or on disk. |
 | ⛓️ [autodeploy-downstream](automations/autodeploy-downstream) | `deployment.completed` | Deploys opted-in dependents when an instance deploys. |
-| ⏪ [rollback-on-failure](automations/rollback-on-failure) | `deployment.failed` | Rolls an opted-in instance back to its last completed deployment when a deployment fails. |
-| 🧭 [drift](automations/drift) | `deployment.completed`, `deployment.failed`, `deployment.aborted` | Plans instances on a schedule, alerts Slack about drift, and can re-apply the deployed configuration. |
-| 🥶 [freeze-guard](automations/freeze-guard) | `group.created`, `group.updated`, `group.deleted` | Adds deny policies for deployment actions to groups during change freeze windows. |
-| 💬 [proposal-chatops](automations/proposal-chatops) | `deployment.proposed`, `deployment.approved`, `deployment.rejected` | Approve or reject proposed deployments from Slack. |
-| ⏰ [stale-proposals](automations/stale-proposals) | none (reads the API on a schedule) | Posts a digest of proposed deployments that wait too long for approval, with Slack mentions, and can reject the oldest. |
-| 🧾 [log-results](automations/log-results) | `deployment.completed`, `deployment.failed` | Reads each finished deployment's logs with your rules, such as plan changes, Helm releases, and Checkov findings, and writes the results to the deployment's stash. |
-| 🐙 [github-deployments](automations/github-deployments) | `deployment.*` | Shows Massdriver deployments as GitHub Deployments. |
-| 🗂️ [params-to-git](automations/params-to-git) | `deployment.completed` | Writes the params of each successful deployment to `params.json` in a GitHub repository, by push or pull request. |
-| 🔃 [pr-sync](automations/pr-sync) | none (reads GitHub on an interval) | Writes the pull requests of a project's GitHub repositories to the project's stash, so a note on the project lists their review, check, and merge state. |
-| 🏆 [leaderboard](automations/leaderboard) | none (reads GitHub on an interval) | Ranks the authors of GitHub pull requests, with routes for repositories, branches, labels, paths, window, and score, and writes the top players to environment leaderboards. A static route writes a fixed list for trying it out. |
-| 📟 [oncall](automations/oncall) | none (reads PagerDuty or incident.io on an interval) | Writes who is on call now, by escalation level, to environment on-call cards. A static route writes a fixed list for trying it out. |
-| 📣 [release-notes](automations/release-notes) | `repo.published` | Posts new bundle versions, and the instances that can upgrade, to Slack and Teams. |
 | 🔍 [bundle-scanner](automations/bundle-scanner) | `repo.published` | Scans each new bundle version with Trivy and Checkov. Uses the `-scanner` image tag. |
 | 🐒 [chaos-monkey](automations/chaos-monkey) | `deployment.completed`, `deployment.failed`, `deployment.aborted`, `deployment.rejected` | Sends random presets, merged presets, mutated params, and gibberish to the instances that match its attributes, as proposals, plans, or deployments. |
-| 🚂 [upgrade-train](automations/upgrade-train) | `repo.published`, `deployment.completed`, `deployment.failed`, `deployment.aborted`, `deployment.rejected` | Moves each new bundle version through stages of instances, such as dev, staging, and prod, with a soak time and an alarm check between stages. |
 | 💸 [cost-explorer](automations/cost-explorer) | `deployment.completed` | Serves a dashboard of instance costs that you can group, filter, and chart over time. |
-| 🏖️ [sandbox-on-join](automations/sandbox-on-join) | `group_membership.*`, `deployment.completed` | Forks a sandbox environment for each new group member, and removes it when they leave. |
-| 🚦 [statuspage](automations/statuspage) | `alarm.*`, `alarm_state.created`, `deployment.*`, `instance.*`, `stash_entry.*` | Serves a public status page from alarms, instances, deployments, and stash health and banners. |
-| 📈 [stash-sync](automations/stash-sync) | none (reads metrics on an interval) | Copies CloudWatch and Prometheus metrics into stash entries, so widgets show health, usage, traffic, and banners. A simulate mode writes changing values for demos. |
-| 🗄️ [audit-archiver](automations/audit-archiver) | every event | Archives every event, unchanged, in S3, Splunk, Datadog, or on disk. |
+| 🧭 [drift](automations/drift) | `deployment.completed`, `deployment.failed`, `deployment.aborted` | Plans instances on a schedule, alerts Slack about drift, and can re-apply the deployed configuration. |
+| 🥶 [freeze-guard](automations/freeze-guard) | `group.created`, `group.updated`, `group.deleted` | Adds deny policies for deployment actions to groups during change freeze windows. |
+| 🐙 [github-deployments](automations/github-deployments) | `deployment.*` | Shows Massdriver deployments as GitHub Deployments. |
+| 🏆 [leaderboard](automations/leaderboard) | none (reads GitHub on an interval) | Ranks the authors of GitHub pull requests, with routes for repositories, branches, labels, paths, window, and score, and writes the top players to environment leaderboards. A static route writes a fixed list for trying it out. |
+| 🧾 [log-results](automations/log-results) | `deployment.completed`, `deployment.failed` | Reads each finished deployment's logs with your rules, such as plan changes, Helm releases, and Checkov findings, and writes the results to the deployment's stash. |
+| 📟 [oncall](automations/oncall) | none (reads PagerDuty or incident.io on an interval) | Writes who is on call now, by escalation level, to environment on-call cards. A static route writes a fixed list for trying it out. |
+| 🗂️ [params-to-git](automations/params-to-git) | `deployment.completed` | Writes the params of each successful deployment to `params.json` in a GitHub repository, by push or pull request. |
+| 🔃 [pr-sync](automations/pr-sync) | none (reads GitHub on an interval) | Writes the pull requests of a project's GitHub repositories to the project's stash, so a note on the project lists their review, check, and merge state. |
+| 💬 [proposal-chatops](automations/proposal-chatops) | `deployment.proposed`, `deployment.approved`, `deployment.rejected` | Approve or reject proposed deployments from Slack. |
+| 📣 [release-notes](automations/release-notes) | `repo.published` | Posts new bundle versions, and the instances that can upgrade, to Slack and Teams. |
+| ⏪ [rollback-on-failure](automations/rollback-on-failure) | `deployment.failed` | Rolls an opted-in instance back to its last completed deployment when a deployment fails. |
 | 🔀 [router](automations/router) | configured per route | Runs HTTP requests, commands, and Massdriver API calls for the events that match configured routes. Commands use the `-scripts` image tag. |
+| 🏖️ [sandbox-on-join](automations/sandbox-on-join) | `group_membership.*`, `deployment.completed` | Forks a sandbox environment for each new group member, and removes it when they leave. |
+| ⏰ [stale-proposals](automations/stale-proposals) | none (reads the API on a schedule) | Posts a digest of proposed deployments that wait too long for approval, with Slack mentions, and can reject the oldest. |
+| 📈 [stash-sync](automations/stash-sync) | none (reads metrics on an interval) | Copies CloudWatch and Prometheus metrics into stash entries, so widgets show health, usage, traffic, and banners. A simulate mode writes changing values for demos. |
+| 🚦 [statuspage](automations/statuspage) | `alarm.*`, `alarm_state.created`, `deployment.*`, `instance.*`, `stash_entry.*` | Serves a public status page from alarms, instances, deployments, and stash health and banners. |
+| 🚂 [upgrade-train](automations/upgrade-train) | `repo.published`, `deployment.completed`, `deployment.failed`, `deployment.aborted`, `deployment.rejected` | Moves each new bundle version through stages of instances, such as dev, staging, and prod, with a soak time and an alarm check between stages. |
 
 Each automation's README has its config, its environment variables, and the `mass event destination create`
 command that sends it only the events it uses.
