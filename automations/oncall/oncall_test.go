@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/massdriver-cloud/massdriver-automations/internal/widgetschema"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/automation"
 	"github.com/massdriver-cloud/massdriver-automations/pkg/massdriver"
 )
@@ -120,8 +121,9 @@ type setCall struct {
 
 // fakeAPI serves the stash mutation of the Massdriver API.
 type fakeAPI struct {
-	mu   sync.Mutex
-	sets []setCall
+	mu      sync.Mutex
+	sets    []setCall
+	invalid []error
 }
 
 func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -132,8 +134,14 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.Unmarshal(b, &req)
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.sets = append(f.sets, setCall{Scope: req.Variables["scope"].(map[string]any), Key: req.Variables["key"].(string),
-		Input: req.Variables["input"].(map[string]any)})
+	c := setCall{Scope: req.Variables["scope"].(map[string]any), Key: req.Variables["key"].(string),
+		Input: req.Variables["input"].(map[string]any)}
+	f.sets = append(f.sets, c)
+	for scope := range c.Scope {
+		if err := widgetschema.Check(scope, c.Key, c.Input["format"].(string), c.Input["value"].(string)); err != nil {
+			f.invalid = append(f.invalid, err)
+		}
+	}
 	_, _ = w.Write([]byte(`{"data":{"alphaSetStashEntry":{"successful":true,"messages":[],"result":{"key":"x"}}}}`))
 }
 
@@ -168,6 +176,11 @@ func setup(t *testing.T, cfgYAML string) *env {
 	t.Cleanup(iioSrv.Close)
 	apiSrv := httptest.NewServer(e.api)
 	t.Cleanup(apiSrv.Close)
+	t.Cleanup(func() {
+		for _, err := range e.api.invalid {
+			t.Errorf("the server would reject this write: %v", err)
+		}
+	})
 	client := &massdriver.Client{Endpoint: apiSrv.URL, OrganizationID: "tendwell-health", APIKey: "md_test"}
 	e.o = New(&cfg,
 		&PagerDuty{URL: pdSrv.URL, Token: "pd_test", HTTP: pdSrv.Client()},
@@ -442,5 +455,32 @@ func TestExampleConfigLoads(t *testing.T) {
 	if len(cfg.Routes) != 3 || cfg.Routes[0].PagerDuty == nil || cfg.Routes[1].IncidentIO == nil ||
 		cfg.Routes[2].Static == nil {
 		t.Errorf("config = %+v", cfg)
+	}
+}
+
+// Fields the server would reject are dropped, so the rest of the person still shows. setup checks each write
+// against the server's schema.
+func TestProviderPeopleAreTrimmedToTheWidget(t *testing.T) {
+	e := setup(t, `
+routes:
+  - environments: [billing-prod]
+    max_people: 25
+    pagerduty: {escalation_policies: [PPOLICY]}
+`)
+	for i := range 30 {
+		o := pdOnCall(1, "S", "PPOLICY", "P"+strconv.Itoa(i), "Person "+strconv.Itoa(i)+" "+strings.Repeat("x", 80))
+		u := o["user"].(map[string]any)
+		u["email"], u["avatar_url"] = "a@b.test, c@d.test", "ftp://x.test/a.png"
+		e.pd.oncalls = append(e.pd.oncalls, o)
+	}
+	e.cycle()
+	v := decode(t, e.api.calls()[0])
+	if len(v.Entries) != 25 {
+		t.Fatalf("entries = %d", len(v.Entries))
+	}
+	for _, p := range v.Entries {
+		if p["email"] != nil || p["image_url"] != nil || len([]rune(p["name"].(string))) != 64 {
+			t.Errorf("person = %v", p)
+		}
 	}
 }
