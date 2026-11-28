@@ -536,6 +536,37 @@ def automations(k8s):
                                    "pull_request": {"reviewers": TAG}}}},
     )
 
+    # ---------------------------------------------------------------- leaderboard
+    out["leaderboard"] = dict(
+        title="Environment leaderboards",
+        description="Ranks the authors of GitHub pull requests and writes the top players to the leaderboard widget "
+                    "of environments on an interval. A route can also write a fixed list, to try the widget. Set "
+                    "the `GITHUB_TOKEN` secret for routes that read pull requests.",
+        config=s("Settings (YAML)", f"The YAML config of leaderboard. See the [leaderboard README]"
+                 f"({README.format('leaderboard')}).",
+                 default="interval: 15m\nroutes:\n  - environments: [api-prod]\n    title: Demo leaderboard\n"
+                         "    static:\n      - name: Jo Park\n        handles: [github:jopark]\n"
+                         "      - name: Lee Chen\n        handles: [github:leechen]\n"),
+        extra={},
+        ui=None,
+        config_ui={"ui:widget": "textarea", "ui:options": {"rows": 16}},
+    )
+
+    # ---------------------------------------------------------------- oncall
+    out["oncall"] = dict(
+        title="Environment on-call",
+        description="Writes who is on call now, from PagerDuty or incident.io, to the on-call widget of environments "
+                    "on an interval. A route can also write a fixed list, to try the widget. Set the "
+                    "`PAGERDUTY_TOKEN` or `INCIDENT_IO_API_KEY` secret for the provider that routes use.",
+        config=s("Settings (YAML)", f"The YAML config of oncall. See the [oncall README]({README.format('oncall')}).",
+                 default="interval: 2m\nroutes:\n  - environments: [api-prod]\n    title: Demo on call\n"
+                         "    static:\n      - name: Jo Park\n        email: jo@example.com\n"
+                         "      - name: Lee Chen\n        handles: [slack:@lee]\n"),
+        extra={},
+        ui=None,
+        config_ui={"ui:widget": "textarea", "ui:options": {"rows": 16}},
+    )
+
     # ---------------------------------------------------------------- pr-sync
     out["pr-sync"] = dict(
         title="Pull requests in the project stash",
@@ -949,6 +980,9 @@ SECRET_DEFS = {
     "ROUTER_ENV": {"title": "Route environment",
                    "description": "A JSON object of environment variables for routes, such as "
                                   "`{\"PAGERDUTY_ROUTING_KEY\": \"...\"}`.", "json": True},
+    "PAGERDUTY_TOKEN": {"title": "PagerDuty API key", "description": "A read-only PagerDuty REST API key."},
+    "INCIDENT_IO_API_KEY": {"title": "incident.io API key",
+                            "description": "Needs `schedules.view` and `escalation_paths.view`."},
     "OTEL_EXPORTER_OTLP_HEADERS": {"title": "OTLP headers",
                                    "description": "Headers for the OTLP endpoint, as `key=value` pairs separated by "
                                                   "commas, such as `authorization=Bearer abc123`."},
@@ -958,6 +992,9 @@ SECRET_OVERRIDES = {
     "params-to-git": {"GITHUB_TOKEN": {"title": "GitHub token",
                                        "description": "Needs `Contents` write, and `Pull requests` write for the "
                                                       "pull request strategy, or the `repo` scope."}},
+    "leaderboard": {"GITHUB_TOKEN": {"title": "GitHub token",
+                                     "description": "Needs `Pull requests` and `Contents` read, or the `repo` scope "
+                                                    "for private repositories."}},
     "pr-sync": {"GITHUB_TOKEN": {"title": "GitHub token",
                                  "description": "Needs `Pull requests`, `Commit statuses`, and `Contents` read, or "
                                                 "the `repo` scope for private repositories."}},
@@ -977,6 +1014,8 @@ SECRETS = {
     "drift": SLACK + ["DRIFT_RUN_TOKEN"],
     "freeze-guard": SLACK + ["FREEZE_ADMIN_TOKEN"],
     "github-deployments": ["GITHUB_TOKEN"],
+    "leaderboard": ["GITHUB_TOKEN"],
+    "oncall": ["PAGERDUTY_TOKEN", "INCIDENT_IO_API_KEY"],
     "params-to-git": ["GITHUB_TOKEN", "PARAMS_MASK_KEY"],
     "pr-sync": ["GITHUB_TOKEN"],
     "proposal-chatops": ["SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET"],

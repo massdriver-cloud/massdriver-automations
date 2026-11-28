@@ -1,0 +1,50 @@
+# oncall config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+
+# How often to read the providers and write the lists. Each write sets a TTL of three intervals, so the entries
+# expire when the automation stops. A Go duration, at least 30s. Default: 2m.
+interval: 2m
+# The entry's name in the Massdriver UI. Default: On call.
+label: On call
+
+pagerduty:
+  # The PagerDuty REST API. For an EU account: https://api.eu.pagerduty.com.
+  api_url: https://api.pagerduty.com
+  # The environment variable that holds a read-only PagerDuty API key. Only routes with pagerduty need it.
+  # Default: PAGERDUTY_TOKEN.
+  token_env: PAGERDUTY_TOKEN
+
+incident_io:
+  # The incident.io API.
+  api_url: https://api.incident.io
+  # The environment variable that holds an incident.io API key with the schedules.view and escalation_paths.view
+  # scopes. Only routes with incident_io need it. Default: INCIDENT_IO_API_KEY.
+  token_env: INCIDENT_IO_API_KEY
+
+# Each route writes who is on call to the md/v1/oncall key of its environments, lowest escalation level first.
+# Each person appears once. An environment can be in one route only. A route sets exactly one of pagerduty,
+# incident_io, or static.
+routes:
+  - environments: [billing-prod, billing-staging]   # Environment identifiers.
+    title: Billing on call                           # Optional. The card's title, up to 64 characters.
+    max_people: 10                                   # The most people, from 1 to 25. Default: 10.
+    pagerduty:                                       # Set schedules, escalation_policies, or both.
+      schedules: [P1A2B3C]                           # Schedule IDs, from the schedule's URL.
+      escalation_policies: [PD4E5F6]                 # Escalation policy IDs. Each level of the policy is a level.
+
+  - environments: [visits-prod]
+    title: Visits on call
+    incident_io:                                     # Set schedules, escalation_paths, or both.
+      # Each schedule, then each escalation path, is one level, in this order.
+      schedules: [01HXYZPRIMARY000000000000]
+      escalation_paths: [01HXYZPATH0000000000000000]
+
+  # A fixed list, written as it is. Use it to try the widget without a provider. Each person has at least one of
+  # name, image_url, email, and handles.
+  - environments: [sandbox-dev]
+    title: Demo on call
+    static:
+      - name: Jo Park
+        email: jo@tendwell.example
+        handles: [pagerduty:jo@tendwell.example, slack:@jo]
+      - name: Lee Chen
+        image_url: https://avatars.githubusercontent.com/u/9919?v=4

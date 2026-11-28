@@ -1,0 +1,131 @@
+name: massdriver-oncall
+description: Writes who is on call now, from PagerDuty or incident.io, to the on-call widget of environments on an interval.
+  A route can also write a fixed list, to try the widget. Set the `PAGERDUTY_TOKEN` or `INCIDENT_IO_API_KEY` secret for
+  the provider that routes use. Runs on a Kubernetes cluster, with an event destination that sends it only the events
+  it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/massdriver-oncall
+version: 0.1.0
+steps:
+- path: src
+  provisioner: opentofu:1.10
+params:
+  required:
+  - image
+  - ingress
+  - config
+  properties:
+    image:
+      type: object
+      title: Image
+      required:
+      - repository
+      - tag
+      properties:
+        repository:
+          type: string
+          title: Repository
+          description: The automations image. bundle-scanner adds `-scanner` to the tag, and router adds `-scripts` when
+            it runs commands.
+          default: ghcr.io/massdriver-cloud/massdriver-automations
+        tag:
+          type: string
+          title: Tag
+          description: The image tag, such as `0.2.0`. Pin a version so that a redeploy runs the same code. A deploy of
+            a tag that moves, such as `latest` or `0.2`, restarts the automation on the image the tag names then.
+          default: '0.2'
+          pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
+          message:
+            pattern: Must be a valid image tag.
+    ingress:
+      type: object
+      title: Ingress
+      required:
+      - host
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Where the automation is served, such as `oncall.automations.acme.com`. Point it at the ingress
+            controller. Massdriver sends events to `https://<host>/hooks/massdriver`.
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          message:
+            pattern: Must be a lowercase DNS name, such as drift.automations.acme.com.
+        class_name:
+          type: string
+          title: Ingress class
+          description: Empty uses the default class of the cluster.
+        cluster_issuer:
+          type: string
+          title: cert-manager ClusterIssuer
+          description: Issues a certificate for the host. Leave empty when TLS ends in front of the ingress controller,
+            or when you set a TLS secret.
+        tls_secret_name:
+          type: string
+          title: TLS secret
+          description: A Secret in the namespace with a certificate for the host. Ignored when a ClusterIssuer is set.
+    config:
+      type: string
+      title: Settings (YAML)
+      description: The YAML config of oncall. See the [oncall README](https://github.com/massdriver-cloud/massdriver-automations/tree/main/automations/oncall).
+      default: |
+        interval: 2m
+        routes:
+          - environments: [api-prod]
+            title: Demo on call
+            static:
+              - name: Jo Park
+                email: jo@example.com
+              - name: Lee Chen
+                handles: [slack:@lee]
+    otel:
+      type: object
+      title: Tracing
+      description: Sends OpenTelemetry traces to an OTLP endpoint. Set the `OTEL_EXPORTER_OTLP_HEADERS` secret when the
+        endpoint needs credentials.
+      properties:
+        endpoint:
+          type: string
+          title: OTLP endpoint
+          description: The OTLP/HTTP base URL of a collector, such as `http://otel-collector.observability:4318`. Empty
+            turns tracing off.
+dependencies:
+  kubernetes_cluster:
+    resource_type: massdriver-kubernetes-cluster
+    required: true
+  service_account:
+    resource_type: massdriver-service-account
+    required: true
+resources: {}
+app:
+  secrets:
+    PAGERDUTY_TOKEN:
+      title: PagerDuty API key
+      description: A read-only PagerDuty REST API key.
+    INCIDENT_IO_API_KEY:
+      title: incident.io API key
+      description: Needs `schedules.view` and `escalation_paths.view`.
+    OTEL_EXPORTER_OTLP_HEADERS:
+      title: OTLP headers
+      description: Headers for the OTLP endpoint, as `key=value` pairs separated by commas, such as `authorization=Bearer
+        abc123`.
+ui:
+  ui:order:
+  - image
+  - ingress
+  - config
+  - otel
+  - '*'
+  image:
+    ui:order:
+    - repository
+    - tag
+  ingress:
+    ui:order:
+    - host
+    - class_name
+    - cluster_issuer
+    - tls_secret_name
+  config:
+    ui:widget: textarea
+    ui:options:
+      rows: 16
