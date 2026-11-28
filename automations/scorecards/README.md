@@ -59,7 +59,15 @@ A roll-up:
 
 A check is `passed`, `failed`, or `unknown`. It is unknown when its entry is missing, expired, or older than
 `max_age`, or when its expression fails or returns nothing. Missing data is not a failure: an unknown check counts
-in `unknown`, and not in the score. A scorecard whose checks are all unknown has the level `none` and the score 0.
+in `unknown`, and not in the score:
+
+```text
+score = passed / (passed + failed) x 100
+```
+
+The level is the highest level whose threshold the score reaches. A score below every threshold, or a scorecard
+whose checks are all unknown, has the level `none`, and the latter the score 0. A roll-up's score is the mean of
+its instances' scores, its level is the level of that mean, and `lowest_level` is the lowest level of any of them.
 
 The expression gets the entry's value: a JSON entry as an object, a TEXT entry as a string. It passes when it
 returns anything but `false` or `null`, as in jq. It cannot read environment variables, and it stops after two
@@ -135,6 +143,21 @@ project counts the instances it has that the scorecard scores.
   while its computation waits is computed once. Roll-ups and parity wait until no instance waits, so a pass over
   many instances runs each of them a few times at most.
 
+## Events
+
+| Event | Computes again |
+|---|---|
+| `deployment.completed`, `.failed`, `.aborted`, `.rejected` | The instance |
+| `alarm_state.created`, `alarm.created`, `.updated`, `.deleted` | The instance |
+| `instance.created`, `.updated`, `.moved`, `.orphaned`, `.copied` | The instance |
+| `instance.deleted` | The roll-ups of its environment and project |
+| `repo.published` | Every instance of the bundle |
+| `group_membership.added`, `.removed` | Ownership |
+| `stash_entry.set`, `.deleted` | The instance whose stash, or whose deployment's stash, has the key. A key on an environment or project computes each of its instances again. Only keys that a check reads count. |
+
+After an instance, the automation computes the roll-ups of its environment and project, and the parity of its
+environment.
+
 ## Configuration
 
 | Variable | |
@@ -169,12 +192,18 @@ stops the automation at start.
 | `scorecards[].levels` | `gold: 100`, `silver: 80`, `bronze: 50` | Up to 9 level names and the score each needs, from 0 to 100. A score below every level is `none`. |
 | `results.prefix` | `md/v1` | Replaces `md/v1` in the keys that scorecards writes. The server rejects an `md/` key until its widget catalog has it; a prefix outside `md/`, such as `results/v1`, shows each value as a labeled metadata row until then. |
 
+The [telehealth example](../../examples/telehealth/scorecards.yaml) scores Tendwell Health's prod instances for
+production readiness, from what drift, github-deployments, bundle-scanner, and the automation's own facts write.
+
 ## Permissions
 
-The service account needs to view the projects, environments, instances, deployments, alarms, audit logs, and
-bundles that it scores, and `stash:write` on those instances, environments, and projects. Ownership needs
-`organization:manageGroups` to read what each group's policies allow; without it, the ownership entries are not
-written and the log says `job failed` for `ownership`.
+The service account needs:
+
+- `project:view` on the projects of the scored instances, to read instances, deployments, alarms, bundle versions,
+  the stash, and the audit log
+- `stash:write` on the scored instances, their environments, and their projects
+- `organization:manageGroups`, to read which groups own an environment. Without it, each environment logs
+  `ownership skipped` and gets no ownership entry.
 
 ## Event destination
 

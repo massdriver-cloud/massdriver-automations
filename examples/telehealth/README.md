@@ -12,6 +12,7 @@ reminders), Care (charting), and Billing (claims). Each app has a `dev` and a `p
 | [sandbox-on-join](sandbox-on-join.yaml) | Each person who joins a team gets a sandbox environment, deleted when they leave. |
 | [statuspage](statuspage.yaml) | A status page for dev and one for prod, with the components patients and clinicians use. |
 | [audit-archiver](audit-archiver.yaml) | Every event, as one JSON file, on disk. |
+| [scorecards](scorecards.yaml) | Each prod instance is scored for production readiness: no drift, alarms in place and quiet, deployed from a commit, Checkov clean, tests passed, no critical vulnerabilities, recently deployed, and owned. Each prod environment lists how it differs from dev. |
 | [stash-sync](stash-sync.yaml) | A live Postgres migration on the billing-dev canvas: banners, replication lag, health dots, and traffic moving from the old database to the new one. With no cloud access. |
 | [stash-sync-incident](stash-sync-incident.yaml) | The billing-dev ledger slows down, fails, and recovers. |
 | [stash-sync-rollout](stash-sync-rollout.yaml) | A security fix rolls out to billing-dev, then billing-prod. |

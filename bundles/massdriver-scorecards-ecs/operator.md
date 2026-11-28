@@ -53,7 +53,7 @@ aws logs tail /ecs/$SVC --region {{dependencies.ecs_cluster.region}} --since 30m
 
 - **`does not match md/v1/...`:** a value doesn't fit its widget. This is a bug in the automation; the log line has the key.
 - **`forbidden` on a write:** the service account needs `stash:write` on the instances, environments, and projects it scores.
-- **`job failed` for `ownership`:** the service account needs `organization:manageGroups` to read what each group may do.
+- **`ownership skipped` for each environment:** the service account needs `organization:manageGroups` to read what each group may do.
 - **`401` or `unauthorized`:** the service account's key is gone. Give the **service_account** resource a new key and deploy.
 
 ## The task won't start or keeps restarting
