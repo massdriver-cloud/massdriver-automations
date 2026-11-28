@@ -1,6 +1,7 @@
 package scorecards
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -190,13 +191,15 @@ func reliability(now time.Time, window time.Duration, alarms []Alarm, changes []
 						lastFired = c.OccurredAt
 					}
 				}
-			case "OK":
+			default:
 				switch {
 				case firing:
 					inAlarm += c.OccurredAt.Sub(firedAt)
-					recoveries = append(recoveries, c.OccurredAt.Sub(firedAt).Seconds())
+					if entityString(c.Data, "status") == "OK" {
+						recoveries = append(recoveries, c.OccurredAt.Sub(firedAt).Seconds())
+					}
 					firing = false
-				case i == 0:
+				case i == 0 && previousState(c.Data) == "ALARM":
 					inAlarm += c.OccurredAt.Sub(start)
 				}
 			}
@@ -223,6 +226,21 @@ func reliability(now time.Time, window time.Duration, alarms []Alarm, changes []
 		r.LastFiredAt = timestamp(lastFired)
 	}
 	return r
+}
+
+// previousState is the state an alarm left, from the CloudWatch notification of the change, or "" when the
+// notification does not say.
+func previousState(data map[string]any) string {
+	entity, _ := data["entity"].(map[string]any)
+	notification, _ := entity["notification"].(map[string]any)
+	message, _ := notification["Message"].(string)
+	var m struct {
+		OldStateValue string `json:"OldStateValue"`
+	}
+	if json.Unmarshal([]byte(message), &m) != nil {
+		return ""
+	}
+	return m.OldStateValue
 }
 
 func entityString(data map[string]any, key string) string {
@@ -293,12 +311,19 @@ func pending(inst *Instance) Pending {
 	return p
 }
 
-// normalizeParams treats no params and empty params as the same.
+// normalizeParams treats no params and empty params as the same, and leaves out what Massdriver adds.
 func normalizeParams(m map[string]any) map[string]any {
-	if len(m) == 0 {
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		// Massdriver adds md_metadata to a deployment's params. The instance's params never have it.
+		if k != "md_metadata" {
+			out[k] = v
+		}
+	}
+	if len(out) == 0 {
 		return nil
 	}
-	return m
+	return out
 }
 
 // parity lists the differences between an environment and its reference: a component on one side only, another

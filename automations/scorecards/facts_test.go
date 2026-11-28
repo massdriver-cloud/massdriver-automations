@@ -38,6 +38,11 @@ func TestReliabilityFromAlarmChanges(t *testing.T) {
 		return AuditEvent{Type: "alarm_state.created", OccurredAt: at,
 			Data: map[string]any{"entity": map[string]any{"alarm_id": name, "status": status}}}
 	}
+	// A change that names the state it left, as CloudWatch notifications do.
+	from := func(c AuditEvent, old string) AuditEvent {
+		c.Data["entity"].(map[string]any)["notification"] = map[string]any{"Message": `{"OldStateValue":"` + old + `"}`}
+		return c
+	}
 	alarms := []Alarm{
 		{ID: "cpu", CurrentState: &AlarmState{Status: "ALARM", OccurredAt: ago(time.Hour)}},
 		{ID: "disk", CurrentState: &AlarmState{Status: "OK", OccurredAt: ago(5 * day)}},
@@ -47,7 +52,9 @@ func TestReliabilityFromAlarmChanges(t *testing.T) {
 	}
 	changes := []AuditEvent{
 		// disk was firing when the window started, and recovered.
-		change("disk", "OK", ago(5*day)),
+		from(change("disk", "OK", ago(5*day)), "ALARM"),
+		// queue went from no data to OK: it was not firing before.
+		from(change("queue", "OK", ago(4*day)), "INSUFFICIENT_DATA"),
 		change("cpu", "ALARM", ago(3*day)),
 		change("cpu", "OK", ago(3*day-10*time.Minute)),
 		change("cpu", "ALARM", ago(time.Hour)),
@@ -131,5 +138,14 @@ func TestParityListsAtMost50Items(t *testing.T) {
 	p := parity(now, "ref", cs)
 	if p.Differences != 60 || len(p.Items) != 50 {
 		t.Errorf("differences %d, items %d", p.Differences, len(p.Items))
+	}
+}
+
+func TestPendingIgnoresMassdriverMetadata(t *testing.T) {
+	inst := &Instance{Params: map[string]any{"size": "small"}, DeployedVersion: "1.0.0", ResolvedVersion: "1.0.0",
+		LatestProvision: &Deployment{Status: "COMPLETED", LastTransitionedAt: tp(ago(day)),
+			Params: map[string]any{"size": "small", "md_metadata": map[string]any{"name_prefix": "acme-api-prod"}}}}
+	if p := pending(inst); p.Changed {
+		t.Errorf("pending = %+v", p)
 	}
 }
