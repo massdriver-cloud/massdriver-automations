@@ -747,6 +747,22 @@ def automations(k8s):
             "mentions": {"items": {"ui:order": ["match", "mentions"], "mentions": TAG}}},
     )
 
+    # ---------------------------------------------------------------- scorecards
+    out["scorecards"] = dict(
+        title="Scorecards",
+        description="Scores instances against scorecards, and writes the scores and the facts they use (delivery, "
+                    "reliability, currency, pending changes, parity, and ownership) to the stash. Each event and "
+                    "each interval computes them again from the API.",
+        config=s("Settings (YAML)", f"The YAML config of scorecards. See the [scorecards README]"
+                 f"({README.format('scorecards')}).",
+                 default="interval: 1h\nscorecards:\n  - name: production-readiness\n    match:\n"
+                         "      md-environment: prod\n    checks:\n      - id: has-alarms\n"
+                         "        stash: md/v1/reliability\n        pass: .alarms > 0\n"),
+        extra={},
+        ui=None,
+        config_ui={"ui:widget": "textarea", "ui:options": {"rows": 16}},
+    )
+
     # ---------------------------------------------------------------- stash-sync
     aws_creds = ("The `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` secrets hold the AWS keys for CloudWatch."
                  if k8s else "CloudWatch rules and presets use a task role that can read metrics and alarms, unless "

@@ -1,0 +1,41 @@
+# Prod instances are scored for production readiness. The facts are computed every hour and on each event.
+interval: 1h
+
+delivery:
+  window: 30d
+reliability:
+  window: 30d
+
+# Prod should match what was tested in dev, so each prod environment lists how it differs.
+parity:
+  - {environment: billing-prod, reference: billing-dev}
+  - {environment: care-prod, reference: care-dev}
+  - {environment: visits-prod, reference: visits-dev}
+
+scorecards:
+  - name: production-readiness
+    match:
+      md-environment: prod
+    checks:
+      # The drift automation checks prod every night, so a result older than two days means it stopped running.
+      - id: no-drift
+        stash: md/v1/drift
+        pass: .status == "none"
+        max_age: 2d
+      - id: has-alarms
+        stash: md/v1/reliability
+        pass: .alarms > 0
+      # The deployment came from a commit, not from a laptop.
+      - id: from-git
+        stash: {key: md/v1/source, scope: deployment}
+        pass: .commit != null
+      - id: tests-passed
+        stash: {key: md/v1/tests, scope: deployment}
+        pass: .failed == 0 and .passed > 0
+      - id: no-critical-vulns
+        stash: {key: md/v1/vulnerabilities, scope: deployment}
+        pass: .severity.critical == 0
+    levels:
+      gold: 100
+      silver: 80
+      bronze: 50
