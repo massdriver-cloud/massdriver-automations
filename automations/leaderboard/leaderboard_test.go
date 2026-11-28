@@ -300,7 +300,7 @@ routes:
     pull_requests:
       repos: [tendwell-health/monorepo]
       base: main
-      labels: [feature, fix]
+      labels: [feature, Fix]
       paths: [services/billing/]
       exclude_authors: [Renovate]
 `)

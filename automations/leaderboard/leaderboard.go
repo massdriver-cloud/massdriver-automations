@@ -303,10 +303,11 @@ func touches(pr PullRequest, prefixes []string) bool {
 }
 
 // labeled reports whether the pull request has any of the labels. The filter runs here, not in the query, so
-// that the rule is any of them whatever GitHub's labels argument does with several.
+// that the rule is any of them whatever GitHub's labels argument does with several. GitHub label names ignore
+// case: a repository can't have both Fix and fix.
 func labeled(pr PullRequest, labels []string) bool {
 	for _, l := range pr.Labels.Nodes {
-		if slices.Contains(labels, l.Name) {
+		if slices.ContainsFunc(labels, func(want string) bool { return strings.EqualFold(want, l.Name) }) {
 			return true
 		}
 	}

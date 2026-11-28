@@ -50,7 +50,7 @@ points is not on the board.
 Filters narrow which pull requests score:
 
 - `base` keeps the pull requests into one branch.
-- `labels` keeps the pull requests with any of the labels.
+- `labels` keeps the pull requests with any of the labels, in any case.
 - `paths` keeps the pull requests that change a file under any of the prefixes, such as `services/billing/`.
 - `exclude_authors` removes logins, such as a bot account that is a user.
 - GitHub Apps, such as dependabot and renovate, do not score unless `include_bots` is `true`.
