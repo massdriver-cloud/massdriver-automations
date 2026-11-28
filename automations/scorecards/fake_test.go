@@ -160,6 +160,9 @@ func (f *fakeMassdriver) GroupMembers(_ context.Context, group string) ([]string
 }
 
 func (f *fakeMassdriver) EnvironmentActions(_ context.Context, env, group string) ([]string, error) {
+	if err := f.err("EnvironmentActions:" + env); err != nil {
+		return nil, err
+	}
 	return f.actions[env+"/"+group], nil
 }
 

@@ -69,10 +69,11 @@ is their mean, and its level is the level of that mean. `lowest_level` is the lo
 
 - It writes a key only when its value changed. `evaluated_at` and `checked_at` do not count as a change, so they
   say when the value last changed.
-- Before its first write of a key, it reads the key, so a restart does not write every key again.
+- Before its first write of a key, it reads the key, so a restart does not write every key again. Each pass
+  reads every key again, so a key that someone deleted or changed is written again.
 - Entries have no TTL. Each event and each interval computes them again.
 - Jobs wait in a queue by instance, environment, or project. A job that many events name waits once. Four jobs
-  run at a time.
+  run at a time. Roll-ups and parity wait until no instance job waits, so a pass runs each of them about once.
 - A failed write is logged, and the next event or interval writes it again.
 
 ## Events
@@ -184,7 +185,10 @@ docker run -p 8080:8080 \
 ## Limits
 
 - The stash API is alpha. Its names start with `alpha` and can change.
-- Delivery and reliability read the audit log, so they count only what the audit log still keeps.
+- Delivery and reliability read the audit log, so they count only what the audit log still keeps. When an
+  instance has more than 5,000 audit records of one kind in the window, the fact is skipped, because a cut list
+  would undercount.
 - Each list reads at most 50 pages of 100 items.
-- Ownership asks each group about each environment, so it makes groups × environments calls each interval.
+- Ownership asks each group about each environment, so it makes groups × environments calls each interval. An
+  environment it cannot read is logged with `ownership skipped` and keeps its last value, and so does its project.
 - A jq expression runs for at most 2 seconds.

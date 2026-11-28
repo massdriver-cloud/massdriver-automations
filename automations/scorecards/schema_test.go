@@ -214,7 +214,7 @@ func TestGraphQLAPIPagesAndFilters(t *testing.T) {
 		"ScorecardAuditLogs": {
 			`{"data":{"auditLogs":{"cursor":{"next":null},"items":[{"occurredAt":"2026-11-26T00:00:00Z","type":"deployment.created","data":{"entity":{"id":"d3"}}}]}}}`,
 		},
-		"ScorecardInstance": {`{"data":{"instance":null}}`},
+		"ScorecardInstance": {`{"data":{"instance":null},"errors":[{"message":"Instance not found","path":["instance"]}]}`},
 	}}
 	srv := httptest.NewServer(f)
 	defer srv.Close()
@@ -249,5 +249,21 @@ func TestGraphQLAPIPagesAndFilters(t *testing.T) {
 
 	if _, err := api.Instance(ctx, "gone"); err != ErrNotFound {
 		t.Errorf("missing instance: err = %v", err)
+	}
+}
+
+func TestAuditLogLongerThanTheLimitIsAnError(t *testing.T) {
+	f := &fakeGraphQL{pages: map[string][]string{
+		"ScorecardAuditLogs": {`{"data":{"auditLogs":{"cursor":{"next":"more"},"items":[]}}}`},
+	}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	api := &GraphQLAPI{Client: &massdriver.Client{Endpoint: srv.URL, OrganizationID: "tendwell-health", APIKey: "md_test"}}
+	// A cut list would undercount alarms, so reliability is skipped instead.
+	if _, err := api.AuditEvents(context.Background(), "billing-prod-app", []string{"alarm_state.created"}, "", now); err != errTruncated {
+		t.Errorf("err = %v", err)
+	}
+	if len(f.calls) != maxPages {
+		t.Errorf("calls = %d, want %d", len(f.calls), maxPages)
 	}
 }

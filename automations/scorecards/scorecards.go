@@ -92,6 +92,12 @@ func New(cfg *Config, api API, stash Stash, now func() time.Time) *Scorecards {
 	return &Scorecards{cfg: cfg, api: api, out: newWriter(stash, api), now: now, queue: newQueue()}
 }
 
+// isRollup reports whether a job summarizes other jobs' results: a roll-up or parity.
+func isRollup(key string) bool {
+	return strings.HasPrefix(key, jobEnvironment) || strings.HasPrefix(key, jobProject) ||
+		strings.HasPrefix(key, jobParity)
+}
+
 // Job keys.
 const (
 	jobAll          = "all"
@@ -242,6 +248,7 @@ func (s *Scorecards) run(ctx context.Context, job string) {
 
 // all queues every instance that a scorecard matches, ownership, and parity.
 func (s *Scorecards) all(ctx context.Context) error {
+	s.out.forget()
 	s.queue.add(jobOwnership)
 	for _, p := range s.cfg.Parity {
 		s.queue.add(jobParity + p.Environment)
@@ -540,14 +547,21 @@ func (s *Scorecards) ownership(ctx context.Context) error {
 		return o, nil
 	}
 
+	log := automation.Logger(ctx)
 	for _, project := range sortedKeys(envsByProject) {
 		projectOwners := map[string]Group{}
+		// A project whose environments could not all be read keeps its last value: a partial list of owners would
+		// look like lost owners.
+		complete := true
+	envs:
 		for _, env := range sortedKeys(envsByProject[project]) {
 			var envOwners []Group
 			for _, g := range custom {
 				actions, err := s.api.EnvironmentActions(ctx, env, g.ID)
 				if err != nil {
-					return err
+					log.Warn("ownership skipped", "environment", env, "err", err)
+					complete = false
+					continue envs
 				}
 				if contains(actions, s.cfg.Ownership.EnvironmentAction) {
 					envOwners = append(envOwners, g)
@@ -558,9 +572,14 @@ func (s *Scorecards) ownership(ctx context.Context) error {
 			}
 			o, err := owners(envOwners)
 			if err != nil {
-				return err
+				log.Warn("ownership skipped", "environment", env, "err", err)
+				complete = false
+				continue
 			}
 			s.write(ctx, Scope{Kind: "environment", ID: env}, KeyOwnership, o)
+		}
+		if !complete {
+			continue
 		}
 		var pg []Group
 		for _, id := range sortedKeys(projectOwners) {
@@ -568,7 +587,8 @@ func (s *Scorecards) ownership(ctx context.Context) error {
 		}
 		o, err := owners(pg)
 		if err != nil {
-			return err
+			log.Warn("ownership skipped", "project", project, "err", err)
+			continue
 		}
 		s.write(ctx, Scope{Kind: "project", ID: project}, KeyOwnership, o)
 	}
