@@ -53,6 +53,8 @@ flowchart LR
 | 🐙 [github-deployments](automations/github-deployments) | `deployment.*` | Shows Massdriver deployments as GitHub Deployments. |
 | 🗂️ [params-to-git](automations/params-to-git) | `deployment.completed` | Writes the params of each successful deployment to `params.json` in a GitHub repository, by push or pull request. |
 | 🔃 [pr-sync](automations/pr-sync) | none (reads GitHub on an interval) | Writes the pull requests of a project's GitHub repositories to the project's stash, so a note on the project lists their review, check, and merge state. |
+| 🏆 [leaderboard](automations/leaderboard) | none (reads GitHub on an interval) | Ranks the authors of GitHub pull requests, with routes for repositories, branches, labels, paths, window, and score, and writes the top players to environment leaderboards. A static route writes a fixed list for trying it out. |
+| 📟 [oncall](automations/oncall) | none (reads PagerDuty or incident.io on an interval) | Writes who is on call now, by escalation level, to environment on-call cards. A static route writes a fixed list for trying it out. |
 | 📣 [release-notes](automations/release-notes) | `repo.published` | Posts new bundle versions, and the instances that can upgrade, to Slack and Teams. |
 | 🔍 [bundle-scanner](automations/bundle-scanner) | `repo.published` | Scans each new bundle version with Trivy and Checkov. Uses the `-scanner` image tag. |
 | 🐒 [chaos-monkey](automations/chaos-monkey) | `deployment.completed`, `deployment.failed`, `deployment.aborted`, `deployment.rejected` | Sends random presets, merged presets, mutated params, and gibberish to the instances that match its attributes, as proposals, plans, or deployments. |

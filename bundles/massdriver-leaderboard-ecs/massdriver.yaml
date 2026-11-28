@@ -1,0 +1,159 @@
+name: massdriver-leaderboard-ecs
+description: Ranks the authors of GitHub pull requests and writes the top players to the leaderboard widget of environments
+  on an interval. A route can also write a fixed list, to try the widget. Set the `GITHUB_TOKEN` secret for routes that
+  read pull requests. Runs on Amazon ECS with Fargate, with an event destination that sends it only the events it uses.
+source_url: https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/massdriver-leaderboard-ecs
+version: 0.1.0
+steps:
+- path: src
+  provisioner: opentofu:1.10
+params:
+  required:
+  - image
+  - ingress
+  - logs
+  - config
+  properties:
+    image:
+      type: object
+      title: Image
+      required:
+      - repository
+      - tag
+      properties:
+        repository:
+          type: string
+          title: Repository
+          description: The automations image. bundle-scanner adds `-scanner` to the tag, and router adds `-scripts` when
+            it runs commands.
+          default: ghcr.io/massdriver-cloud/massdriver-automations
+        tag:
+          type: string
+          title: Tag
+          description: The image tag, such as `0.2.0`. Pin a version so that a redeploy runs the same code. A deploy of
+            a tag that moves, such as `latest` or `0.2`, restarts the automation on the image the tag names then.
+          default: '0.2'
+          pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
+          message:
+            pattern: Must be a valid image tag.
+    ingress:
+      type: object
+      title: Ingress
+      required:
+      - dns_records
+      properties:
+        host:
+          type: string
+          title: Host
+          description: Where the automation is served. Empty uses `leaderboard.<domain of the cluster's hosted zone>`.
+            The load balancer's HTTPS listener needs a certificate for it. Massdriver sends events to `https://<host>/hooks/massdriver`.
+          pattern: ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$
+          message:
+            pattern: Must be a lowercase DNS name, such as drift.automations.acme.com.
+        dns_records:
+          type: boolean
+          title: Create a DNS record
+          description: Creates a CNAME record to the load balancer when the host is in the cluster's hosted zone.
+          default: true
+    logs:
+      type: object
+      title: Logs
+      required:
+      - retention_days
+      properties:
+        retention_days:
+          type: integer
+          title: Retention (days)
+          description: Days that CloudWatch Logs keeps the logs.
+          default: 90
+          enum:
+          - 1
+          - 3
+          - 5
+          - 7
+          - 14
+          - 30
+          - 60
+          - 90
+          - 120
+          - 150
+          - 180
+          - 365
+          - 400
+          - 545
+          - 731
+          - 1096
+          - 1827
+          - 2192
+          - 2557
+          - 2922
+          - 3288
+          - 3653
+    config:
+      type: string
+      title: Settings (YAML)
+      description: The YAML config of leaderboard. See the [leaderboard README](https://github.com/massdriver-cloud/massdriver-automations/tree/main/automations/leaderboard).
+      default: |
+        interval: 15m
+        routes:
+          - environments: [api-prod]
+            title: Demo leaderboard
+            static:
+              - name: Jo Park
+                handles: [github:jopark]
+              - name: Lee Chen
+                handles: [github:leechen]
+    otel:
+      type: object
+      title: Tracing
+      description: Sends OpenTelemetry traces to an OTLP endpoint. Set the `OTEL_EXPORTER_OTLP_HEADERS` secret when the
+        endpoint needs credentials.
+      properties:
+        endpoint:
+          type: string
+          title: OTLP endpoint
+          description: The OTLP/HTTP base URL of a collector, such as `http://otel-collector.observability:4318`. Empty
+            turns tracing off.
+dependencies:
+  aws_authentication:
+    resource_type: aws-iam-role
+    required: true
+  ecs_cluster:
+    resource_type: aws-ecs-cluster
+    required: true
+  service_account:
+    resource_type: massdriver-service-account
+    required: true
+resources: {}
+app:
+  secrets:
+    GITHUB_TOKEN:
+      title: GitHub token
+      description: Needs `Pull requests` and `Contents` read, or the `repo` scope for private repositories.
+    OTEL_EXPORTER_OTLP_HEADERS:
+      title: OTLP headers
+      description: Headers for the OTLP endpoint, as `key=value` pairs separated by commas, such as `authorization=Bearer
+        abc123`.
+ui:
+  ui:order:
+  - image
+  - ingress
+  - logs
+  - config
+  - otel
+  - '*'
+  image:
+    ui:order:
+    - repository
+    - tag
+  ingress:
+    ui:order:
+    - host
+    - dns_records
+  logs:
+    ui:order:
+    - retention_days
+  config:
+    ui:widget: textarea
+    ui:options:
+      rows: 16

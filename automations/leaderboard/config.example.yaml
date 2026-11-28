@@ -1,0 +1,54 @@
+# leaderboard config. Mount it at /etc/massdriver-automations/config.yaml, or set CONFIG_FILE.
+
+# How often to read GitHub and write the leaderboards. Each write sets a TTL of three intervals, so the entries
+# expire when the automation stops. A Go duration, at least 1m. Default: 15m.
+interval: 15m
+# The entry's name in the Massdriver UI. Default: Leaderboard.
+label: Leaderboard
+
+github:
+  # The GitHub GraphQL endpoint. For GitHub Enterprise Server: https://<host>/api/graphql.
+  graphql_url: https://api.github.com/graphql
+  # The environment variable that holds the GitHub token. Only routes with pull_requests need it. Default:
+  # GITHUB_TOKEN.
+  token_env: GITHUB_TOKEN
+
+# Each route writes one leaderboard to the md/v1/leaderboard key of its environments. An environment can be in
+# one route only. A route sets exactly one of pull_requests or static.
+routes:
+  - environments: [billing-prod, billing-staging]   # Environment identifiers.
+    title: Most merged this month                    # Optional. The card's title, up to 64 characters.
+    max_players: 10                                  # The most players, from 1 to 25. Default: 10.
+    pull_requests:
+      repos:                                         # Repositories as owner/name. Scores add up across them.
+        - tendwell-health/billing
+        - tendwell-health/infra
+      base: main                                     # Optional. Only pull requests into this branch.
+      labels: [feature, fix]                         # Optional. Only pull requests with any of these labels.
+      paths: [services/billing/, modules/ledger/]    # Optional. Only pull requests that change a file under one.
+      window: 720h                                   # How far back to count, at least 1h. Default: 720h (30 days).
+      # merged (default): one point for each merged pull request.
+      # opened: one point for each pull request opened, in any state.
+      # lines: the lines added and deleted by merged pull requests.
+      score: merged
+      exclude_authors: [renovate-tendwell]           # Optional. GitHub logins that never score.
+      include_bots: false                            # Whether GitHub Apps, such as dependabot, score. Default: false.
+
+  - environments: [visits-prod]
+    title: Most lines shipped this week
+    pull_requests:
+      repos: [tendwell-health/visits]
+      window: 168h
+      score: lines
+
+  # A fixed list, written as it is. Use it to try the widget without GitHub. Each person has at least one of name,
+  # image_url, email, and handles.
+  - environments: [sandbox-dev]
+    title: Demo leaderboard
+    static:
+      - name: Jo Park
+        image_url: https://avatars.githubusercontent.com/u/9919?v=4
+        handles: [github:jopark, slack:@jo]
+      - name: Lee Chen
+        email: lee@tendwell.example
+      - handles: [github:ana]

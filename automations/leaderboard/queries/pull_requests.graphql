@@ -1,0 +1,49 @@
+query PullRequests(
+  $owner: String!
+  $name: String!
+  $first: Int!
+  $after: String
+  $states: [PullRequestState!]
+  $base: String
+  $files: Boolean!
+) {
+  repository(owner: $owner, name: $name) {
+    pullRequests(
+      first: $first
+      after: $after
+      states: $states
+      baseRefName: $base
+      orderBy: {field: UPDATED_AT, direction: DESC}
+    ) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        createdAt
+        updatedAt
+        mergedAt
+        additions
+        deletions
+        labels(first: 50) {
+          nodes {
+            name
+          }
+        }
+        author {
+          __typename
+          login
+          avatarUrl
+          ... on User {
+            name
+          }
+        }
+        files(first: 100) @include(if: $files) {
+          nodes {
+            path
+          }
+        }
+      }
+    }
+  }
+}
