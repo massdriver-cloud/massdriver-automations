@@ -1080,6 +1080,13 @@ LOGS = obj("Logs", {"retention_days": i("Retention (days)", "Days that CloudWatc
                                               1827, 2192, 2557, 2922, 3288, 3653])}, required=["retention_days"])
 
 
+def presets(props):
+    # Development and production differ only in how long CloudWatch keeps the logs.
+    image = {k: v["default"] for k, v in props["image"]["properties"].items()}
+    return [{"__name": env, "image": image, "ingress": {"dns_records": True}, "logs": {"retention_days": days}}
+            for env, days in (("Development", 7), ("Production", 365))]
+
+
 def bundle_name(name, k8s):
     return f"massdriver-{name}" if k8s else f"massdriver-{name}-ecs"
 
@@ -1114,6 +1121,9 @@ def manifest(name, a, k8s):
     deps["service_account"] = {"resource_type": "massdriver-service-account", "required": True}
 
     secrets = {k: secret_def(name, k) for k in SECRETS.get(name, []) + ["OTEL_EXPORTER_OTLP_HEADERS"]}
+    params = {"required": required, "properties": props}
+    if not k8s:
+        params = {"examples": presets(props), **params}
     m = {
         "name": bname,
         "description": f"{a['description']} Runs on {platform}, with an event destination that sends it only the "
@@ -1121,7 +1131,7 @@ def manifest(name, a, k8s):
         "source_url": f"https://github.com/massdriver-cloud/massdriver-automations/tree/main/bundles/{bname}",
         "version": "0.1.0",
         "steps": [{"path": "src", "provisioner": "opentofu:1.10"}],
-        "params": {"required": required, "properties": props},
+        "params": params,
         "dependencies": deps,
         "resources": {"website": {"resource_type": "website", "required": True}} if name in WEBSITE else {},
         "app": {"secrets": secrets},
@@ -1186,6 +1196,11 @@ def write_bundle(name, a, k8s):
         f.write(yaml.dump(manifest(name, a, k8s), Dumper=Dumper, sort_keys=False, width=116, allow_unicode=True))
     with open(os.path.join(root, "README.md"), "w") as f:
         f.write(readme(name, a, k8s))
+    guide = os.path.join(REPO, "bundles", "_shared", "operator", platform, f"{name}.md")
+    if os.path.exists(guide):
+        shutil.copyfile(guide, os.path.join(root, "operator.md"))
+    elif os.path.exists(os.path.join(root, "operator.md")):
+        os.remove(os.path.join(root, "operator.md"))
 
 
 class Dumper(yaml.SafeDumper):

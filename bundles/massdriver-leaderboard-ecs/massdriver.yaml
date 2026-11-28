@@ -8,6 +8,23 @@ steps:
 - path: src
   provisioner: opentofu:1.10
 params:
+  examples:
+  - __name: Development
+    image:
+      repository: ghcr.io/massdriver-cloud/massdriver-automations
+      tag: latest
+    ingress:
+      dns_records: true
+    logs:
+      retention_days: 7
+  - __name: Production
+    image:
+      repository: ghcr.io/massdriver-cloud/massdriver-automations
+      tag: latest
+    ingress:
+      dns_records: true
+    logs:
+      retention_days: 365
   required:
   - image
   - ingress
@@ -32,7 +49,7 @@ params:
           title: Tag
           description: The image tag, such as `0.2.0`. Pin a version so that a redeploy runs the same code. A deploy of
             a tag that moves, such as `latest` or `0.2`, restarts the automation on the image the tag names then.
-          default: '0.2'
+          default: latest
           pattern: ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,100}$
           message:
             pattern: Must be a valid image tag.
